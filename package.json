@@ -1,0 +1,60 @@
+{
+  "name": "@tiaforge-ui/sinter-mail",
+  "version": "0.1.0",
+  "description": "Email bodies for sinter: HTML and plain-text mail parsed into a tree that folds at build time, rendered by mail-* components without an iframe.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tiavision/sinter-mail.git"
+  },
+  "keywords": [
+    "sinter",
+    "email",
+    "mail",
+    "html",
+    "sanitizer",
+    "components"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "sinter": "./sinter",
+  "exports": {
+    ".": "./sinter/index.ts",
+    "./parser": "./sinter/parser/index.ts",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "sinter",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "build:entities": "node scripts/build-entities.mjs",
+    "build:components": "node --experimental-strip-types scripts/build-components.ts",
+    "check": "sinter check",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@tiaforge-ui/sinter": ">=0.19.0 <1"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@tiaforge-ui/sinter": "0.19.0",
+    "@types/jsdom": "30.0.0",
+    "@types/node": "26.6.6",
+    "character-entities": "2.0.2",
+    "character-entities-legacy": "3.0.0",
+    "jsdom": "31.0.1",
+    "parse5": "8.1.1",
+    "playwright": "1.63.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
+  }
+}
