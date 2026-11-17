@@ -7,6 +7,19 @@
 //
 // Every file is markup without whitespace between tags: whitespace is text, and would show in tables and
 // phrasing content, once per row of a loop. The files are committed; test/components.test.ts runs --check.
+//
+// What the components bind, per element:
+// - `data-sn-attr`: the tag's attributes (sinter/tags.ts, attrsOf: the global ones included), literal keys.
+//   The id is the exception: parse.ts keeps one only when an in-email `#fragment` link points at it, and
+//   writes that link already prefixed, so the element renders `id: 'mail-' + node.attrs.id`. sinter accepts
+//   a bound id only when its value starts with a literal (SN503), and a value that is null when there is no
+//   id (`node.attrs.id ? 'mail-' + … : null`) does not, so each element is an if chain over `node.attrs.id`:
+//   the element with its id, else the element without one. Inside a table only the table, its caption and
+//   its cells take an id; rows, sections, colgroups and cols do not (each would double what it holds).
+// - `data-sn-style`: the properties its tag binds, literal keys; a property the tree leaves out is
+//   `undefined`, and nothing is written.
+// - `data-sn-class`: the parts (`mail-quote`, `mail-signature`), on the tags they occur on (PARTS).
+// - its children, unless void: text runs first, every element through mail-node.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,87 +28,98 @@ import { TAGS, attrsOf } from '../sinter/tags.ts';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'sinter/components/internal');
 
-/** the tags whose elements carry a `part` (mail.plain's quotes and signature; quoted replies in HTML later) */
+/** the tags whose elements carry a `part`: mail.plain's quotes and signature (quoted replies in HTML later) */
 const PARTS = new Set(['blockquote', 'div']);
+/** HTML's void elements: no end tag, no children, whatever the table says (a template after one is its sibling) */
+const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
+const isVoid = (tag) => !!TAGS[tag].void || VOID.has(tag);
+/** an in-table element outside a table: its content, as the browser keeps it (parse.ts never writes one there) */
+const ORPHAN = 'mail-orphan';
+
 const IDENT = /^[a-z][a-z0-9]*$/;
 const key = (k) => (IDENT.test(k) ? k : `'${k}'`);
 const read = (obj, k) => (IDENT.test(k) ? `${obj}.${k}` : `${obj}['${k}']`);
 
-/** `data-sn-attr` for an element `v` of `tag`: its attributes as literal keys, the id prefixed */
-function attrs(v, tag, extra = []) {
-  const entries = attrsOf(tag).map((a) => a === 'id'
-    ? `id: ${v}.attrs.id ? 'mail-' + ${v}.attrs.id : null`
-    : `${key(a)}: ${read(`${v}.attrs`, a)}`);
-  return ` data-sn-attr="{ ${[...entries, ...extra].join(', ')} }"`;
+/** `data-sn-attr` for the element `v` of `tag`; `id`: with the prefixed id */
+function attrs(v, tag, id, extra = []) {
+  const entries = attrsOf(tag).flatMap((a) => a === 'id' ? (id ? [`id: 'mail-' + ${v}.attrs.id`] : []) : [`${key(a)}: ${read(`${v}.attrs`, a)}`]);
+  const all = [...entries, ...extra];
+  return all.length ? ` data-sn-attr="{ ${all.join(', ')} }"` : '';
 }
-/** `data-sn-style` for an element `v` of `tag`: the properties its tag binds, as literal keys */
+/** `data-sn-style` for the element `v` of `tag`: the properties its tag binds */
 function style(v, tag) {
   const props = TAGS[tag].props;
-  if (!props.length) return '';
-  return ` data-sn-style="{ ${props.map((p) => `${key(p)}: ${read(`${v}.style`, p)}`).join(', ')} }"`;
+  return props.length ? ` data-sn-style="{ ${props.map((p) => `${key(p)}: ${read(`${v}.style`, p)}`).join(', ')} }"` : '';
 }
 /** `data-sn-class` for the parts, on the tags where they occur */
 const parts = (v, tag) => (PARTS.has(tag) ? ` data-sn-class="{ 'mail-quote': ${v}.part === 'quote', 'mail-signature': ${v}.part === 'signature' }"` : '');
-/** the loop over an element's children: text runs first, every element through mail-node */
-const children = (v, c = 'c') => `<template data-sn-for="${c} in ${v}.children"><template data-sn-if="${c}.type === 'text'"><template data-sn-text="${c}.value"></template></template><template data-sn-else><mail-node data-sn-prop="{ node: ${c} }"></mail-node></template></template>`;
-/** the element `v` of `tag`, with its bindings and (unless void) its children */
-function element(v, tag, { attrsExtra = [], literal = '', c = 'c' } = {}) {
-  const open = `<${tag}${literal}${attrs(v, tag, attrsExtra)}${style(v, tag)}${parts(v, tag)}>`;
-  return TAGS[tag].void ? open : `${open}${children(v, c)}</${tag}>`;
+/** the start tag of the element `v` of `tag`, with its bindings */
+const open = (v, tag, { id = false, literal = '', extra = [] } = {}) => `<${tag}${literal}${attrs(v, tag, id, extra)}${style(v, tag)}${parts(v, tag)}>`;
+/** the loop over the children of `v`: text runs first, every element through mail-node */
+const children = (v, c) => `<template data-sn-for="${c} in ${v}.children"><template data-sn-if="${c}.type === 'text'"><template data-sn-text="${c}.value"></template></template><template data-sn-else><mail-node data-sn-prop="{ node: ${c} }"></mail-node></template></template>`;
+/** an if chain: the first branch whose condition holds; `last`, if given, the final else */
+function chain(branches, last = '') {
+  return branches.reduceRight((rest, [cond, then]) => `<template data-sn-if="${cond}">${then}</template>${rest ? `<template data-sn-else>${rest}</template>` : ''}`, last);
+}
+/** the element `v` of `tag` with `inner` inside (unless void), as a chain over its id when `ids` */
+function element(v, tag, inner, { ids = attrsOf(tag).includes('id'), literal = '', extra = [] } = {}) {
+  const one = (id) => `${open(v, tag, { id, literal, extra })}${isVoid(tag) ? '' : `${inner}</${tag}>`}`;
+  return ids ? chain([[`${v}.attrs.id`, one(true)]], one(false)) : one(false);
 }
 
 const HEAD = (what) => `<!--\n  Generated by scripts/build-components.mjs from sinter/tags.ts: do not edit.\n  ${what}\n-->\n`;
 const component = (what, root) => `${HEAD(what)}<template data-sn-component="{ node: Element }">${root}</template>\n`;
 
-const own = Object.keys(TAGS).filter((t) => !TAGS[t].inTable).sort();
-const files = {};
-
-files['mail-node.html'] = component(
-  'One element, by its tag: the only place elements are dispatched. Table parts render inside mail-table.',
-  `<sn-component use="{ ${own.map((t) => `${t}: 'mail-${t}'`).join(', ')} }[node.tag]" data-sn-prop="{ node }"></sn-component>`,
-);
-
-/** if `v` is an element of `tag`: `then`, else `rest` (a chain) */
-const chain = (branches, last) => branches.reduceRight((rest, [cond, then]) => `<template data-sn-if="${cond}">${then}</template>${rest ? `<template data-sn-else>${rest}</template>` : ''}`, last);
-
+/** a table and its whole structure, chosen by chains over each child's tag */
 function table() {
-  const cell = (d) => chain([[`${d}.type === 'element' && ${d}.tag === 'th'`, element(d, 'th', { c: 'n' })], [`${d}.type === 'element'`, element(d, 'td', { c: 'n' })]], '');
-  const rows = (s) => `<template data-sn-for="r in ${s}.children"><template data-sn-if="r.type === 'element'">${open('r', 'tr')}<template data-sn-for="d in r.children">${cell('d')}</template></tr></template></template>`;
-  const section = (tag) => `${open('s', tag)}${rows('s')}</${tag}>`;
-  const colgroup = `${open('s', 'colgroup')}<template data-sn-for="k in s.children"><template data-sn-if="k.type === 'element'">${element('k', 'col')}</template></template></colgroup>`;
+  const cell = (d) => chain([
+    [`${d}.type === 'element' && ${d}.tag === 'th'`, element(d, 'th', children(d, 'n'))],
+    [`${d}.type === 'element'`, element(d, 'td', children(d, 'n'))],
+  ]);
+  const rows = (s) => `<template data-sn-for="r in ${s}.children"><template data-sn-if="r.type === 'element'">${element('r', 'tr', `<template data-sn-for="d in r.children">${cell('d')}</template>`, { ids: false })}</template></template>`;
+  const section = (tag) => element('s', tag, rows('s'), { ids: false });
+  const cols = `<template data-sn-for="k in s.children"><template data-sn-if="k.type === 'element'">${element('k', 'col', '', { ids: false })}</template></template>`;
   const content = chain([
-    [`s.type === 'element' && s.tag === 'caption'`, element('s', 'caption', { c: 'n' })],
-    [`s.type === 'element' && s.tag === 'colgroup'`, colgroup],
+    [`s.type === 'element' && s.tag === 'caption'`, element('s', 'caption', children('s', 'n'))],
+    [`s.type === 'element' && s.tag === 'colgroup'`, element('s', 'colgroup', cols, { ids: false })],
     [`s.type === 'element' && s.tag === 'thead'`, section('thead')],
     [`s.type === 'element' && s.tag === 'tfoot'`, section('tfoot')],
     [`s.type === 'element'`, section('tbody')],
-  ], '');
-  return `${open('node', 'table')}<template data-sn-for="s in node.children">${content}</template></table>`;
-}
-/** the start tag of `tag` for the element `v`, with its bindings */
-function open(v, tag) {
-  return `<${tag}${attrs(v, tag)}${style(v, tag)}${parts(v, tag)}>`;
+  ]);
+  return element('node', 'table', `<template data-sn-for="s in node.children">${content}</template>`);
 }
 
+const files = {};
+const tags = Object.keys(TAGS).sort();
+const own = tags.filter((t) => !TAGS[t].inTable);
+
+files['mail-node.html'] = component(
+  `One element, by its tag: the only place elements are dispatched. A table's parts render inside mail-table; one outside a table (which parse.ts never writes) renders its content, through ${ORPHAN}.`,
+  `<sn-component use="{ ${tags.map((t) => `${key(t)}: '${TAGS[t].inTable ? ORPHAN : `mail-${t}`}'`).join(', ')} }[node.tag]" data-sn-prop="{ node }"></sn-component>`,
+);
+files[`${ORPHAN}.html`] = component(
+  'A table\'s part outside a table, which parse.ts never writes: its content in a <span>, as the browser drops the tag and keeps what it holds.',
+  `<span>${children('node', 'c')}</span>`,
+);
 for (const tag of own) {
   const name = `mail-${tag}.html`;
   if (tag === 'a') {
     files[name] = component(
       'A link: its root is the `link` slot; the default opens the address in a new tab, without the opener or the referrer.',
-      `<slot name="link" data-sn-prop="{ node }">${element('node', 'a', { literal: ' target="_blank" rel="noopener noreferrer"' })}</slot>`,
+      `<slot name="link" data-sn-prop="{ node }">${element('node', 'a', children('node', 'c'), { literal: ' target="_blank" rel="noopener noreferrer"' })}</slot>`,
     );
   } else if (tag === 'img') {
     files[name] = component(
-      'An image: its root is the `image` slot. A blocked image has no src: its box keeps width, height and alt. `srcset: null` keeps it out of the app\'s resizing service.',
-      `<slot name="image" data-sn-prop="{ node }">${element('node', 'img', { attrsExtra: ['srcset: null'] })}</slot>`,
+      'An image: its root is the `image` slot. A blocked image has no src, and its box keeps width, height and alt. `srcset: null` keeps it out of the app\'s resizing service.',
+      `<slot name="image" data-sn-prop="{ node }">${element('node', 'img', '', { extra: ['srcset: null'] })}</slot>`,
     );
   } else if (tag === 'table') {
     files[name] = component(
-      'A table and its whole structure: a component\'s tag inside a <table> would be moved out of it by the HTML parser, so caption, colgroup, col, the sections, rows and cells are literal here. Cell content goes through mail-node.',
+      'A table and its whole structure: a component\'s tag inside a <table> would be moved out of it by the HTML parser, so caption, colgroup, col, the sections, rows and cells are literal here, chosen by their tag. Cell content goes through mail-node.',
       table(),
     );
   } else {
-    files[name] = component(`<${tag}>.`, element('node', tag));
+    files[name] = component(`<${tag}>.`, element('node', tag, children('node', 'c')));
   }
 }
 
