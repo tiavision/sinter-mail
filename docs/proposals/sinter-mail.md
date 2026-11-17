@@ -132,7 +132,10 @@ interface Element {
   part?: 'quote' | 'signature';   // what the element is in the message
   children: Node[];
 }
-interface ImageInfo { blocked: number; }   // remote images left out, for "show images"
+interface ImageInfo {
+  origins: string[];              // every remote image's origin (`https://cdn.example`), sorted, once each
+  blocked: string[];              // the origins whose images were left out, for "show images from …"
+}
 ```
 
 - **One node per element the browser would build**, no more: the parse produces the tree that the
@@ -191,26 +194,73 @@ allowlist, the tree's `Tag` type and the generated components.
 - **Links**: `http:`, `https:`, `mailto:`, `tel:` and in-email `#fragments`; anything else is dropped by
   the parser, and the runtime's check stays as a second gate. Every `<a>` gets `target="_blank"` and
   `rel="noopener noreferrer"`, written literally in its component.
-- **Images** (`images` option):
-  - `'block'` (the default): a remote image is left out; its box keeps its `width` and `height` and
-    its `alt` text, so the layout does not move when images are shown. `body.images.blocked` counts
-    them, for a "show images" button that parses again with `'proxy'` or `'allow'`.
-  - `'allow'`: `http:` and `https:` images are kept, and load from the sender's servers.
-  - `'proxy'`: `http:` and `https:` images are kept, with their URL rewritten through the `proxy`
-    option, a URL template of the app's: `proxy: '/images?url={url}'`. `{url}` is the image's absolute
-    URL, percent-encoded as a query value; the template must contain it once, and an absolute template
-    must be `https:` (an error otherwise, at each call, as an invalid option). The browser then asks only
-    the app's server, so the sender does not see the reader's address, browser or the time each time
-    the email is opened. What the proxy does is the app's: fetch on request, or fetch when the email
-    arrives so the sender cannot tell whether it was read, cache, resize, refuse what is not an image.
-    A template, not a function, so the option is a value: `memo()` keys on it, an API can pass the
-    same string when it runs the parse on the server, and an email from a file folds at build time.
-  - `cid:` images are kept when the `cid` option maps them (`{ 'logo@acme': '/att/12' }` or a function);
-    an unmapped one is left out. `data:` images are kept up to a size bound (an option).
+- **Images.** Three options decide what a remote (`http:`, `https:`) image becomes; the pattern they are
+  made for is [an image proxy with an allowlist of origins](#an-image-proxy-with-an-allowlist), as
+  Caley's.
+  - `images`: `'block'` (the default) leaves every remote image out; `'allow'` keeps it, loading from
+    the sender's server; `'proxy'` keeps it, through the `proxy` template.
+  - `proxy`: a URL template of the app's, `'/api/email/proxy-image?url={url}'`. `{url}` is the image's
+    absolute URL, percent-encoded as a query value; the template must contain it once, and an absolute
+    template must be `https:` (an error otherwise, at each call, as an invalid option).
+  - `origins`: with `'allow'` or `'proxy'`, only images of these origins (`scheme://host`, as
+    `new URL(src).origin` writes it) are kept; without it, every origin's. An image of another
+    origin is left out, as under `'block'`.
+  - A left-out image keeps its box (`width`, `height`, `alt`), so the layout does not move when it is
+    shown; its origin is in `body.images.blocked`. `body.images.origins` lists every remote image's
+    origin, blocked or not, for a list of origins to allow or ignore.
+  - Options are values, not functions: `memo()` keys on them (`origins` sorted first), an API can pass
+    the same options when it runs the parse on the server, and an email from a file folds at build time.
+- **`cid:` images** (inline parts of the message) are kept when the `cid` option resolves them: a map
+  (`{ 'logo@acme': 'data:image/png;base64,…' }`, as for a decrypted message whose parts the app holds),
+  or a template with `{cid}` (`'/api/email/proxy-image?uid=42&cid={cid}'`, the message's own values
+  written into it by the app). An unresolved one is left out. `cid:` images do not count as remote.
+- **`data:` images** are kept for raster types (`image/png`, `jpeg`, `gif`, `webp`, `avif`), base64,
+  up to a size bound (an option); `data:image/svg+xml` never.
   - Images bind `srcset: null`, so an app's image pipeline does not resize user content (as
     sinter-markdown's `md-image`).
 - **Comments, processing instructions, conditional comments** (`<!--[if mso]>`) are dropped. Outlook's
   conditional content is for Outlook; what other clients show is what is outside it.
+
+#### An image proxy with an allowlist
+
+The pattern sinter-mail is made for, as Caley (a sinter mail app) runs it today with DOMPurify and an
+iframe:
+
+- **Every remote image goes through the app's server**, `/api/email/proxy-image?url=…`: the sender
+  never sees the reader. The server checks the address (no private or loopback targets, no redirects),
+  serves only what sniffs as PNG, JPEG, GIF, WebP or AVIF with `nosniff`, and answers anything else
+  with a transparent pixel.
+- **The server keeps the user's allowlist** of origins (and an ignore list), and the proxy fetches only
+  allowed origins.
+- **The page shows a notice** for the origins of this email that are neither allowed nor ignored, with
+  "allow" (`POST /email/image-origins`) and "ignore" per origin.
+
+With sinter-mail the page writes:
+
+```html
+<sn-resource name="allowedOrigins" src="/email/image-origins"></sn-resource>
+<article data-sn-let="{ body: mail.parse(msg.html, {
+           images: 'proxy', proxy: '/api/email/proxy-image?url={url}',
+           origins: allowedOrigins?.origins ?? [],
+           cid: `/api/email/proxy-image?account_id=${encodeURIComponent(msg.account)}&uid=${msg.uid}&cid={cid}` }) }">
+  <template data-sn-for="origin in body.images.blocked.filter(o => !ignored.includes(o))">
+    <button data-sn-post="/email/image-origins" data-sn-body="{ origin }" data-sn-then="refresh('allowedOrigins')"
+            data-sn-text="'Show images from ' + origin"></button>
+  </template>
+  <mail-body data-sn-prop="{ body }"></mail-body>
+</article>
+```
+
+- **The allowlist is applied twice**: in the tree (`origins`), so no request is made for an image that
+  would come back as a pixel and the image keeps its alt text, and on the server, which stays the
+  authority.
+- **Allowing an origin is a refresh**: the resource changes, the let parses again with the new
+  options (memo keys on them), and only the images change. No frame to reload, no height to measure.
+- **No URL rewriting to undo**: the source HTML is never changed, only the tree, so a reply or a
+  forward quotes the original image URLs as they were (Caley restores them from its proxied HTML
+  today, `restoreForwardedImageSources`).
+- **The origins come from the parse** (`body.images.origins`), not from a regular expression over
+  HTML (Caley's `imageOriginsFromHtml`).
 
 ### 4. Styles
 
@@ -351,13 +401,16 @@ tree, about 8 MiB of trees kept, the least recently used dropped first.
 5. **Classes are dropped** after the cascade is resolved; ids are kept only as link targets, prefixed.
 6. **Remote images are blocked by default**, with their boxes kept, so tracking pixels need the app's
    consent and showing images does not move the layout. An app that shows images should prefer
-   `'proxy'` over `'allow'`; it is in version 1 because it is what makes showing images private.
+   `'proxy'` over `'allow'`; it is in version 1 because it is what makes showing images private. The
+   allowlist of origins is an option, so the tree, not the proxy's pixel, decides what is requested,
+   and the server stays the authority.
 7. **One tag table generates the allowlists, the types and the components**, so they cannot disagree.
 8. **Plain text is in version 1**, through the same tree, in a module without the parser.
 9. **One document per body.** A body is parsed and rendered on its own; bodies are never joined. This
    keeps MIME and PGP/MIME open ([Later](#later)): EFAIL's direct exfiltration relies on parts joined into
    one document.
-10. **No MIME in version 1.** The caller passes a decoded string, and a map for `cid:` images.
+10. **No MIME in version 1.** The caller passes a decoded string, and a map or template for `cid:`
+    images.
 
 ## Plan
 
@@ -380,8 +433,8 @@ tree, about 8 MiB of trees kept, the least recently used dropped first.
   newsletter of 2,000 elements, and small enough as generated components? If not: properties grouped by
   how often email sets them, or a smaller list per tag.
 - **`data:` images**: the size bound, and whether to keep them at all.
-- **The proxy template**: is `{url}` enough, or do apps need the message's id as well (`{id}`, from an
-  option), for a proxy that only fetches images of messages it holds?
+- **`origins` with wildcards**: is an exact origin enough, or do allowlists need `https://*.example.com`?
+  Caley's are exact.
 - **`media: 'narrow'`**: is 600 px the right width, and should the option be a number?
 - **Outlook's conditional comments**: are there emails whose content is only inside `<!--[if mso]>`?
   The corpus will tell.
