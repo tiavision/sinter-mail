@@ -51,7 +51,7 @@ const DOCS: Record<string, string> = {
   .MsoChpDefault { mso-style-type: export-only; font-family: "Calibri",sans-serif }
   @page WordSection1 { size: 612.0pt 792.0pt; margin: 72.0pt 72.0pt 72.0pt 72.0pt }
   div.WordSection1 { page: WordSection1 }
-  .hack { *zoom: 1; _height: 1px; color: red !ie; width: 100px\9; color: blue }
+  .hack { *zoom: 1; _height: 1px; color: red !ie; width: 100px\\9; color: blue }
   @font-face { font-family: "Cambria Math"; src: local(x) }
   @supports (display: grid) { .hack { color: red } }
   @import url(x.css);
