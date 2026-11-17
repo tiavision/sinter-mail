@@ -1,0 +1,19 @@
+# @tiaforge-ui/sinter-mail
+
+> Email bodies in a sinter app, without an iframe: `mail.parse(html, options)` turns an email's HTML into a sanitized tree (the browser's own tree construction, every element's CSS resolved), `mail.plain(text, options)` does the same for plain text, and `<mail-body data-sn-prop="{ body }">` renders the tree as part of the page. Pure helpers: an email in a `file:` resource is plain HTML at build time.
+
+Setup: `sinter({ components: ['@tiaforge-ui/sinter-mail'] })`; `export * as mail from '@tiaforge-ui/sinter-mail'` in src/sinter.helpers.ts; `export type { Body, Element } from '@tiaforge-ui/sinter-mail'` in src/sinter.types.ts. Lazy parser: also `lazy: ['@tiaforge-ui/sinter-mail']` (a let over mail.parse is undefined until it loads).
+
+- `mail.parse(html, { images, proxy, cid, media, dataImages })`: `images` 'block' (default: remote images left out, their box kept) | 'allow' | 'proxy' (with `proxy: '/img?url={url}'`, `{url}` once); `cid` a map `{ 'id@host': url }` or a template with `{cid}`; `media` 'wide' (800 px, default) | 'narrow' (375 px), the width `@media` rules are evaluated at; `dataImages` the largest data: image kept (characters, default 65536). Invalid options throw. Same source and options give the same frozen tree.
+- `mail.plain(text, { flowed, delsp })`: paragraphs, autolinks, `>` quotes (class mail-quote), `-- ` signature (class mail-signature); `flowed` for format=flowed.
+- `mail.text(node)`: the text, for previews. `mail.links(body)`: every link with its text.
+- `body.images.origins`: the origins of the remote images, for a "show images from …" control.
+- `<mail-body>` slots: `link` (`$slot.node`, its children through `<slot></slot>`) and `image` (`$slot.node.attrs.src` absent when blocked).
+
+Styles: the email's own win over the page's (inline); the page fills in what the email does not set (fonts, link colours). Kept: colours, fonts, text, box, borders, tables, display, float. Never: position, url(), web fonts, :hover, negative margins.
+
+CSP: rendered in the browser, nothing beyond `script-src 'self'; style-src 'self'`. Folded at build time (file: emails): `style-src-attr 'unsafe-inline'`.
+
+Security: nothing runs (no script, handler, javascript: link, SVG, form, iframe), nothing loads without the app (images blocked or through its proxy, no CSS url()), nothing leaves the email's box, no class or stylesheet reaches the page, ids only for in-email links (prefixed mail-).
+
+Guide: docs/mail.md. Design: docs/proposals/sinter-mail.md.
