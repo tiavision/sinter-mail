@@ -64,8 +64,9 @@ interface Entry {
   important: Compiled | null;
 }
 
-// the matching work allowed for one resolve (selectors.ts, budget)
-const MAX_STEPS = 20_000_000;
+// the matching work allowed for one resolve (selectors.ts, budget): a 1,800-element newsletter with
+// 300 rules takes 0.5 million steps; a hostile stylesheet stops matching here, within about a second
+const MAX_STEPS = 8_000_000;
 
 // `@media` nested deeper than this is dropped rather than walked
 const MAX_MEDIA_DEPTH = 16;
@@ -123,40 +124,43 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
   const universal = buckets.get('*');
   const values: (string | undefined)[] = new Array(LONGHANDS.length);
   budget(MAX_STEPS);
-  for (const e of all) {
-    let candidates: Entry[] = [];
-    const take = (list: Entry[] | undefined) => {
-      if (!list || exhausted()) return;
-      const m: Entry[] = [];
-      for (const x of list) if (matches(x.sel, e)) m.push(x);
-      if (m.length) candidates = candidates.length ? merge(candidates, m, byCascade) : m;
-    };
-    if (e.id !== null) take(buckets.get('#' + e.id));
-    const seen = new Set<string>();
-    for (const c of e.classes) if (!seen.has(c)) { seen.add(c); take(buckets.get('.' + c)); }
-    take(buckets.get(e.el.tag));
-    take(universal);
+  try {
+    for (const e of all) {
+      let candidates: Entry[] = [];
+      const take = (list: Entry[] | undefined) => {
+        if (!list || exhausted()) return;
+        const m: Entry[] = [];
+        for (const x of list) if (matches(x.sel, e)) m.push(x);
+        if (m.length) candidates = candidates.length ? merge(candidates, m, byCascade) : m;
+      };
+      if (e.id !== null) take(buckets.get('#' + e.id));
+      const seen = new Set<string>();
+      for (const c of e.classes) if (!seen.has(c)) { seen.add(c); take(buckets.get('.' + c)); }
+      take(buckets.get(e.el.tag));
+      take(universal);
 
-    // from the highest precedence down, each longhand taken from the first that sets it: inline
-    // !important, author !important (the last in cascade order first), inline, author, hints
-    values.fill(undefined);
-    let s0 = 0, s1 = 0, s2 = 0;
-    const apply = (c: Compiled) => {
-      if (!((c.m0 & ~s0) | (c.m1 & ~s1) | (c.m2 & ~s2))) return;
-      for (let i = 0; i < c.props.length; i++) if (values[c.props[i]] === undefined) values[c.props[i]] = c.values[i];
-      s0 |= c.m0; s1 |= c.m1; s2 |= c.m2;
-    };
-    const inline = attr(e.el, 'style');
-    const own = inline !== null ? compile(parseDeclarations(inline)) : null;
-    if (own) apply(own.important);
-    for (let i = candidates.length - 1; i >= 0; i--) { const imp = candidates[i].important; if (imp) apply(imp); }
-    if (own) apply(own.normal);
-    for (let i = candidates.length - 1; i >= 0; i--) apply(candidates[i].normal);
-    apply(compiled(hints(e, cx)));
-    const style = finish(values);
-    if (style) out.set(e.el, style);
+      // from the highest precedence down, each longhand taken from the first that sets it: inline
+      // !important, author !important (the last in cascade order first), inline, author, hints
+      values.fill(undefined);
+      let s0 = 0, s1 = 0, s2 = 0;
+      const apply = (c: Compiled) => {
+        if (!((c.m0 & ~s0) | (c.m1 & ~s1) | (c.m2 & ~s2))) return;
+        for (let i = 0; i < c.props.length; i++) if (values[c.props[i]] === undefined) values[c.props[i]] = c.values[i];
+        s0 |= c.m0; s1 |= c.m1; s2 |= c.m2;
+      };
+      const inline = attr(e.el, 'style');
+      const own = inline !== null ? compile(parseDeclarations(inline)) : null;
+      if (own) apply(own.important);
+      for (let i = candidates.length - 1; i >= 0; i--) { const imp = candidates[i].important; if (imp) apply(imp); }
+      if (own) apply(own.normal);
+      for (let i = candidates.length - 1; i >= 0; i--) apply(candidates[i].normal);
+      apply(compiled(hints(e, cx)));
+      const style = finish(values);
+      if (style) out.set(e.el, style);
+    }
+  } finally {
+    budget(Infinity);
   }
-  const left = budget(Infinity); if ((globalThis as any).DEBUG) console.log('steps', MAX_STEPS - left);
   return out;
 }
 

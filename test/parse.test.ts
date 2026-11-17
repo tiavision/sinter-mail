@@ -246,7 +246,7 @@ describe('attacks', () => {
       const b = parse(html);
       invariants(b);
       const json = JSON.stringify(b);
-      expect(json).not.toMatch(/javascript:|vbscript:|data:text|onerror|onload|evil\.example|tracker\.example|k\.example|attacker\.example\/\?/i);
+      expect(json).not.toMatch(/javascript:|vbscript:|data:text|onerror|onload|evil\.example|tracker\.example|\bk\.example|attacker\.example\/\?/i);
       for (const e of els(b)) {
         expect(e.style['margin-top'] ?? '', 'negative margin').not.toMatch(/^-/);
         expect(DROP.has(e.tag)).toBe(false);

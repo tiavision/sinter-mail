@@ -45,7 +45,7 @@ const NEVER_CLASSES = new Set([
   'disabled', 'enabled', 'default', 'indeterminate', 'valid', 'invalid', 'in-range', 'out-of-range', 'required',
   'optional', 'read-only', 'read-write', 'placeholder-shown', 'autofill', '-webkit-autofill', 'fullscreen',
   'modal', 'picture-in-picture', 'playing', 'paused', 'defined', 'user-invalid', 'user-valid', 'open', 'popover-open',
-  'scope', 'host', 'current', 'past', 'future', 'blank', 'lang', 'dir', 'has', 'state', 'host-context',
+  'host', 'current', 'past', 'future', 'blank', 'lang', 'dir', 'has', 'state', 'host-context',
   '-webkit-any', '-webkit-full-screen', 'window-inactive', 'horizontal', 'vertical', 'decrement', 'increment',
   'start', 'end', 'double-button', 'single-button', 'no-button', 'corner-present',
 ]);
@@ -228,7 +228,8 @@ function compound(items: CV[], i: number, end: number, depth: number): Parsed {
 
 function pseudoClass(name: string): Simple {
   switch (name) {
-    case 'root': return { k: 'root' };
+    // :scope, in a stylesheet, is the root
+    case 'root': case 'scope': return { k: 'root' };
     case 'empty': return { k: 'empty' };
     case 'link': case 'any-link': case '-webkit-any-link': return { k: 'link' };
     case 'first-child': return { k: 'nth', last: false, type: false, a: 0, b: 1, of: null };
@@ -423,8 +424,8 @@ function info(el: RawElement, parent: Info | null, siblings: Info[], index: numb
 const enum R { Match, FailLocal, FailSiblings, FailAll }
 
 // The matching work left for this resolve, in compound tests. A hostile stylesheet can make every rule
-// match every element, or every test walk to the root; past a budget no real email comes near (one
-// resolves with well under a million), what is left does not match, so a resolve ends in bounded time.
+// match every element, or every test walk to the root; past a budget no real email comes near
+// (index.ts, MAX_STEPS), what is left does not match, so a resolve ends in bounded time.
 let left = Infinity;
 
 /** the work allowed for the next matches; returns what was left of the last budget */

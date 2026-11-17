@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { attr, type RawElement } from '../sinter/raw.js';
 import { resolveStyles } from '../sinter/css/index.js';
-import { tokenize } from '../sinter/css/tokenize.js';
+import { parseComponents, tokenize } from '../sinter/css/tokenize.js';
 import { parseDeclarations, parseStylesheet } from '../sinter/css/parse.js';
 import { matchMedia } from '../sinter/css/media.js';
 import { expand } from '../sinter/css/values.js';
@@ -24,6 +24,7 @@ function styles(html: string, media: 'wide' | 'narrow' = 'wide'): Record<string,
   return out;
 }
 const one = (html: string, media: 'wide' | 'narrow' = 'wide') => styles(html, media).x;
+const tokenizeCV = (s: string) => parseComponents(s);
 /** one declaration's longhands, as an object */
 const ex = (name: string, value: string) => {
   const a = expand(name, value);
@@ -247,9 +248,6 @@ describe('selectors', () => {
   });
 });
 
-import { parseComponents } from '../sinter/css/tokenize.js';
-const tokenizeCV = (s: string) => parseComponents(s);
-
 describe('media', () => {
   test('types, features, ranges, logic, at both widths', () => {
     const both = (q: string) => [matchMedia(q, 'wide'), matchMedia(q, 'narrow')];
@@ -415,16 +413,31 @@ describe('safety', () => {
       '* * * * * * * * * * * * * x { color: red }'.repeat(2_000),
       '"\\'.repeat(50_000),
       'url('.repeat(50_000),
+      '*{color:red;margin:0 auto}'.repeat(40_000),
+      ':not(#a) * {color:red}'.repeat(40_000),
     ];
-    let body = '';
-    for (let i = 0; i < 200; i++) body += '<div><span><b>';
+    // deep (600 levels) and wide (2,000 elements)
+    let deep = '';
+    for (let i = 0; i < 200; i++) deep += '<div><span><b>';
+    const wide = '<div><p><span>x</span></p></div>'.repeat(660);
     for (const css of parts) {
-      const html = `<style>${css}</style>${body}`;
-      const root = reference(html);
-      const t = performance.now();
-      resolveStyles(root, { media: 'wide' });
-      expect(performance.now() - t, css.slice(0, 20)).toBeLessThan(1000);
+      for (const body of [deep, wide]) {
+        const root = reference(`<style>${css}</style>${body}`);
+        const t = performance.now();
+        resolveStyles(root, { media: 'wide' });
+        expect(performance.now() - t, css.slice(0, 20)).toBeLessThan(1000);
+      }
     }
+  });
+  test('past its matching budget a hostile stylesheet stops matching; a real email is far from it', () => {
+    const root = reference(`<style>${'*{color:red}'.repeat(40_000)}</style>` + '<p>x</p>'.repeat(2_000));
+    const map = resolveStyles(root, { media: 'wide' });
+    const ps = [...map.keys()].filter((e) => e.tag === 'p');
+    // the first elements have their style, the last do not
+    expect(ps.length).toBeGreaterThan(100);
+    expect(ps.length).toBeLessThan(2_000);
+    // and matching works again afterwards
+    expect(one('<style>p { color: red }</style><p id=x>')).toEqual({ color: 'red' });
   });
   test('deep trees and long selector chains stay fast', () => {
     let html = '<style>' + 'div '.repeat(40) + 'span { color: red } ' + 'div ~ '.repeat(30) + 'b { color: blue }</style>';
