@@ -156,16 +156,27 @@ function build(html: string, o: Options): Body {
 
 const ROOT_PROPS: readonly Property[] = [...TEXT, 'background-color'];
 
-/** what an in-email `#fragment` link points at, decoded */
-function collectTargets(el: RawElement, out: Set<string>): void {
-  for (const c of el.children) {
-    if (c.type !== 'element') continue;
-    if (c.tag === 'a') {
-      const href = attr(c, 'href')?.trim();
-      if (href?.startsWith('#') && href.length > 1) out.add(fragment(href));
+/**
+ * The fragments in-email links point at that the email has (an id, or an old-style `<a name>`): such a
+ * link keeps its href, and its target its id. Every other id is left out, and every other fragment link
+ * loses its href.
+ */
+function collectTargets(body: RawElement, out: Set<string>): void {
+  const linked = new Set<string>(), named = new Set<string>();
+  const stack: RawElement[] = [body];
+  while (stack.length) {
+    const el = stack.pop()!;
+    const id = attr(el, 'id');
+    if (id) named.add(id);
+    if (el.tag === 'a') {
+      const name = attr(el, 'name');
+      if (name) named.add(name);
+      const href = attr(el, 'href')?.trim();
+      if (href?.startsWith('#') && href.length > 1) linked.add(fragment(href));
     }
-    collectTargets(c, out);
+    for (const c of el.children) if (c.type === 'element') stack.push(c);
   }
+  for (const f of linked) if (named.has(f)) out.add(f);
 }
 
 function fragment(href: string): string {

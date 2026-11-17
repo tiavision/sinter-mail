@@ -32,12 +32,12 @@ const ATTR_NAME = /[^\t\n\f />=]*/y;
 const UNQUOTED = /[^\t\n\f >]*/y;
 const COMMENT_END = /--!?>/g;
 const REFERENCE = /&(?:#[xX]([\dA-Fa-f]+);?|#(\d+);?|([A-Za-z\d]{1,32})(;?))/g;
-// numeric references to 0x80–0x9F mean what windows-1252 has there; a code with no character there stays itself
-const C1 = '€\x81‚ƒ„…†‡ˆ‰Š‹Œ\x8DŽ\x8F\x90‘’“”•–—˜™š›œ\x9DžŸ';
+// numeric references to 0x80\u20130x9F mean what windows-1252 has there; a code with no character there stays itself
+const C1 = '\u20AC\x81\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\x8D\u017D\x8F\x90\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\x9D\u017E\u0178';
 
 /** ASCII lowercase, as the standard lowercases names (`toLowerCase` would also fold other letters) */
 export const lower = (s: string): string => (/[A-Z]/.test(s) ? s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32)) : s);
-const nul = (s: string): string => (s.includes('\0') ? s.replace(/\0/g, '�') : s);
+const nul = (s: string): string => (s.includes('\0') ? s.replace(/\0/g, '\uFFFD') : s);
 const isAlpha = (c: number): boolean => ((c | 32) >= 97 && (c | 32) <= 122);
 
 /** `s` with its character references decoded; in an attribute value, a legacy one before `=` or a letter stays */
@@ -47,7 +47,7 @@ export function decode(s: string, inAttr: boolean): string {
     if (name === undefined) {
       const digits = (hex ?? dec!).replace(/^0+/, '');
       const n = digits.length > 8 ? 0x110000 : parseInt(digits || '0', hex === undefined ? 10 : 16);
-      return n === 0 || n > 0x10FFFF || (n >= 0xD800 && n <= 0xDFFF) ? '�' : n >= 0x80 && n <= 0x9F ? C1[n - 0x80] : String.fromCodePoint(n);
+      return n === 0 || n > 0x10FFFF || (n >= 0xD800 && n <= 0xDFFF) ? '\uFFFD' : n >= 0x80 && n <= 0x9F ? C1[n - 0x80] : String.fromCodePoint(n);
     }
     if (semi && ENTITIES.has(name)) return ENTITIES.get(name)!;
     // the longest name that is a reference without `;` (at most six letters long)

@@ -1224,9 +1224,9 @@ export function build(html: string, maxDepth: number): Node {
         if (!s) return;
       }
       if (!inForeign()) return text(s);
-      s = s.replace(/\0/g, '�');
-      insertText(s);
-      if (!isWhitespace(s.replace(/�/g, ''))) framesetOk = false;
+      // foreign content: NUL is U+FFFD, and only characters other than whitespace and NUL end frameset-ok
+      if (!isWhitespace(noNul(s))) framesetOk = false;
+      insertText(s.replace(/\0/g, '\uFFFD'));
     },
     start(name, attrs, selfClosing) {
       skipNewline = false;

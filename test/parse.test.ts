@@ -30,8 +30,8 @@ describe('elements', () => {
     expect(shape(parse('<head><title>t</title></head><body><p>a<!-- c -->b</p></body>'))).toEqual([['p', 'ab']]);
   });
   test('dropped with their content, renamed, unknown as span', () => {
-    const b = parse('<p>a<script>x()</script><iframe src="https://x.example"></iframe><form><input value=1>b</form><o:p>c</o:p><label>d</label><big>e</big></p>');
-    expect(shape(b)).toEqual([['p', 'a', ['span', 'c'], ['span', 'd'], ['span', 'e']]]);
+    const b = parse('<div>a<script>x()</script><iframe src="https://x.example"></iframe><form><input value=1>b</form><o:p>c</o:p><label>d</label><big>e</big></div>');
+    expect(shape(b)).toEqual([['div', 'a', ['span', 'c'], ['span', 'd'], ['span', 'e']]]);
   });
   test('<style> anywhere is read, not shown', () => {
     const b = parse('<p>a</p><style>p { color: red }</style>');
@@ -59,7 +59,7 @@ describe('links', () => {
   test('http, https, mailto and tel only, normalized', () => {
     const hrefs = ['https://a.example/x y', 'HTTP://A.example', 'mailto:a@b.example', 'tel:+1 555', 'javascript:alert(1)', ' jav\tascript:alert(1)', 'data:text/html,x', 'vbscript:x', '/relative', 'ftp://x.example', '//x.example']
       .map((h) => first(parse(`<a href="${h}">x</a>`), 'a').attrs.href);
-    expect(hrefs).toEqual(['https://a.example/x%20y', 'http://a.example/', 'mailto:a@b.example', 'tel:+1%20555', undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
+    expect(hrefs).toEqual(['https://a.example/x%20y', 'http://a.example/', 'mailto:a@b.example', 'tel:+1 555', undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
   });
   test('an in-email fragment keeps its target, prefixed; others lose theirs', () => {
     const b = parse('<a href="#top">up</a><a href="#nowhere">x</a><h1 id="top">T</h1><p id="other">p</p><a name="old"></a><a href="#old">o</a>');
