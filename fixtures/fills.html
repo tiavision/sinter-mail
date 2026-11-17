@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>@tiaforge-ui/sinter-mail: both slots filled</title>
+</head>
+<body>
+  <!-- Each declared slot, filled. `<slot>` in the link's fill is the link's children. -->
+  <sn-resource name="mail" src="file:./trees/all.json" type="Body"></sn-resource>
+  <mail-body data-sn-prop="{ body: mail }">
+    <a slot="link" class="out" target="_blank" rel="noopener noreferrer nofollow" data-sn-attr="{ href: $slot.node.attrs.href, title: $slot.node.attrs.href }"><slot></slot></a>
+    <template slot="image" data-sn-if="$slot.node.attrs.src"><img loading="lazy" data-sn-attr="{ src: $slot.node.attrs.src, alt: $slot.node.attrs.alt, width: $slot.node.attrs.width, height: $slot.node.attrs.height, srcset: null }"></template>
+    <template data-sn-else><span class="blocked" data-sn-text="$slot.node.attrs.alt ?? 'image'"></span></template>
+  </mail-body>
+</body>
+</html>

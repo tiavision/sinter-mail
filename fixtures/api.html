@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>@tiaforge-ui/sinter-mail: a tree from an API</title>
+</head>
+<body>
+  <!-- An API that runs mail.parse on the server sends the tree: the page ships no parser -->
+  <sn-resource name="message" src="/api/message" type="Body"></sn-resource>
+  <main>
+    <mail-body id="message" data-sn-prop="{ body: message }"></mail-body>
+  </main>
+</body>
+</html>

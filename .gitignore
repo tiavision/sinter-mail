@@ -3,3 +3,4 @@ node_modules/
 .vite/
 dist/
 sinter/sinter.components.d.ts
+.sinter/

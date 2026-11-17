@@ -1,0 +1,14 @@
+<!--
+  mail-body: one email body, HTML or plain text. Public.
+  <mail-body data-sn-prop="{ body }"></mail-body>, `body` from mail.parse or mail.plain (or an API that
+  runs the parse on the server and sends the tree as JSON).
+  Its root is a plain <div class="mail">, so the tag may carry an id or a class. It carries the body's own
+  style (its text properties and background-color) and `display: flow-root`, so the email's floats and
+  margins stay inside its box. With no body (a lazy parser that has not arrived) it is an empty
+  <div class="mail">.
+  The slots below are the library's whole contract: `link` replaces every <a> of the email, `image` every
+  <img>, each fill reading the element as $slot.node (its attrs, style and, for a link, children through
+  <slot></slot>). Without a fill a link opens in a new tab (rel="noopener noreferrer"); an image is a plain
+  <img> that keeps its box when the parse left its src out.
+-->
+<template data-sn-component="{ body?: Body | null; link: Slot<{ node: Element }>; image: Slot<{ node: Element }> }"><div class="mail" data-sn-style="{ display: 'flow-root', color: body?.style.color, 'font-family': body?.style['font-family'], 'font-size': body?.style['font-size'], 'font-style': body?.style['font-style'], 'font-weight': body?.style['font-weight'], 'font-variant': body?.style['font-variant'], 'line-height': body?.style['line-height'], 'letter-spacing': body?.style['letter-spacing'], 'word-spacing': body?.style['word-spacing'], 'text-align': body?.style['text-align'], 'text-decoration': body?.style['text-decoration'], 'text-transform': body?.style['text-transform'], 'text-indent': body?.style['text-indent'], 'white-space': body?.style['white-space'], 'word-break': body?.style['word-break'], 'overflow-wrap': body?.style['overflow-wrap'], 'background-color': body?.style['background-color'] }"><template data-sn-for="c in body ? body.children : []"><template data-sn-if="c.type === 'text'"><template data-sn-text="c.value"></template></template><template data-sn-else><mail-node data-sn-prop="{ node: c }"></mail-node></template></template></div></template>

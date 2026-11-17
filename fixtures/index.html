@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>@tiaforge-ui/sinter-mail: an email from a file</title>
+</head>
+<body>
+  <!-- A tree in the repo (what mail.parse returns, as JSON): expanded at build time, the page is plain HTML -->
+  <sn-resource name="mail" src="file:./trees/all.json" type="Body"></sn-resource>
+  <main>
+    <mail-body id="message" data-sn-prop="{ body: mail }"></mail-body>
+  </main>
+</body>
+</html>
