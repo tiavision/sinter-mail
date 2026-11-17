@@ -422,12 +422,28 @@ function info(el: RawElement, parent: Info | null, siblings: Info[], index: numb
 
 const enum R { Match, FailLocal, FailSiblings, FailAll }
 
+// The matching work left for this resolve, in compound tests. A hostile stylesheet can make every rule
+// match every element, or every test walk to the root; past a budget no real email comes near (one
+// resolves with well under a million), what is left does not match, so a resolve ends in bounded time.
+let left = Infinity;
+
+/** the work allowed for the next matches; returns what was left of the last budget */
+export function budget(steps: number): number {
+  const out = left;
+  left = steps;
+  return out;
+}
+
+/** whether the budget is spent: no further selector matches */
+export const exhausted = (): boolean => left <= 0;
+
 /** whether `sel` matches `e` */
 export function matches(sel: Complex, e: Info): boolean {
   return step(sel, sel.compounds.length - 1, e) === R.Match;
 }
 
 function step(sel: Complex, k: number, e: Info): R {
+  if (--left < 0) return R.FailAll;
   if (!compoundMatches(sel.compounds[k], e)) return R.FailLocal;
   if (k === 0) return R.Match;
   switch (sel.combinators[k - 1]) {

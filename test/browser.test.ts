@@ -115,7 +115,7 @@ test('a tree from the API renders under Trusted Types and style-src \'self\', it
   await p.waitForFunction(() => !!document.querySelector('#message .mail-signature'));
   expect(await styled(p)).toEqual(STYLED);
   // links open in a new tab; ids are prefixed; a blocked image keeps its box and has no src
-  expect(await p.$eval('#message a[href="https://example.com/news"]', (a) => [a.target, a.rel])).toEqual(['_blank', 'noopener noreferrer']);
+  expect(await p.$eval('#message a[href="https://example.com/news"]', (a) => [a.getAttribute('target'), a.getAttribute('rel')])).toEqual(['_blank', 'noopener noreferrer']);
   expect(await p.$$eval('#message [id]', (es) => es.map((e) => e.id))).toEqual(['mail-top', 'mail-bottom']);
   expect(await p.$eval('#message img[alt="Acme Weekly"]', (i) => [i.getAttribute('src'), i.getAttribute('srcset'), (i as HTMLImageElement).width, (i as HTMLImageElement).height])).toEqual([null, null, 200, 50]);
   // every tag of the fixture is in the page

@@ -1,6 +1,6 @@
 // The tag table: what an email may contain. The single source for parse.ts (what is kept, dropped or
 // renamed), for the tree's `Tag` type (test/components.test.ts checks they agree) and for the generated
-// components (scripts/build-components.ts writes sinter/components/internal/ from it).
+// components (scripts/build-components.mjs writes sinter/components/internal/ from it).
 import type { Attrs, Property, Tag } from './sinter.types.js';
 
 type AttrName = keyof Attrs;
@@ -87,7 +87,7 @@ export const TAGS: Record<Tag, TagInfo> = {
   footer: t(),
   h1: t(), h2: t(), h3: t(), h4: t(), h5: t(), h6: t(),
   header: t(),
-  hr: t(),
+  hr: t([], FLOW, { void: true }),
   i: t(),
   img: t(['src', 'alt', 'width', 'height'], BOX, { void: true }),
   ins: t(['cite', 'datetime']),

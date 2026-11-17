@@ -19,8 +19,17 @@ const body = JSON.parse(TREE) as Body;
 const PAGE = page(`<sn-resource name="mail" src="file:./tree.json" type="Body"></sn-resource>
 <main><mail-body id="message" data-sn-prop="{ body: mail }"></mail-body></main>`);
 
+// both slots filled, as in fixtures/fills.html
+const FILLS = page(`<sn-resource name="mail" src="file:./tree.json" type="Body"></sn-resource>
+<main><mail-body id="message" data-sn-prop="{ body: mail }">
+  <a slot="link" class="out" target="_blank" rel="noopener noreferrer nofollow" data-sn-attr="{ href: $slot.node.attrs.href }"><slot></slot></a>
+  <template slot="image" data-sn-if="$slot.node.attrs.src"><img loading="lazy" data-sn-attr="{ src: $slot.node.attrs.src, alt: $slot.node.attrs.alt, srcset: null }"></template>
+  <template data-sn-else><span class="blocked" data-sn-text="$slot.node.attrs.alt ?? 'image'"></span></template>
+</mail-body></main>`);
+
 const apps = {
   tree: app({ 'tree.json': TREE, 'index.html': PAGE }),
+  fills: app({ 'tree.json': TREE, 'index.html': FILLS }),
   deep: app({ 'tree.json': DEEP, 'index.html': PAGE }),
 };
 const out: Record<string, { html: string; js: string[]; error: string | null }> = {};
@@ -102,6 +111,21 @@ test('whitespace-free: no text between two tags that the tree does not have', ()
   }
   expect(own.length).toBeGreaterThan(0);
   expect(between).toEqual(own);
+});
+
+test('the slots: a fill replaces every link and every image, and folds with the tree', () => {
+  const { html: page, js, error } = out.fills!;
+  expect(error).toBe(null);
+  expect(js).toEqual([]);
+  expect(noScript(page)).not.toMatch(/<script|<template|<!--/);
+  const links = [...elements({ type: 'body', style: {}, images: { origins: [] }, children: body.children })].filter((e) => e.tag === 'a');
+  expect(page.match(/<a class="out" target="_blank" rel="noopener noreferrer nofollow" href="[^"]*">/g)).toHaveLength(links.length);
+  // the link's children, through <slot></slot>
+  expect(page).toContain('<a class="out" target="_blank" rel="noopener noreferrer nofollow" href="https://example.com/news">News</a>');
+  // a blocked image is the fill's placeholder, a kept one the fill's <img>
+  expect(page).toContain('<span class="blocked">Acme Weekly</span>');
+  expect(page).toContain('<img loading="lazy" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="A pixel">');
+  expect(page).not.toContain('noopener noreferrer" href');
 });
 
 // sinter 0.19 expands a constant tree at build time only when each prop is plain data at most 20 objects

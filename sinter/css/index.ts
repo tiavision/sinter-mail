@@ -15,7 +15,7 @@ import type { Property, Style } from '../sinter.types.js';
 import { hints, legacyColor } from './hints.js';
 import { matchMedia, type Media } from './media.js';
 import { parseDeclarations, parseStylesheet, rules as parseRules, type Declaration, type Rule } from './parse.js';
-import { bucketKey, indexTree, matches, parseSelectorList, type Complex, type Info } from './selectors.js';
+import { bucketKey, budget, exhausted, indexTree, matches, parseSelectorList, type Complex } from './selectors.js';
 import { expand, joinOverflow, joinTextDecoration, type Assignment, type Longhand } from './values.js';
 
 export { matchMedia } from './media.js';
@@ -36,11 +36,17 @@ const LONGHANDS: Longhand[] = [
 ];
 const ID = new Map(LONGHANDS.map((l, i) => [l, i]));
 
-/** assignments as parallel arrays of longhand numbers and values, the last one per longhand only */
+/**
+ * Assignments as parallel arrays of longhand numbers and values, the last one per longhand only, and
+ * which longhands they set as a bit mask in 30-bit words (small integers), so a rule whose longhands a
+ * higher one already set is skipped with a few integer operations.
+ */
 interface Compiled {
   props: number[];
   values: string[];
+  mask: number[];
 }
+const WORDS = Math.ceil(LONGHANDS.length / 30);
 
 interface StyleRule {
   normal: Compiled;
@@ -53,6 +59,9 @@ interface Entry {
   order: number;
   rule: StyleRule;
 }
+
+// the matching work allowed for one resolve (selectors.ts, budget)
+const MAX_STEPS = 20_000_000;
 
 // `@media` nested deeper than this is dropped rather than walked
 const MAX_MEDIA_DEPTH = 16;
@@ -109,10 +118,12 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
   const out = new Map<RawElement, Style>();
   const universal = buckets.get('*');
   const values: (string | undefined)[] = new Array(LONGHANDS.length);
+  const set: number[] = new Array(WORDS);
+  budget(MAX_STEPS);
   for (const e of all) {
     let candidates: Entry[] = [];
     const take = (list: Entry[] | undefined) => {
-      if (!list) return;
+      if (!list || exhausted()) return;
       const m: Entry[] = [];
       for (const x of list) if (matches(x.sel, e)) m.push(x);
       if (m.length) candidates = candidates.length ? merge(candidates, m, byCascade) : m;
@@ -123,18 +134,28 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
     take(buckets.get(e.el.tag));
     take(universal);
 
+    // from the highest precedence down, each longhand taken from the first that sets it: inline
+    // !important, author !important (the last in cascade order first), inline, author, hints
     values.fill(undefined);
-    const apply = (c: Compiled) => { for (let i = 0; i < c.props.length; i++) values[c.props[i]] = c.values[i]; };
-    apply(compiled(hints(e, cx)));
+    set.fill(0);
+    const apply = (c: Compiled) => {
+      let fresh = false;
+      for (let w = 0; w < WORDS; w++) if (c.mask[w] & ~set[w]) fresh = true;
+      if (!fresh) return;
+      for (let i = 0; i < c.props.length; i++) if (values[c.props[i]] === undefined) values[c.props[i]] = c.values[i];
+      for (let w = 0; w < WORDS; w++) set[w] |= c.mask[w];
+    };
     const inline = attr(e.el, 'style');
     const own = inline !== null ? compile(parseDeclarations(inline)) : null;
-    for (const c of candidates) apply(c.rule.normal);
-    if (own) apply(own.normal);
-    for (const c of candidates) apply(c.rule.important);
     if (own) apply(own.important);
+    for (let i = candidates.length - 1; i >= 0; i--) apply(candidates[i].rule.important);
+    if (own) apply(own.normal);
+    for (let i = candidates.length - 1; i >= 0; i--) apply(candidates[i].rule.normal);
+    apply(compiled(hints(e, cx)));
     const style = finish(values);
     if (style) out.set(e.el, style);
   }
+  const left = budget(Infinity); if ((globalThis as any).DEBUG) console.log('steps', MAX_STEPS - left);
   return out;
 }
 
@@ -174,7 +195,9 @@ function compiled(list: Assignment[]): Compiled {
     last.delete(id);
     last.set(id, v);
   }
-  return { props: [...last.keys()], values: [...last.values()] };
+  const mask = new Array<number>(WORDS).fill(0);
+  for (const id of last.keys()) mask[Math.floor(id / 30)] |= 1 << id % 30;
+  return { props: [...last.keys()], values: [...last.values()], mask };
 }
 
 const at = (values: (string | undefined)[], l: Longhand) => values[ID.get(l)!];
