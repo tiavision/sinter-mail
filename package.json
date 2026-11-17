@@ -20,7 +20,7 @@
   "sinter": "./sinter",
   "exports": {
     ".": "./sinter/index.ts",
-    "./parser": "./sinter/parser/index.ts",
+    "./parser": "./sinter/engine.ts",
     "./package.json": "./package.json"
   },
   "files": [
@@ -30,7 +30,7 @@
   ],
   "scripts": {
     "build:entities": "node scripts/build-entities.mjs",
-    "build:components": "node --experimental-strip-types scripts/build-components.ts",
+    "build:components": "node --experimental-strip-types scripts/build-components.mjs",
     "check": "sinter check",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

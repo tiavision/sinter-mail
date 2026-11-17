@@ -1,0 +1,15 @@
+Hi Sam,
+
+thanks, that works for me. The notes are at https://notes.example.com/meeting
+(see section 3), or write to robin@example.com.
+
+On Monday, Sam wrote:
+> Can we move the meeting?
+>
+>> Original: Tuesday at 10.
+>> Room 4.
+> Thanks!
+
+-- 
+Robin Example
+https://robin.example.com
