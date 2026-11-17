@@ -24,6 +24,10 @@ const PRESENTATIONAL = [
  */
 const ACCEPTED: { match: RegExp; why: string }[] = [
   {
+    match: /^outlook div#15 (color|border-\w+-color)$/,
+    why: '@supports is not evaluated: its rules are dropped (here a rule that would make the text red)',
+  },
+  {
     match: /^legacy img#\d+ vertical-align$/,
     why: "img align=middle is Chromium's -webkit-baseline-middle; the cascade writes `middle`, which every engine has",
   },
@@ -42,6 +46,17 @@ const ACCEPTED: { match: RegExp; why: string }[] = [
 ];
 
 const DOCS: Record<string, string> = {
+  nested: `<!doctype html><html><body style="margin:0; background-color:#eef">
+<div align="center"><table width="500" cellpadding="8" border="2" bgcolor="white">
+  <tr><th colspan="2" bgcolor="#336" align="left"><font color="white" face="Trebuchet MS" size="4">Title</font></th></tr>
+  <tr><td width="50%" valign="top"><table cellpadding="0" cellspacing="0" width="100%"><tr><td align="right">inner, no padding</td></tr></table></td>
+      <td><table border="1" cellspacing="4" cellpadding="2" align="right"><tr><td bgcolor="#fc0">x</td><td nowrap width="80">long nowrap text here</td></tr></table></td></tr>
+  <tfoot valign="bottom" bgcolor="#ddd"><tr height="50"><td>foot</td><td valign="top">own</td></tr></tfoot>
+</table></div>
+<table width="0" height="0" border="0"><colgroup><col width="120" bgcolor="#efe"><col></colgroup><tr><td>c1</td><td>c2</td></tr></table>
+<p align="center"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" width="50%" height="10" alt=""></p>
+</body></html>`,
+
   outlook: `<!doctype html><html xmlns:o="urn:schemas-microsoft-com:office:office"><head>
 <!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]-->
 <style>

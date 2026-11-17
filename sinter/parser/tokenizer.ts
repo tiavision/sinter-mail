@@ -228,52 +228,43 @@ function scriptEnd(s: string, pos: number): number {
   return n;
 }
 
-/** a doctype's text after `<!DOCTYPE`, up to its `>` (or the end of the input: `eof`), as the standard's doctype states read it */
+/** a doctype's text after `<!DOCTYPE`, up to its `>` (or the end of the input: `eof`), read as the standard's doctype states read it */
 function doctype(d: string, eof: boolean, sink: Sink): void {
-  let i = 0, quirks = eof, bogus = false;
   const n = d.length;
+  // `trailing`: text after the system identifier, the one bogus doctype that does not force quirks
+  let i = 0, quirks = false, trailing = false;
   const ws = (): void => { while (i < n && /[\t\n\f ]/.test(d[i])) i++; };
-  /** a quoted identifier, or null when there is none (which forces quirks) */
+  /** a quoted identifier, or null where there is none */
   const quoted = (): string | null => {
     ws();
     const q = d[i];
-    if (q !== '"' && q !== "'") { quirks = bogus = true; return null; }
-    const close = d.indexOf(q, i + 1);
-    if (close < 0) { quirks = true; i = n; return nulOf(d.slice(i + 1)); } // ended by `>`
-    const id = d.slice(i + 1, close);
+    if (q !== '"' && q !== "'") { quirks = true; i = n; return null; }
+    let close = d.indexOf(q, i + 1);
+    if (close < 0) { quirks = true; close = n; } // ended by `>`
+    const id = nul(d.slice(i + 1, close));
     i = close + 1;
-    return nulOf(id);
+    return id;
   };
   ws();
-  if (i >= n) return sink.doctype(null, null, null, true);
   let j = i;
   while (j < n && !/[\t\n\f ]/.test(d[j])) j++;
-  const name = lower(nulOf(d.slice(i, j)));
+  const name = i < n ? lower(nul(d.slice(i, j))) : null;
+  if (name === null) quirks = true;
   i = j;
   ws();
   let publicId: string | null = null, systemId: string | null = null;
   if (i < n) {
     const keyword = lower(d.substr(i, 6));
+    i += 6;
     if (keyword === 'public') {
-      i += 6;
       publicId = quoted();
-      if (publicId !== null) {
-        ws();
-        if (i < n) {
-          if (d[i] === '"' || d[i] === "'") systemId = quoted();
-          else quirks = bogus = true;
-        }
-      }
-    } else if (keyword === 'system') {
-      i += 6;
-      systemId = quoted();
-    } else quirks = bogus = true;
+      ws();
+      if (i < n) systemId = quoted();
+    } else if (keyword === 'system') systemId = quoted();
+    else { quirks = true; i = n; }
     ws();
-    if (!bogus && i < n) bogus = true; // after the system identifier: ignored, quirks unchanged
+    if (i < n) trailing = true;
   }
-  // in the bogus doctype state the end of the input does not force quirks
-  sink.doctype(name, publicId, systemId, quirks && !(eof && bogus && !forced(d)) ? true : quirks);
+  // the end of the input forces quirks in every doctype state but the bogus one
+  sink.doctype(name, publicId, systemId, quirks || (eof && !trailing));
 }
-
-const nulOf = (s: string): string => (s.includes('\0') ? s.replace(/\0/g, '�') : s);
-const forced = (_: string): boolean => false;

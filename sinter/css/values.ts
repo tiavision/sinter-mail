@@ -85,6 +85,14 @@ const NAMED = new Set(
     'yellow yellowgreen').split(' '),
 );
 
+// system colours, the deprecated ones included: Outlook writes `windowtext` in every border
+const SYSTEM = new Set(
+  ('activeborder activecaption appworkspace background buttonface buttonhighlight buttonshadow buttontext captiontext graytext ' +
+    'highlight highlighttext inactiveborder inactivecaption inactivecaptiontext infobackground infotext menu menutext scrollbar ' +
+    'threeddarkshadow threedface threedhighlight threedlightshadow threedshadow window windowframe windowtext canvas canvastext ' +
+    'linktext visitedtext activetext buttonborder field fieldtext mark marktext selecteditem selecteditemtext accentcolor accentcolortext').split(' '),
+);
+
 /** whether `name` (lowercase) is a named colour */
 export const isNamedColor = (name: string): boolean => NAMED.has(name);
 
@@ -96,7 +104,7 @@ export function color(v: CV | undefined): string | null {
   if (!v) return null;
   if (v.t === 'ident') {
     const k = v.v.toLowerCase();
-    return NAMED.has(k) || k === 'transparent' || k === 'currentcolor' ? k : null;
+    return NAMED.has(k) || SYSTEM.has(k) || k === 'transparent' || k === 'currentcolor' ? k : null;
   }
   if (v.t === 'hash') {
     const h = v.v;

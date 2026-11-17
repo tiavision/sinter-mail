@@ -28,9 +28,23 @@ export interface ResolveOptions {
   media: Media;
 }
 
+// every tracked longhand by number: an element's values are an array, not a map, since a hostile
+// stylesheet can match thousands of rules on every element
+const LONGHANDS: Longhand[] = [
+  ...(PROPERTIES.filter((p) => p !== 'text-decoration' && p !== 'overflow') as Longhand[]),
+  'text-decoration-line', 'text-decoration-style', 'text-decoration-color', 'overflow-x', 'overflow-y',
+];
+const ID = new Map(LONGHANDS.map((l, i) => [l, i]));
+
+/** assignments as parallel arrays of longhand numbers and values, the last one per longhand only */
+interface Compiled {
+  props: number[];
+  values: string[];
+}
+
 interface StyleRule {
-  normal: Assignment[];
-  important: Assignment[];
+  normal: Compiled;
+  important: Compiled;
 }
 
 interface Entry {
@@ -65,7 +79,7 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
       if (!sels || sels.length === 0) continue;
       const rule = compile(r.declarations);
       // a rule that sets nothing kept is not matched at all
-      if (rule.normal.length === 0 && rule.important.length === 0) continue;
+      if (rule.normal.props.length === 0 && rule.important.props.length === 0) continue;
       const o = order++;
       for (const sel of sels) {
         const key = bucketKey(sel);
@@ -88,21 +102,30 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
   const link = body ? attr(body.el, 'link') : null;
   const cx = { link: link !== null ? legacyColor(link) : null };
 
+  // each bucket in cascade order, so an element's matches are merged, not sorted
+  const byCascade = (a: Entry, b: Entry) => a.specificity - b.specificity || a.order - b.order;
+  for (const b of buckets.values()) b.sort(byCascade);
+
   const out = new Map<RawElement, Style>();
-  const universal = buckets.get('*') ?? [];
+  const universal = buckets.get('*');
+  const values: (string | undefined)[] = new Array(LONGHANDS.length);
   for (const e of all) {
-    const candidates: Entry[] = [];
-    const take = (list: Entry[] | undefined) => { if (list) for (const x of list) if (matches(x.sel, e)) candidates.push(x); };
+    let candidates: Entry[] = [];
+    const take = (list: Entry[] | undefined) => {
+      if (!list) return;
+      const m: Entry[] = [];
+      for (const x of list) if (matches(x.sel, e)) m.push(x);
+      if (m.length) candidates = candidates.length ? merge(candidates, m, byCascade) : m;
+    };
     if (e.id !== null) take(buckets.get('#' + e.id));
     const seen = new Set<string>();
     for (const c of e.classes) if (!seen.has(c)) { seen.add(c); take(buckets.get('.' + c)); }
     take(buckets.get(e.el.tag));
     take(universal);
-    candidates.sort((a, b) => a.specificity - b.specificity || a.order - b.order);
 
-    const values = new Map<Longhand, string>();
-    const apply = (list: Assignment[]) => { for (const [p, v] of list) values.set(p, v); };
-    apply(hints(e, cx));
+    values.fill(undefined);
+    const apply = (c: Compiled) => { for (let i = 0; i < c.props.length; i++) values[c.props[i]] = c.values[i]; };
+    apply(compiled(hints(e, cx)));
     const inline = attr(e.el, 'style');
     const own = inline !== null ? compile(parseDeclarations(inline)) : null;
     for (const c of candidates) apply(c.rule.normal);
@@ -112,6 +135,16 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
     const style = finish(values);
     if (style) out.set(e.el, style);
   }
+  return out;
+}
+
+/** two lists in cascade order as one */
+function merge(a: Entry[], b: Entry[], cmp: (x: Entry, y: Entry) => number): Entry[] {
+  const out: Entry[] = [];
+  let i = 0, j = 0;
+  while (i < a.length && j < b.length) out.push(cmp(a[i], b[j]) <= 0 ? a[i++] : b[j++]);
+  while (i < a.length) out.push(a[i++]);
+  while (j < b.length) out.push(b[j++]);
   return out;
 }
 
@@ -130,19 +163,31 @@ function compile(decls: Declaration[]): StyleRule {
     const a = expand(d.name, d.value);
     if (a) (d.important ? important : normal).push(...a);
   }
-  return { normal, important };
+  return { normal: compiled(normal), important: compiled(important) };
 }
 
+function compiled(list: Assignment[]): Compiled {
+  const last = new Map<number, string>();
+  for (const [p, v] of list) {
+    const id = ID.get(p)!;
+    // re-inserted, so the map's order stays the order of the winning assignments
+    last.delete(id);
+    last.set(id, v);
+  }
+  return { props: [...last.keys()], values: [...last.values()] };
+}
+
+const at = (values: (string | undefined)[], l: Longhand) => values[ID.get(l)!];
+
 /** the tracked longhands as the element's style: the kept properties, in PROPERTIES order */
-function finish(values: Map<Longhand, string>): Style | null {
-  if (values.size === 0) return null;
+function finish(values: (string | undefined)[]): Style | null {
   const style: Style = {};
   let any = false;
   for (const p of PROPERTIES as readonly Property[]) {
     let v: string | null | undefined;
-    if (p === 'text-decoration') v = joinTextDecoration(values.get('text-decoration-line'), values.get('text-decoration-style'), values.get('text-decoration-color'));
-    else if (p === 'overflow') v = joinOverflow(values.get('overflow-x'), values.get('overflow-y'));
-    else v = values.get(p);
+    if (p === 'text-decoration') v = joinTextDecoration(at(values, 'text-decoration-line'), at(values, 'text-decoration-style'), at(values, 'text-decoration-color'));
+    else if (p === 'overflow') v = joinOverflow(at(values, 'overflow-x'), at(values, 'overflow-y'));
+    else v = at(values, p);
     if (v != null && safe(v)) { style[p] = v; any = true; }
   }
   return any ? style : null;

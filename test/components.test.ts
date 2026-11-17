@@ -17,7 +17,7 @@ const tags = Object.keys(TAGS).sort();
 const own = tags.filter((t) => !TAGS[t as keyof typeof TAGS].inTable);
 const inTable = tags.filter((t) => TAGS[t as keyof typeof TAGS].inTable);
 /** the markup of a component file, after its leading comment */
-const markup = (f: string) => read(f).replace(/^<!--[\s\S]*?-->\n/, '');
+const markup = (f: string) => read(f).replace(/^<!--[\s\S]*?-->\n/, '').replace(/\n<style>[\s\S]*<\/style>\n$/, '\n');
 
 test('the Tag union of sinter.types.ts is the table\'s tags', () => {
   const union = /export type Tag =([^;]+);/.exec(read(join(PKG, 'sinter/sinter.types.ts')))![1]!;
