@@ -239,11 +239,12 @@ With sinter-mail the page writes:
 
 ```html
 <sn-resource name="allowedOrigins" src="/email/image-origins"></sn-resource>
+<sn-resource name="ignoredOrigins" src="/email/image-blacklist"></sn-resource>
 <article data-sn-let="{ body: mail.parse(msg.html, {
            images: 'proxy', proxy: '/api/email/proxy-image?url={url}',
            origins: allowedOrigins?.origins ?? [],
            cid: `/api/email/proxy-image?account_id=${encodeURIComponent(msg.account)}&uid=${msg.uid}&cid={cid}` }) }">
-  <template data-sn-for="origin in body.images.blocked.filter(o => !ignored.includes(o))">
+  <template data-sn-for="origin in body.images.blocked.filter(o => !(ignoredOrigins?.origins ?? []).includes(o))">
     <button data-sn-post="/email/image-origins" data-sn-body="{ origin }" data-sn-then="refresh('allowedOrigins')"
             data-sn-text="'Show images from ' + origin"></button>
   </template>
