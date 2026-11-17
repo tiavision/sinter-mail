@@ -26,8 +26,8 @@ design choice is recorded in [Decisions](#decisions), and what is left depends o
 
 ### Not in version 1
 
-Listed so that version 1 does not close them off ([Later](#later)): reading MIME messages, PGP/MIME, a
-proxy for remote images, detecting and collapsing quoted replies in HTML email, background images.
+Listed so that version 1 does not close them off ([Later](#later)): reading MIME messages, PGP/MIME,
+detecting and collapsing quoted replies in HTML email, background images.
 
 ## The case
 
@@ -194,8 +194,17 @@ allowlist, the tree's `Tag` type and the generated components.
 - **Images** (`images` option):
   - `'block'` (the default): a remote image is left out; its box keeps its `width` and `height` and
     its `alt` text, so the layout does not move when images are shown. `body.images.blocked` counts
-    them, for a "show images" button that parses again with `'allow'`.
-  - `'allow'`: `http:` and `https:` images are kept.
+    them, for a "show images" button that parses again with `'proxy'` or `'allow'`.
+  - `'allow'`: `http:` and `https:` images are kept, and load from the sender's servers.
+  - `'proxy'`: `http:` and `https:` images are kept, with their URL rewritten through the `proxy`
+    option, a URL template of the app's: `proxy: '/images?url={url}'`. `{url}` is the image's absolute
+    URL, percent-encoded as a query value; the template must contain it once, and an absolute template
+    must be `https:` (an error otherwise, at each call, as an invalid option). The browser then asks only
+    the app's server, so the sender does not see the reader's address, browser or the time each time
+    the email is opened. What the proxy does is the app's: fetch on request, or fetch when the email
+    arrives so the sender cannot tell whether it was read, cache, resize, refuse what is not an image.
+    A template, not a function, so the option is a value: `memo()` keys on it, an API can pass the
+    same string when it runs the parse on the server, and an email from a file folds at build time.
   - `cid:` images are kept when the `cid` option maps them (`{ 'logo@acme': '/att/12' }` or a function);
     an unmapped one is left out. `data:` images are kept up to a size bound (an option).
   - Images bind `srcset: null`, so an app's image pipeline does not resize user content (as
@@ -341,7 +350,8 @@ tree, about 8 MiB of trees kept, the least recently used dropped first.
 4. **Legacy attributes become inline styles**, so the page cannot undo them by accident.
 5. **Classes are dropped** after the cascade is resolved; ids are kept only as link targets, prefixed.
 6. **Remote images are blocked by default**, with their boxes kept, so tracking pixels need the app's
-   consent and showing images does not move the layout.
+   consent and showing images does not move the layout. An app that shows images should prefer
+   `'proxy'` over `'allow'`; it is in version 1 because it is what makes showing images private.
 7. **One tag table generates the allowlists, the types and the components**, so they cannot disagree.
 8. **Plain text is in version 1**, through the same tree, in a module without the parser.
 9. **One document per body.** A body is parsed and rendered on its own; bodies are never joined. This
@@ -370,6 +380,8 @@ tree, about 8 MiB of trees kept, the least recently used dropped first.
   newsletter of 2,000 elements, and small enough as generated components? If not: properties grouped by
   how often email sets them, or a smaller list per tag.
 - **`data:` images**: the size bound, and whether to keep them at all.
+- **The proxy template**: is `{url}` enough, or do apps need the message's id as well (`{id}`, from an
+  option), for a proxy that only fetches images of messages it holds?
 - **`media: 'narrow'`**: is 600 px the right width, and should the option be a number?
 - **Outlook's conditional comments**: are there emails whose content is only inside `<!--[if mso]>`?
   The corpus will tell.
@@ -385,5 +397,4 @@ tree, about 8 MiB of trees kept, the least recently used dropped first.
   payload, and mark which bodies were encrypted or signed. Verifying a `multipart/signed` part needs its
   raw bytes, which postal-mime does not return: to be asked upstream.
 - **Quoted replies in HTML email** (`blockquote type=cite`, Gmail's and Outlook's markers), into `part`.
-- **A proxy for remote images** (`images: 'proxy'` with a URL template).
 - **Background images**, through a checked `background` attribute on tables and cells.
