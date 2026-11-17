@@ -37,7 +37,8 @@ beforeAll(async () => {
   for (const [name, a] of Object.entries(apps)) {
     let error: string | null = null;
     try {
-      await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'], static: ['index.html'] })], build: { outDir: join(a.root, 'dist'), emptyOutDir: true } });
+      // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
+    await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'], static: ['index.html'] }) as never], build: { outDir: join(a.root, 'dist'), emptyOutDir: true } });
     } catch (e) { error = (e as Error).message; }
     const dist = join(a.root, 'dist');
     out[name] = {
@@ -128,10 +129,9 @@ test('the slots: a fill replaces every link and every image, and folds with the 
   expect(page).not.toContain('noopener noreferrer" href');
 });
 
-// sinter 0.19 expands a constant tree at build time only when each prop is plain data at most 20 objects
-// deep (`plainData` in its compiler), which is about 9 elements of an email: a newsletter with nested tables
-// is deeper, so its page keeps the tree in the browser. When sinter lifts the bound, this test fails: then
-// fold the deep fixture as the shallow one above.
-test('a tree deeper than sinter folds (all.json, 12 elements deep) is left to the browser: SN322 on a static page', () => {
-  expect(out.deep!.error).toMatch(/SN322 ships-javascript/);
+// sinter used to expand a constant tree at build time only when each prop was plain data at most 20 objects
+// deep (about 9 elements of an email); the bound is now 1,024 levels, so a newsletter with nested tables folds.
+test('a deep tree (all.json, 12 elements deep) folds too: no JavaScript', () => {
+  expect(out.deep!.error).toBeNull();
+  expect(out.deep!.js).toEqual([]);
 });

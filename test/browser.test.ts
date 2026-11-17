@@ -74,9 +74,10 @@ async function tab(): Promise<{ page: Page; violations: () => Promise<string[]>;
 const dist = (a: keyof typeof apps) => join(apps[a].root, 'dist');
 beforeAll(async () => {
   for (const name of ['api', 'plain'] as const) {
-    await build({ root: apps[name].root, logLevel: 'silent', plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'] })], build: { outDir: dist(name), emptyOutDir: true } });
+    // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
+    await build({ root: apps[name].root, logLevel: 'silent', plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'] }) as never], build: { outDir: dist(name), emptyOutDir: true } });
   }
-  await build({ root: apps.static.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'], static: ['index.html'] })], build: { outDir: dist('static'), emptyOutDir: true } });
+  await build({ root: apps.static.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'], static: ['index.html'] }) as never], build: { outDir: dist('static'), emptyOutDir: true } });
   browser = await chromium.launch();
 });
 afterAll(async () => {

@@ -45,9 +45,9 @@ test('each component renders its own tag as its root (a link and an image inside
     const m = markup(join(DIR, 'internal', `mail-${t}.html`));
     const root = /^<template data-sn-component="\{ node: Element \}">([\s\S]*)<\/template>\n$/.exec(m)![1]!;
     const inner = t === 'a' ? /^<slot name="link" data-sn-prop="\{ node \}">([\s\S]*)<\/slot>$/.exec(root)![1]! : t === 'img' ? /^<slot name="image" data-sn-prop="\{ node \}">([\s\S]*)<\/slot>$/.exec(root)![1]! : root;
-    // an if chain over the id: the element with it, else the element without it
-    expect(inner, t).toMatch(new RegExp(`^<template data-sn-if="node\\.attrs\\.id"><${t}[ >]`));
-    expect(inner, t).toContain(`<template data-sn-else><${t}`);
+    // the element itself, its id bound only when it has one
+    expect(inner, t).toMatch(new RegExp(`^<${t}[ >]`));
+    expect(inner, t).not.toMatch(/^<template data-sn-if="node\.attrs\.id">/);
   }
   // the table's parts are literal in mail-table
   const table = read(join(DIR, 'internal/mail-table.html'));
@@ -85,7 +85,7 @@ test('no whitespace between tags in any component\'s markup', () => {
 test('every attribute and property of the table is bound where its tag renders, the id with its prefix', () => {
   const p = markup(join(DIR, 'internal/mail-p.html'));
   for (const prop of TAGS.p.props) expect(p).toContain(`'${prop}': node.style['${prop}']`.replace(/^'([a-z]+)': node\.style\['\1'\]$/, '$1: node.style.$1'));
-  expect(p).toContain("id: 'mail-' + node.attrs.id");
-  expect(read(join(DIR, 'internal/mail-a.html'))).toContain('<a target="_blank" rel="noopener noreferrer" data-sn-attr="{ dir: node.attrs.dir, lang: node.attrs.lang, title: node.attrs.title, href: node.attrs.href }"');
+  expect(p).toContain("id: node.attrs.id ? 'mail-' + node.attrs.id : null");
+  expect(read(join(DIR, 'internal/mail-a.html'))).toContain(`<a target="_blank" rel="noopener noreferrer" data-sn-attr="{ dir: node.attrs.dir, lang: node.attrs.lang, title: node.attrs.title, id: node.attrs.id ? 'mail-' + node.attrs.id : null, href: node.attrs.href }"`);
   expect(read(join(DIR, 'internal/mail-img.html'))).toContain('srcset: null');
 });
