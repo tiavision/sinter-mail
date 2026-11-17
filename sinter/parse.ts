@@ -135,13 +135,15 @@ interface Context {
   ids: Set<string>;
   origins: Set<string>;
   styles: Map<RawElement, Style>;
+  /** projected(): the style kept per resolved style and tag */
+  projected: Map<Style, Map<Tag, Style>>;
 }
 
 function build(html: string, o: Options): Body {
   const root = parseHTML(html);
   const styles = resolveStyles(root, { media: o.media });
   const body = root.children.find((n): n is RawElement => n.type === 'element' && n.tag === 'body');
-  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles };
+  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, projected: new Map() };
   if (body) collectTargets(body, cx.targets);
   const children = body ? nodes(body, 'body', cx) : [];
   // the body's style is the root's: its text properties and its background, the <html> element's under it
@@ -228,7 +230,7 @@ function element(el: RawElement, cx: Context): Element | null {
   const tag: Tag = el.tag in TAGS ? (el.tag as Tag) : RENAME[el.tag] ?? 'span';
   const info = TAGS[tag];
   const attrs: Attrs = {};
-  for (const name of attrsOf(tag)) {
+  for (const name of ATTRS[tag]) {
     const raw = attr(el, name);
     if (raw === null) continue;
     const v = attribute(tag, name, raw, cx);
@@ -243,10 +245,28 @@ function element(el: RawElement, cx: Context): Element | null {
     }
   }
   if (tag === 'img') image(el, attrs, cx);
-  const style: Style = {};
-  const resolved = cx.styles.get(el);
-  if (resolved) for (const p of info.props) if (resolved[p] !== undefined) style[p] = resolved[p];
+  const style = projected(cx.styles.get(el), tag, cx);
   return { type: 'element', tag, attrs, style, children: info.void ? [] : nodes(el, tag, cx) };
+}
+
+/** each tag's attributes, GLOBAL included (attrsOf), listed once */
+const ATTRS = Object.fromEntries(Object.keys(TAGS).map((t) => [t, attrsOf(t as Tag)])) as Record<Tag, readonly (keyof Attrs)[]>;
+
+/**
+ * The resolved style with only the properties `tag` binds. The cascade shares one resolved style among the
+ * elements that have the same, so this shares one result per resolved style and tag, as one object of the tree.
+ */
+function projected(resolved: Style | undefined, tag: Tag, cx: Context): Style {
+  if (!resolved) return {};
+  let byTag = cx.projected.get(resolved);
+  if (!byTag) cx.projected.set(resolved, (byTag = new Map()));
+  let style = byTag.get(tag);
+  if (!style) {
+    style = {};
+    for (const p of TAGS[tag].props) if (resolved[p] !== undefined) style[p] = resolved[p];
+    byTag.set(tag, style);
+  }
+  return style;
 }
 
 const INTEGER = /^\s*\d{1,9}\s*$/;

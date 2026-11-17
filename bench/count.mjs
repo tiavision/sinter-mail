@@ -1,0 +1,10 @@
+import { bundle } from './bundle.mjs';
+import { newsletterHtml } from './newsletter.mjs';
+const b = await bundle('sinter/parse.ts', { minify: false });
+const { parse } = await import(b.path);
+const h = newsletterHtml();
+const body = parse(h);
+let n = 0; const walk = (x) => { if (x.type === 'element') n++; for (const c of x.children ?? []) walk(c); };
+for (const c of body.children) walk(c);
+console.log('html bytes', h.length, 'elements', n, 'tree json', JSON.stringify(body).length);
+const t = body.children.find((c) => c.type === "element"); console.log(JSON.stringify(t.children[0].children[0]).slice(0, 1200));
