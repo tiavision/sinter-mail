@@ -184,7 +184,7 @@
                  "type": "element",
                  "tag": "a",
                  "attrs": {
-                  "href": "#bottom",
+                  "href": "#mail-bottom",
                   "title": "To the end"
                  },
                  "style": {},
@@ -1297,7 +1297,7 @@
                  "type": "element",
                  "tag": "a",
                  "attrs": {
-                  "href": "#top"
+                  "href": "#mail-top"
                  },
                  "style": {},
                  "children": [

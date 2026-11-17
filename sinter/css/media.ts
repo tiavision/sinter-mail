@@ -44,8 +44,9 @@ const RESERVED = new Set(['only', 'not', 'and', 'or', 'layer']);
 function query(q: CV[], screen: Screen): K {
   if (q.length === 0) return false;
   const first = q[0];
-  if (first.t === 'block' && first.open === '(') return condition(q, 0, screen, true);
-  if (first.t === 'ident' && first.v.toLowerCase() === 'not' && q[1]?.t === 'block') return condition(q, 0, screen, true);
+  if ((first.t === 'block' && first.open === '(') || (first.t === 'ident' && first.v.toLowerCase() === 'not' && q[1]?.t === 'block')) {
+    return condition(q, 0, screen, true) ?? false;
+  }
   // [not | only]? <media-type> [and <condition-without-or>]?
   let i = 0;
   let negate = false;
