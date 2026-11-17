@@ -36,12 +36,12 @@ const REFERENCE = /&(?:#[xX]([\dA-Fa-f]+);?|#(\d+);?|([A-Za-z\d]{1,32})(;?))/g;
 const C1 = '\u20AC\x81\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\x8D\u017D\x8F\x90\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\x9D\u017E\u0178';
 
 /** ASCII lowercase, as the standard lowercases names (`toLowerCase` would also fold other letters) */
-export const lower = (s: string): string => (/[A-Z]/.test(s) ? s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32)) : s);
+const lower = (s: string): string => (/[A-Z]/.test(s) ? s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32)) : s);
 const nul = (s: string): string => (s.includes('\0') ? s.replace(/\0/g, '\uFFFD') : s);
 const isAlpha = (c: number): boolean => ((c | 32) >= 97 && (c | 32) <= 122);
 
 /** `s` with its character references decoded; in an attribute value, a legacy one before `=` or a letter stays */
-export function decode(s: string, inAttr: boolean): string {
+function decode(s: string, inAttr: boolean): string {
   if (!s.includes('&')) return s;
   return s.replace(REFERENCE, (m, hex: string | undefined, dec: string | undefined, name: string | undefined, semi: string, at: number) => {
     if (name === undefined) {

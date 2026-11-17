@@ -4,7 +4,10 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { characterEntities } from 'character-entities';
+import { characterEntitiesLegacy } from 'character-entities-legacy';
 import { describe, expect, test } from 'vitest';
+import { ENTITIES, LEGACY } from '../sinter/parser/entities.js';
 import { parseHTML } from '../sinter/parser/index.js';
 import type { RawElement, RawNode } from '../sinter/raw.js';
 import { plainOf, reference } from './reference.js';
@@ -268,8 +271,29 @@ describe('linear time on hostile input', () => {
   test('100k <object>', () => timed('<object>'.repeat(100_000) + '<b>x'.repeat(1000)));
 });
 
-test('the entity table is up to date', () => {
-  execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/build-entities.mjs', import.meta.url)), '--check']);
+describe('the entity table', () => {
+  test('is up to date', () => {
+    execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/build-entities.mjs', import.meta.url)), '--check']);
+  });
+  test('unpacks to character-entities and character-entities-legacy', () => {
+    expect(Object.fromEntries(ENTITIES)).toEqual(characterEntities);
+    expect([...LEGACY].sort()).toEqual([...characterEntitiesLegacy].sort());
+  });
+});
+
+test('a parse does not depend on the parses before it', () => {
+  const a = '<b><p>x</b><table>y<td>z', b = '<svg><foreignObject><p>q</svg><template><td>t</template>&notin;';
+  const first = plainOf(parseHTML(a));
+  parseHTML(b);
+  parseHTML('<div>'.repeat(1000));
+  expect(plainOf(parseHTML(a))).toEqual(first);
+});
+
+test('parseHTML folds: sinter\'s own check finds only the language\'s globals', async () => {
+  // sinter's build-time check, from its package (not one of its exports)
+  const check = new URL('../node_modules/@tiaforge-ui/sinter/dist/fold-check.js', import.meta.url).href;
+  const { foldVerdict } = (await import(check)) as { foldVerdict: (file: string, name: string, root: string) => { fold: boolean } };
+  expect(foldVerdict(fileURLToPath(new URL('../sinter/parser/index.ts', import.meta.url)), 'parseHTML', fileURLToPath(new URL('..', import.meta.url)))).toEqual({ fold: true });
 });
 
 test('sinter/parser imports nothing outside itself', () => {

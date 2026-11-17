@@ -31,7 +31,15 @@ export interface Node {
   listed: boolean;
   /** a template's content */
   content: Node | null;
+  /** what the element is to the stack's searches: the bits below */
+  bits: number;
+  /** a formatting element's key (keyOf) */
+  key?: string;
 }
+
+// the scopes an element bounds, and whether it is special (other than HTML `address`, `div` and `p`, which
+// do not stop the search for a list item to close)
+const SCOPE_BOUND = 1, LIST_BOUND = 2, BUTTON_BOUND = 4, TABLE_BOUND = 8, SPECIAL_BIT = 16, LIST_ITEM_STOP = 32;
 
 interface Tag {
   name: string;
@@ -43,8 +51,8 @@ const INITIAL = 0, BEFORE_HTML = 1, BEFORE_HEAD = 2, IN_HEAD = 3, AFTER_HEAD = 4
   IN_TABLE = 7, IN_TABLE_TEXT = 8, IN_CAPTION = 9, IN_COLUMN_GROUP = 10, IN_TABLE_BODY = 11, IN_ROW = 12,
   IN_CELL = 13, IN_SELECT = 14, IN_SELECT_IN_TABLE = 15, IN_TEMPLATE = 16, AFTER_BODY = 17, IN_FRAMESET = 18,
   AFTER_FRAMESET = 19, AFTER_AFTER_BODY = 20, AFTER_AFTER_FRAMESET = 21;
-// scopes
-const DEFAULT = 0, LIST_ITEM = 1, BUTTON = 2, TABLE = 3;
+// scopes, as the bits of the elements that bound them
+const DEFAULT = SCOPE_BOUND, LIST_ITEM = SCOPE_BOUND | LIST_BOUND, BUTTON = SCOPE_BOUND | BUTTON_BOUND, TABLE = TABLE_BOUND;
 
 const set = (s: string): Set<string> => new Set(s.split(' '));
 const FORMATTING = set('b big code em font i s small strike strong tt u');
@@ -89,19 +97,21 @@ function quirky(name: string | null, publicId: string | null, systemId: string |
 const create = (tag: string, attrs: Attrs, ns: number): Node => ({
   tag, ns, attrs, kids: [], parent: null, open: false, listed: false,
   content: ns === HTML && tag === 'template' ? create('#content', [], HTML) : null,
+  bits: ns === HTML
+    ? (SCOPE.has(tag) ? SCOPE_BOUND : 0) | (tag === 'ol' || tag === 'ul' ? LIST_BOUND : 0) | (tag === 'button' ? BUTTON_BOUND : 0) |
+      (tag === 'html' || tag === 'table' ? TABLE_BOUND : 0) | (SPECIAL.has(tag) ? (tag === 'address' || tag === 'div' || tag === 'p' ? SPECIAL_BIT : SPECIAL_BIT | LIST_ITEM_STOP) : 0)
+    : (ns === MATH ? MATH_SCOPE : SVG_HTML).has(tag) ? SCOPE_BOUND | SPECIAL_BIT | LIST_ITEM_STOP : 0,
 });
 
 const isWhitespace = (s: string): boolean => !/[^\t\n\f\r ]/.test(s);
 const leading = (s: string): number => /^[\t\n\f\r ]*/.exec(s)![0].length;
 const noNul = (s: string): string => (s.includes('\0') ? s.replace(/\0/g, '') : s);
 
-/** whether two elements were made from tags with the same attributes, in any order (Noah's Ark) */
-function sameAttrs(a: Attrs, b: Attrs): boolean {
-  if (a.length !== b.length) return false;
-  if (a.length < 8) return a.every(([n, v]) => b.some((x) => x[0] === n && x[1] === v));
-  const m = new Map(a);
-  return b.every(([n, v]) => m.get(n) === v);
-}
+/**
+ * A formatting element's tag and attributes, in any order, as one string (Noah's Ark compares them): NUL
+ * separates the parts, as the tokenizer leaves none in names and values.
+ */
+const keyOf = (n: Node): string => (n.key ??= n.tag + n.attrs.map(([a, v]) => `\0${a}\0${v}`).sort().join(''));
 
 /** `html` parsed into its `<html>` element, with foreign elements and template contents still in it */
 export function build(html: string, maxDepth: number): Node {
@@ -150,17 +160,12 @@ export function build(html: string, maxDepth: number): Node {
     const i = top(t);
     if (i >= 0) popTo(i);
   };
-  const special = (n: Node): boolean => (n.ns === HTML ? SPECIAL : n.ns === MATH ? MATH_SCOPE : SVG_HTML).has(n.tag);
-  const boundary = (n: Node, scope: number): boolean =>
-    n.ns === HTML
-      ? scope === TABLE ? n.tag === 'html' || n.tag === 'table'
-        : SCOPE.has(n.tag) || (scope === LIST_ITEM && (n.tag === 'ol' || n.tag === 'ul')) || (scope === BUTTON && n.tag === 'button')
-      : scope !== TABLE && special(n);
+  const special = (n: Node): number => n.bits & SPECIAL_BIT;
   const inScope = (t: string | Set<string>, scope = DEFAULT, el?: Node): boolean => {
     for (let i = stack.length - 1; i >= 0; i--) {
       const n = stack[i];
       if (n.ns === HTML && (typeof t === 'string' ? n.tag === t : t.has(n.tag)) && (!el || n === el)) return true;
-      if (boundary(n, scope)) return false;
+      if (n.bits & scope) return false;
     }
     return true;
   };
@@ -257,10 +262,11 @@ export function build(html: string, maxDepth: number): Node {
   const listPush = (n: Node): void => {
     // Noah's Ark: at most three entries with the same tag and attributes after the last marker
     let count = 0, earliest: Node | null = null;
+    const key = keyOf(n);
     for (let i = list.length - 1; i >= 0; i--) {
       const e = list[i];
       if (!e) break;
-      if (e.tag === n.tag && e.ns === n.ns && sameAttrs(e.attrs, n.attrs)) { count++; earliest = e; }
+      if (keyOf(e) === key) { count++; earliest = e; }
     }
     if (count >= 3) unlist(earliest!);
     list.push(n);
@@ -653,7 +659,7 @@ export function build(html: string, maxDepth: number): Node {
       case 'li': case 'dd': case 'dt': {
         framesetOk = false;
         const i = name === 'li' ? top('li') : Math.max(top('dd'), top('dt'));
-        if (i >= 0 && !stack.slice(i + 1).some((n) => special(n) && !(n.ns === HTML && (n.tag === 'address' || n.tag === 'div' || n.tag === 'p')))) {
+        if (i >= 0 && !stack.slice(i + 1).some((n) => n.bits & LIST_ITEM_STOP)) {
           implied(stack[i].tag, THOROUGH);
           popUntil(stack[i].tag);
         }
