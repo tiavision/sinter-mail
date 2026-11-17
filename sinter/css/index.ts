@@ -38,15 +38,17 @@ const ID = new Map(LONGHANDS.map((l, i) => [l, i]));
 
 /**
  * Assignments as parallel arrays of longhand numbers and values, the last one per longhand only, and
- * which longhands they set as a bit mask in 30-bit words (small integers), so a rule whose longhands a
- * higher one already set is skipped with a few integer operations.
+ * which longhands they set as a bit mask in three 30-bit words (small integers), so a rule whose
+ * longhands a higher one already set is skipped with a few integer operations.
  */
 interface Compiled {
   props: number[];
   values: string[];
-  mask: number[];
+  m0: number;
+  m1: number;
+  m2: number;
 }
-const WORDS = Math.ceil(LONGHANDS.length / 30);
+if (LONGHANDS.length > 90) throw new Error('sinter/css: more longhands than the masks hold');
 
 interface StyleRule {
   normal: Compiled;
@@ -57,7 +59,9 @@ interface Entry {
   sel: Complex;
   specificity: number;
   order: number;
-  rule: StyleRule;
+  normal: Compiled;
+  /** null when the rule has no !important declaration */
+  important: Compiled | null;
 }
 
 // the matching work allowed for one resolve (selectors.ts, budget)
@@ -94,7 +98,7 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
         const key = bucketKey(sel);
         let b = buckets.get(key);
         if (!b) buckets.set(key, (b = []));
-        b.push({ sel, specificity: sel.specificity, order: o, rule });
+        b.push({ sel, specificity: sel.specificity, order: o, normal: rule.normal, important: rule.important.props.length ? rule.important : null });
       }
     }
   };
@@ -118,7 +122,6 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
   const out = new Map<RawElement, Style>();
   const universal = buckets.get('*');
   const values: (string | undefined)[] = new Array(LONGHANDS.length);
-  const set: number[] = new Array(WORDS);
   budget(MAX_STEPS);
   for (const e of all) {
     let candidates: Entry[] = [];
@@ -137,20 +140,18 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
     // from the highest precedence down, each longhand taken from the first that sets it: inline
     // !important, author !important (the last in cascade order first), inline, author, hints
     values.fill(undefined);
-    set.fill(0);
+    let s0 = 0, s1 = 0, s2 = 0;
     const apply = (c: Compiled) => {
-      let fresh = false;
-      for (let w = 0; w < WORDS; w++) if (c.mask[w] & ~set[w]) fresh = true;
-      if (!fresh) return;
+      if (!((c.m0 & ~s0) | (c.m1 & ~s1) | (c.m2 & ~s2))) return;
       for (let i = 0; i < c.props.length; i++) if (values[c.props[i]] === undefined) values[c.props[i]] = c.values[i];
-      for (let w = 0; w < WORDS; w++) set[w] |= c.mask[w];
+      s0 |= c.m0; s1 |= c.m1; s2 |= c.m2;
     };
     const inline = attr(e.el, 'style');
     const own = inline !== null ? compile(parseDeclarations(inline)) : null;
     if (own) apply(own.important);
-    for (let i = candidates.length - 1; i >= 0; i--) apply(candidates[i].rule.important);
+    for (let i = candidates.length - 1; i >= 0; i--) { const imp = candidates[i].important; if (imp) apply(imp); }
     if (own) apply(own.normal);
-    for (let i = candidates.length - 1; i >= 0; i--) apply(candidates[i].rule.normal);
+    for (let i = candidates.length - 1; i >= 0; i--) apply(candidates[i].normal);
     apply(compiled(hints(e, cx)));
     const style = finish(values);
     if (style) out.set(e.el, style);
@@ -195,9 +196,9 @@ function compiled(list: Assignment[]): Compiled {
     last.delete(id);
     last.set(id, v);
   }
-  const mask = new Array<number>(WORDS).fill(0);
+  const mask = [0, 0, 0];
   for (const id of last.keys()) mask[Math.floor(id / 30)] |= 1 << id % 30;
-  return { props: [...last.keys()], values: [...last.values()], mask };
+  return { props: [...last.keys()], values: [...last.values()], m0: mask[0], m1: mask[1], m2: mask[2] };
 }
 
 const at = (values: (string | undefined)[], l: Longhand) => values[ID.get(l)!];
