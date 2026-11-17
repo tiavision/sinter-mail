@@ -4,3 +4,4 @@ node_modules/
 dist/
 sinter/sinter.components.d.ts
 .sinter/
+screenshots/

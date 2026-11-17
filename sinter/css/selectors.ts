@@ -421,60 +421,58 @@ function info(el: RawElement, parent: Info | null, siblings: Info[], index: numb
   return { el, parent, siblings, index, typeIndex: 0, typeCount: 0, id: attr(el, 'id'), classes: cls ? cls.split(/[ \t\n\f\r]+/).filter(Boolean) : [], };
 }
 
-const enum R { Match, FailLocal, FailSiblings, FailAll }
+// a match's outcome, as WebKit's matcher has them (plain numbers: sinter's build-time check reads no enum)
+const MATCH = 0, FAIL_LOCAL = 1, FAIL_SIBLINGS = 2, FAIL_ALL = 3;
+type R = typeof MATCH | typeof FAIL_LOCAL | typeof FAIL_SIBLINGS | typeof FAIL_ALL;
 
-// The matching work left for this resolve, in compound tests. A hostile stylesheet can make every rule
-// match every element, or every test walk to the root; past a budget no real email comes near
-// (index.ts, MAX_STEPS), what is left does not match, so a resolve ends in bounded time.
-let left = Infinity;
-
-/** the work allowed for the next matches; returns what was left of the last budget */
-export function budget(steps: number): number {
-  const out = left;
-  left = steps;
-  return out;
-}
+/**
+ * The matching work left for one resolve, in compound tests. A hostile stylesheet can make every rule match
+ * every element, or every test walk to the root; past a budget no real email comes near (index.ts,
+ * MAX_STEPS), what is left does not match, so a resolve ends in bounded time. One per resolve, passed
+ * along: the module keeps no state between calls (sinter runs mail.parse at build time only if it is pure).
+ */
+export interface Budget { left: number }
 
 /** whether the budget is spent: no further selector matches */
-export const exhausted = (): boolean => left <= 0;
+export const exhausted = (b: Budget): boolean => b.left <= 0;
 
 /** whether `sel` matches `e` */
-export function matches(sel: Complex, e: Info): boolean {
-  return step(sel, sel.compounds.length - 1, e) === R.Match;
+export function matches(sel: Complex, e: Info, b: Budget): boolean {
+  return step(sel, sel.compounds.length - 1, e, b) === MATCH;
 }
 
-function step(sel: Complex, k: number, e: Info): R {
-  if (--left < 0) return R.FailAll;
-  if (!compoundMatches(sel.compounds[k], e)) return R.FailLocal;
-  if (k === 0) return R.Match;
+function step(sel: Complex, k: number, e: Info, b: Budget): R {
+  if (--b.left < 0) return FAIL_ALL;
+  if (!compoundMatches(sel.compounds[k], e, b)) return FAIL_LOCAL;
+  if (k === 0) return MATCH;
   switch (sel.combinators[k - 1]) {
     case ' ': {
       for (let p = e.parent; p; p = p.parent) {
-        const r = step(sel, k - 1, p);
-        if (r === R.Match || r === R.FailAll) return r;
+        const r = step(sel, k - 1, p, b);
+        if (r === MATCH || r === FAIL_ALL) return r;
       }
-      return R.FailAll;
+      return FAIL_ALL;
     }
     case '>':
-      return e.parent ? step(sel, k - 1, e.parent) : R.FailAll;
+      return e.parent ? step(sel, k - 1, e.parent, b) : FAIL_ALL;
     case '+':
-      return e.index > 0 ? step(sel, k - 1, e.siblings[e.index - 1]) : R.FailSiblings;
+      return e.index > 0 ? step(sel, k - 1, e.siblings[e.index - 1], b) : FAIL_SIBLINGS;
     case '~': {
       for (let j = e.index - 1; j >= 0; j--) {
-        const r = step(sel, k - 1, e.siblings[j]);
-        if (r === R.Match || r === R.FailSiblings || r === R.FailAll) return r;
+        const r = step(sel, k - 1, e.siblings[j], b);
+        if (r === MATCH || r === FAIL_SIBLINGS || r === FAIL_ALL) return r;
       }
-      return R.FailSiblings;
+      return FAIL_SIBLINGS;
     }
   }
 }
 
-function compoundMatches(c: Compound, e: Info): boolean {
-  for (const s of c.simple) if (!simpleMatches(s, e)) return false;
+function compoundMatches(c: Compound, e: Info, b: Budget): boolean {
+  for (const s of c.simple) if (!simpleMatches(s, e, b)) return false;
   return true;
 }
 
-function simpleMatches(s: Simple, e: Info): boolean {
+function simpleMatches(s: Simple, e: Info, b: Budget): boolean {
   switch (s.k) {
     case 'tag': return e.el.tag === s.v;
     case 'id': return e.id === s.v;
@@ -498,17 +496,17 @@ function simpleMatches(s: Simple, e: Info): boolean {
     case 'root': return e.parent === null;
     case 'empty': return e.el.children.every((c) => c.type === 'text' && c.value === '');
     case 'link': return (e.el.tag === 'a' || e.el.tag === 'area') && attr(e.el, 'href') !== null;
-    case 'not': return !s.list.some((x) => matches(x, e));
-    case 'is': return s.list.some((x) => matches(x, e));
+    case 'not': return !s.list.some((x) => matches(x, e, b));
+    case 'is': return s.list.some((x) => matches(x, e, b));
     case 'nth': {
       let pos: number;
       if (s.type) pos = s.last ? e.typeCount - e.typeIndex : e.typeIndex + 1;
       else if (s.of) {
-        if (!s.of.some((x) => matches(x, e))) return false;
+        if (!s.of.some((x) => matches(x, e, b))) return false;
         pos = 1;
         const sib = e.siblings;
-        if (s.last) { for (let j = e.index + 1; j < sib.length; j++) if (s.of.some((x) => matches(x, sib[j]))) pos++; }
-        else for (let j = 0; j < e.index; j++) if (s.of.some((x) => matches(x, sib[j]))) pos++;
+        if (s.last) { for (let j = e.index + 1; j < sib.length; j++) if (s.of.some((x) => matches(x, sib[j], b))) pos++; }
+        else for (let j = 0; j < e.index; j++) if (s.of.some((x) => matches(x, sib[j], b))) pos++;
       } else pos = s.last ? e.siblings.length - e.index : e.index + 1;
       // pos = a·n + b for some n ≥ 0
       if (s.a === 0) return pos === s.b;

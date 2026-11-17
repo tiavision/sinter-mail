@@ -186,7 +186,7 @@ describe('selectors', () => {
   const ids = (sel: string) => {
     const list = parseSelectorList(tokenizeCV(sel));
     if (!list) return null;
-    return all.filter((e) => list.some((s) => matches(s, e))).map((e) => attr(e.el, 'id')).filter(Boolean).join(' ');
+    return all.filter((e) => list.some((s) => matches(s, e, { left: Infinity }))).map((e) => attr(e.el, 'id')).filter(Boolean).join(' ');
   };
   test('type, class, id, universal, attributes', () => {
     expect(ids('P')).toBe('b c e');

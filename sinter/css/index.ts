@@ -15,7 +15,7 @@ import type { Property, Style } from '../sinter.types.js';
 import { hints, legacyColor } from './hints.js';
 import { matchMedia, type Media } from './media.js';
 import { parseDeclarations, parseStylesheet, rules as parseRules, type Declaration, type Rule } from './parse.js';
-import { bucketKey, budget, exhausted, indexTree, matches, parseSelectorList, type Complex } from './selectors.js';
+import { bucketKey, exhausted, indexTree, matches, parseSelectorList, type Budget, type Complex } from './selectors.js';
 import { expand, joinOverflow, joinTextDecoration, type Assignment, type Longhand } from './values.js';
 
 export { matchMedia } from './media.js';
@@ -123,14 +123,14 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
   const out = new Map<RawElement, Style>();
   const universal = buckets.get('*');
   const values: (string | undefined)[] = new Array(LONGHANDS.length);
-  budget(MAX_STEPS);
-  try {
+  const work: Budget = { left: MAX_STEPS };
+  {
     for (const e of all) {
       let candidates: Entry[] = [];
       const take = (list: Entry[] | undefined) => {
-        if (!list || exhausted()) return;
+        if (!list || exhausted(work)) return;
         const m: Entry[] = [];
-        for (const x of list) if (matches(x.sel, e)) m.push(x);
+        for (const x of list) if (matches(x.sel, e, work)) m.push(x);
         if (m.length) candidates = candidates.length ? merge(candidates, m, byCascade) : m;
       };
       if (e.id !== null) take(buckets.get('#' + e.id));
@@ -158,8 +158,6 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
       const style = finish(values);
       if (style) out.set(e.el, style);
     }
-  } finally {
-    budget(Infinity);
   }
   return out;
 }
