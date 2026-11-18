@@ -122,7 +122,7 @@ export function links(body: Body | null | undefined): LinkInfo[] {
 }
 
 /**
- * PROTOTYPE (progressive rendering): numbers the nodes of `body` in document order (`n`; `z` on an
+ * (<mail-body-progressive>) numbers the nodes of `body` in document order (`n`; `z` on an
  * element: the last number in its subtree) and sets `body.head`, so that <mail-body> renders the first
  * `head` nodes in one task and the rest after the browser has painted them. In place, without
  * recursion; returns `body`. A tree without it renders whole, as before (a `file:` email, folded at

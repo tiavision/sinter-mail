@@ -53,7 +53,7 @@ const parts = (v, tag) => (PARTS.has(tag) ? ` data-sn-class="{ 'mail-quote': ${v
 /** the start tag of the element `v` of `tag`, with its bindings */
 const open = (v, tag, { id = false, literal = '', extra = [] } = {}) => `<${tag}${literal}${attrs(v, tag, id, extra)}${style(v, tag)}${parts(v, tag)}>`;
 /** the loop over the children of `v`: text runs first, every element through mail-node */
-/** PROTOTYPE (progressive rendering): the children of \`v\` below \`limit\`, filtered only on an element the cut passes through */
+/** (<mail-body-progressive>) the children of \`v\` below \`limit\`, filtered only on an element the cut passes through */
 const kids = (v) => `${v}.z >= limit ? ${v}.children.filter((y) => y.n < limit) : ${v}.children`;
 const children = (v, c) => `<template data-sn-for="${c} in ${kids(v)}"><template data-sn-if="${c}.type === 'text'"><template data-sn-text="${c}.value"></template></template><template data-sn-else><mail-node data-sn-prop="{ node: ${c}, limit: ${c}.z >= limit ? limit : 1e9 }"></mail-node></template></template>`;
 /** an if chain: the first branch whose condition holds; `last`, if given, the final else */

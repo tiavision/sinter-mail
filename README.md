@@ -37,6 +37,7 @@ package.json              "sinter": "./sinter", exports ".", "./parser" (the laz
 sinter/
   components/
     mail-body.html        public: one body, and the slots an app fills (`link`, `image`)
+    mail-body-progressive.html, .ts   public: a long body in two tasks (mail.progressive numbers it)
     internal/             generated from tags.ts: one component per tag, the dispatch, the table
   sinter.types.ts         the tree's types: what apps and the components name
   tags.ts                 the tag table: tags, their attributes, the properties each binds, what is dropped
@@ -46,7 +47,7 @@ sinter/
   css/                    the cascade: tokenizer, selectors, media, values, legacy hints
   raw.ts                  the raw tree between the parser and the cascade
   plain.ts, autolink.ts   mail.plain, with GFM's autolinks
-  tree.ts                 mail.text, mail.links
+  tree.ts                 mail.text, mail.links, mail.progressive
   sinter.helpers.ts       the helpers, re-exported by the entry
   index.ts                the entry
 scripts/

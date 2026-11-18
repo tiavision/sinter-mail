@@ -1,8 +1,8 @@
-// PROTOTYPE (progressive rendering): a body that mail.progressive numbered (`body.head`) renders its first
+// <mail-body-progressive>: a body that mail.progressive numbered (`body.head`) renders its first
 // nodes in the task that receives it; once the browser has painted them, the rest renders (in one task, or STEP
 // nodes per task). The rows already rendered are kept (the tree's objects are the same, and
 // rows match by item), and only the elements a step's limit cuts through render again.
-import { MailBodyComponent } from './mail-body.html';
+import { MailBodyProgressiveComponent } from './mail-body-progressive.html';
 
 /**
  * nodes per task after the first paint: by default all of them, in one task (two phases). `?step=400` in the
@@ -11,7 +11,7 @@ import { MailBodyComponent } from './mail-body.html';
  */
 const STEP = +(new URLSearchParams(location.search).get('step') ?? Infinity);
 
-export class MailBody extends MailBodyComponent {
+export class MailBodyProgressive extends MailBodyProgressiveComponent {
   connected() { this.#later(); }
   propsChanged() { this.#later(); }
   #later() {

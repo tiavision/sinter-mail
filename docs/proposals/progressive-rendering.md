@@ -1,6 +1,6 @@
 # Rendering faster: two ideas, measured
 
-Status: prototype on branch `ccr-b2114177-bx52ep`, measured against sinter `main` (812bda8, built from
+Status: built as `<mail-body-progressive>` and `mail.progressive` ([the guide](../mail.md#long-messages-mail-body-progressive-and-mailprogressivebody)); measured against sinter `main` (812bda8, built from
 source, not the 0.19.0 release). Chromium (Playwright's headless build), the 2,012-element generated
 newsletter of `test/app.ts`, served as a tree from the API. Medians of 15 interleaved runs. Times are
 from the API's answer.
@@ -43,7 +43,7 @@ The prototype changes sinter-mail only, with no change to sinter:
 - The generated components take a `limit` prop. A loop filters `n < limit` only on an element the cut
   passes through (`z >= limit`). Every other element gets the same array, and its children get the
   constant `1e9`.
-- `<mail-body>` has a script. After the first frame has painted (`requestAnimationFrame`, then a
+- `<mail-body-progressive>` has a script (`<mail-body>` does not, and stays foldable). After the first frame has painted (`requestAnimationFrame`, then a
   task), it lifts the limit. The rows already rendered are kept: the objects are the same, and rows
   match by item.
 
@@ -71,10 +71,8 @@ What it costs:
   fail, because an in-place change under a prop reaches the case's row only through that forced walk.
 - **The JSON is 12% bigger** (411 kB to 460 kB) when the API numbers the tree. Numbering in the browser
   instead is about one walk.
-- **A static page ships JavaScript.** A component script makes `<mail-body>` ship code, so
-  `static.test.ts` fails with SN322. `components.test.ts` fails too, because it asserts the exact shape
-  of the generated loops. A version to keep would put the progressive path in its own component (or
-  make it the runtime's job, below), so that `<mail-body>` stays foldable with no JavaScript.
+- **A page that uses it ships JavaScript.** The script is why the progressive path is its own component:
+  `<mail-body>` has none, and a static page with it still folds with no JavaScript.
 - Emails under `head` nodes are not affected. The corpus emails are all smaller than that.
 
 ## For sinter in general

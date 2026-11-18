@@ -71,3 +71,20 @@ test('tree.ts imports no parser', () => {
   const imports = [...src.matchAll(/^\s*(?:import|export)\b[^'"]*?from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]);
   expect(imports).toEqual(['./sinter.types.js']);
 });
+
+test('mail.progressive numbers the nodes in document order, each element with the last number of its subtree', async () => {
+  const { progressive } = await import('../sinter/tree.js');
+  const body = { type: 'body', style: {}, images: { origins: [] }, children: [
+    { type: 'element', tag: 'div', attrs: {}, style: {}, children: [{ type: 'text', value: 'a' }, { type: 'element', tag: 'b', attrs: {}, style: {}, children: [{ type: 'text', value: 'b' }] }] },
+    { type: 'text', value: 'c' },
+  ] } as const;
+  const b = progressive(structuredClone(body) as never, 3) as unknown as typeof body & { head: number };
+  const [div, c] = b.children as unknown as [{ n: number; z: number; children: Array<{ n: number; z?: number; children?: Array<{ n: number }> }> }, { n: number }];
+  expect([div.n, div.z, div.children[0]!.n, div.children[1]!.n, div.children[1]!.z, div.children[1]!.children![0]!.n, c.n]).toEqual([0, 3, 1, 2, 3, 3, 4]);
+  expect(b.head).toBe(3);
+  // deep trees: no recursion
+  let deep: any = { type: 'text', value: 'x' };
+  for (let i = 0; i < 50_000; i++) deep = { type: 'element', tag: 'span', attrs: {}, style: {}, children: [deep] };
+  const d = progressive({ type: 'body', style: {}, images: { origins: [] }, children: [deep] } as never);
+  expect((d.children[0] as { z: number }).z).toBe(50_000);
+});

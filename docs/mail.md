@@ -177,6 +177,28 @@ URLs, `www.` addresses and email addresses as links (GFM's rules), `>` quotes as
 `mail.text` is the text of a body or node, blocks separated by newlines, hidden content left out: for
 previews and search snippets. `mail.links` is every link with its text, in order.
 
+## Long messages: `<mail-body-progressive>` and `mail.progressive(body)`
+
+A long email (a newsletter of 2,000 elements) takes one task of about 45 ms to render, and nothing of it
+shows until that task ends. `<mail-body-progressive>` renders the first part in the task that receives the
+body, and the rest once the browser has painted it:
+
+```html
+<sn-resource name="message" src="/api/messages/{$url.id}"></sn-resource>
+<mail-body-progressive data-sn-prop="{ body: message.tree }"></mail-body-progressive>
+```
+
+The body must be numbered by `mail.progressive(body, head = 200)`, on the server before it is sent, or in
+the page (`data-sn-prop="{ body: mail.progressive(tree) }"`). It numbers the nodes in document order and
+sets `body.head`: the first 200 nodes render first. A body that is not numbered renders whole, as in
+`<mail-body>`, so short emails are not affected. Measured on the 2,000-element newsletter (Chromium): the
+email starts to show after about 50 ms instead of about 100, the whole email is rendered after about
+93 ms instead of 73, and the second part is still one task of about 48 ms
+([measurements](proposals/progressive-rendering.md)). The numbers make the tree's JSON about 12% larger.
+
+It has the same slots as `<mail-body>`. It has a script, so a page that uses it ships JavaScript: a static
+page (an email from a file) uses `<mail-body>`, which folds with none.
+
 ## Changing how links and images look
 
 `<mail-body>` has two slots. A fill reads the element as `$slot.node`:
