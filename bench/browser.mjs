@@ -50,7 +50,7 @@ for (const name of chosen) {
   const setup = await v.setup(ctx);
   const app = await buildApp(setup.files, { ...setup.build, ...(which ? { sinter: which } : {}), ...(proto ? { pkg: join(PKG, '..', `sm-${proto}`) } : {}) });
   const server = await serve(app.dist, typeof setup.api === 'function' ? setup.api : () => setup.api, setup.csp ?? CSP);
-  vs.push({ name, v, setup, app, server, times: [], count: 0 });
+  vs.push({ name, v, setup, app, server, times: [], busy: [], count: 0 });
 }
 
 async function run(x) {
@@ -64,6 +64,16 @@ async function run(x) {
     document.addEventListener('securitypolicyviolation', (e) => window.__violations.push(`${e.violatedDirective} ${e.sample}`));
     window.__painted = 0;
     window.__changed = 0;
+    // the long animation frames (50 ms and more): when each starts, its script time (the sum of its
+    // scripts' durations) and its rendering time (from renderStart to its end: style, layout, paint)
+    window.__frames = [];
+    try {
+      new PerformanceObserver((l) => window.__frames.push(...l.getEntries().map((e) => ({
+        start: e.startTime, end: e.startTime + e.duration,
+        script: e.scripts.reduce((n, x) => n + x.duration, 0),
+        render: e.renderStart ? e.startTime + e.duration - e.renderStart : 0,
+      })))).observe({ type: 'long-animation-frame', buffered: true });
+    } catch {}
     new MutationObserver(() => {
       const at = (window.__changed = performance.now());
       requestAnimationFrame(() => setTimeout(() => { if (window.__changed === at) window.__painted = performance.now(); }));
@@ -87,10 +97,14 @@ async function run(x) {
     await p.click('#next');
     await settle(1000);
   }
-  const t = await p.evaluate(() => {
+  const [t, busy] = await p.evaluate(() => {
     const api = performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/message')).pop();
-    return window.__painted - api.responseEnd;
+    // busy: the script and rendering time of the long frames between the answer and the paint
+    let script = 0, render = 0;
+    for (const f of window.__frames) if (f.end > api.responseEnd && f.start < window.__painted) { script += f.script; render += f.render; }
+    return [window.__painted - api.responseEnd, [script, render]];
   });
+  x.busy.push(busy);
   if (setup.check) await setup.check(p);
   const violations = await p.evaluate(() => window.__violations);
   // Playwright's init script runs in the iframe too, where the sandbox blocks it: the benchmark's, not the page's
@@ -101,7 +115,7 @@ async function run(x) {
   return t;
 }
 
-for (const x of vs) await run(x); // a warm-up run of each, discarded
+for (const x of vs) { await run(x); x.busy.length = 0; } // a warm-up run of each, discarded
 for (let i = 0; i < RUNS; i++) {
   for (let j = 0; j < vs.length; j++) {
     const x = vs[(i + j) % vs.length];
@@ -111,14 +125,16 @@ for (let i = 0; i < RUNS; i++) {
 await browser.close();
 
 const results = [];
-for (const { name, v, setup, app, server, times, count } of vs) {
+for (const { name, v, setup, app, server, times, busy, count } of vs) {
   server.close();
   app.remove();
   const sorted = [...times].sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)];
   const apiBytes = Buffer.byteLength(typeof setup.api === 'function' ? setup.api(1) : setup.api);
-  results.push({ name, label: v.label, median, times, js: app.js, count, csp: setup.csp ?? CSP, apiBytes });
-  console.log(`${name.padEnd(22)} ${median.toFixed(0).padStart(5)} ms   JS ${(app.js.gzip / 1024).toFixed(1).padStart(5)} kB gzip   runs ${times.map((t) => t.toFixed(0)).join(' ')}   (${count} elements; API ${(apiBytes / 1024).toFixed(0)} kB)`);
+  const med = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+  const script = med(busy.map((b) => b[0])), render = med(busy.map((b) => b[1])), busyMedian = script + render;
+  results.push({ name, label: v.label, median, times, busy: { script, render }, js: app.js, count, csp: setup.csp ?? CSP, apiBytes });
+  console.log(`${name.padEnd(22)} ${median.toFixed(0).padStart(5)} ms  (script ${script.toFixed(0).padStart(3)}, render ${render.toFixed(0).padStart(3)})   JS ${(app.js.gzip / 1024).toFixed(1).padStart(5)} kB gzip   runs ${times.map((t) => t.toFixed(0)).join(' ')}   (${count} elements; API ${(apiBytes / 1024).toFixed(0)} kB)`);
   if (app.js.files.length > 1) for (const f of app.js.files) console.log(`${''.padEnd(22)}   ${f.file}: ${(f.gzip / 1024).toFixed(1)} kB gzip`);
 }
 if (process.env.BENCH_JSON) (await import('node:fs')).writeFileSync(process.env.BENCH_JSON, JSON.stringify({ blocks: BLOCKS, htmlBytes: HTML.length, results }, null, 2));

@@ -26,10 +26,12 @@ export interface Sink {
 
 export const DATA = 0, RCDATA = 1, RAWTEXT = 2, SCRIPT = 3, PLAINTEXT = 4;
 
-const WS = /[\t\n\f ]*/y;
-const TAG_NAME = /[^\t\n\f />]*/y;
-const ATTR_NAME = /[^\t\n\f />=]*/y;
-const UNQUOTED = /[^\t\n\f >]*/y;
+// the characters names and unquoted values end at (a tag name and an attribute name at `/` too, an attribute
+// name at `=` too), scanned by code: a tag is read with no regular expression and no match array
+const isWs = (c: number): boolean => c === 9 || c === 10 || c === 12 || c === 32;
+const TAG_END = 1, NAME_END = 2, VALUE_END = 3;
+const ends = (c: number, kind: number): boolean =>
+  isWs(c) || c === 62 || (kind !== VALUE_END && c === 47) || (kind === NAME_END && c === 61);
 const COMMENT_END = /--!?>/g;
 const REFERENCE = /&(?:#[xX]([\dA-Fa-f]+);?|#(\d+);?|([A-Za-z\d]{1,32})(;?))/g;
 // numeric references to 0x80\u20130x9F mean what windows-1252 has there; a code with no character there stays itself
@@ -72,11 +74,14 @@ export function tokenize(input: string, sink: Sink): void {
     if (text) sink.text(text);
     text = '';
   };
-  const skip = (re: RegExp): string => {
-    re.lastIndex = pos;
-    const m = re.exec(s)![0];
-    pos += m.length;
-    return m;
+  const skipWs = (): void => {
+    while (pos < n && isWs(s.charCodeAt(pos))) pos++;
+  };
+  /** the characters from `pos` up to one that ends `kind` (or the end of the input) */
+  const scan = (kind: number): string => {
+    const from = pos;
+    while (pos < n && !ends(s.charCodeAt(pos), kind)) pos++;
+    return s.slice(from, pos);
   };
   /** `</name` followed by whitespace, `/` or `>` at `i`: the end tag raw text ends at */
   const endsAt = (i: number, name: string): boolean =>
@@ -84,11 +89,11 @@ export function tokenize(input: string, sink: Sink): void {
 
   /** reads a tag from `pos` (its name's first letter); returns false at the end of the input, which drops it */
   const tag = (isEnd: boolean): boolean => {
-    const name = lower(nul(skip(TAG_NAME)));
+    const name = lower(nul(scan(TAG_END)));
     const attrs: Attrs = [];
     let names: Set<string> | null = null, selfClosing = false;
     for (;;) {
-      skip(WS);
+      skipWs();
       if (pos >= n) return false;
       let c = s[pos];
       if (c === '>') break;
@@ -98,19 +103,19 @@ export function tokenize(input: string, sink: Sink): void {
         continue;
       }
       pos++; // the name's first character, which may be `=`
-      const an = lower(nul(c + skip(ATTR_NAME)));
-      skip(WS);
+      const an = lower(nul(c + scan(NAME_END)));
+      skipWs();
       let value = '';
       if (s[pos] === '=') {
         pos++;
-        skip(WS);
+        skipWs();
         c = s[pos];
         if (c === '"' || c === "'") {
           const close = s.indexOf(c, pos + 1);
           if (close < 0) return false;
           value = s.slice(pos + 1, close);
           pos = close + 1;
-        } else value = skip(UNQUOTED);
+        } else value = scan(VALUE_END);
         value = nul(decode(value, true));
       }
       // the first of duplicate names is kept; a set only for tags with many attributes

@@ -13,8 +13,16 @@ async function tree(ctx, n = 1) {
   return parsed.get(n);
 }
 /** the API's answers, message by message: the tree, or the HTML */
-const treeApi = async (ctx) => { const a = JSON.stringify(await tree(ctx, 1)), b = JSON.stringify(await tree(ctx, 2)); return (n) => (n === 2 ? b : a); };
-const htmlApi = (ctx) => { const a = JSON.stringify({ html: ctx.htmlOf(1) }), b = JSON.stringify({ html: ctx.htmlOf(2) }); return (n) => (n === 2 ? b : a); };
+// messages 1 to ctx.messages (2 unless the run asks for more: bench/switch.mjs), answered as JSON
+const treeApi = async (ctx) => {
+  const all = [];
+  for (let n = 1; n <= (ctx.messages ?? 2); n++) all.push(JSON.stringify(await tree(ctx, n)));
+  return (n) => all[(n - 1) % all.length];
+};
+const htmlApi = (ctx) => {
+  const all = Array.from({ length: ctx.messages ?? 2 }, (_, i) => JSON.stringify({ html: ctx.htmlOf(i + 1) }));
+  return (n) => all[(n - 1) % all.length];
+};
 const countTree = (b) => { let n = 0; const w = (x) => { if (x.type === 'element') n++; for (const c of x.children ?? []) w(c); }; b.children.forEach(w); return n; };
 const rendered = (n) => document.querySelectorAll('#message *').length === n;
 
@@ -118,6 +126,47 @@ root.append(...b.children.map(el));
     async setup(ctx) {
       const s = await VARIANTS.html.setup(ctx);
       return { ...s, build: { ...s.build, compileHints: true } };
+    },
+  },
+  'floor-classes': {
+    label: 'the floor with classes: each distinct style one rule of a constructed stylesheet (adoptedStyleSheets), each element its class',
+    optional: true,
+    async setup(ctx) {
+      const s = await VARIANTS.floor.setup(ctx);
+      return {
+        ...s,
+        files: {
+          ...s.files,
+          'src/floor.js': `const A = { href: 1, colspan: 1, rowspan: 1, width: 1, height: 1, alt: 1, title: 1, dir: 1, lang: 1 };
+const sheet = new CSSStyleSheet();
+document.adoptedStyleSheets = [sheet];
+const classes = new Map();
+function classOf(style) {
+  const key = JSON.stringify(style);
+  let c = classes.get(key);
+  if (c === undefined) {
+    c = 'mail-s' + classes.size;
+    const i = sheet.insertRule('.' + c + ' {}', sheet.cssRules.length);
+    for (const k in style) sheet.cssRules[i].style.setProperty(k, style[k]);
+    classes.set(key, c);
+  }
+  return c;
+}
+function el(n) {
+  if (n.type === 'text') return document.createTextNode(n.value);
+  const e = document.createElement(n.tag);
+  for (const k in n.attrs) if (A[k]) e.setAttribute(k, n.attrs[k]);
+  for (const k in n.style) { e.className = classOf(n.style); break; }
+  for (const c of n.children) e.append(el(c));
+  return e;
+}
+const b = await (await fetch('/api/message?n=1')).json();
+const root = document.getElementById('message');
+for (const k in b.style) root.style.setProperty(k, b.style[k]);
+root.append(...b.children.map(el));
+`,
+        },
+      };
     },
   },
   none: {

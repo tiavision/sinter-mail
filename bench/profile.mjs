@@ -14,7 +14,7 @@ const ctx = { html: newsletterHtml(), htmlOf: (n) => newsletterHtml(67, (n - 1) 
 const [base, which] = name.split('@');
 const setup = await VARIANTS[base].setup(ctx);
 const app = await buildApp(setup.files, { ...setup.build, minify: false, ...(which ? { sinter: which } : {}) });
-const server = await serve(app.dist, () => setup.api, setup.csp ?? CSP);
+const server = await serve(app.dist, typeof setup.api === 'function' ? setup.api : () => setup.api, setup.csp ?? CSP);
 const browser = await chromium.launch();
 const results = [];
 for (let i = 0; i < 4; i++) {

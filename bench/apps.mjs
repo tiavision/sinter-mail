@@ -16,6 +16,8 @@ export const PKG = resolve(import.meta.dirname, '..');
 export const SINTERS = {
   base: resolve(process.env.SINTER_BASE ?? join(PKG, '../sinter-base')),
   work: resolve(process.env.SINTER_WORK ?? realpathSync(join(PKG, 'node_modules/@tiaforge-ui/sinter'))),
+  /** a fixed build to compare `work` with while it changes: a worktree of sinter at the commit to compare with */
+  ref: resolve(process.env.SINTER_REF ?? join(PKG, '../sinter-ref')),
 };
 const SINTER = SINTERS.base;
 
