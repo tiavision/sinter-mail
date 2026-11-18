@@ -1,0 +1,172 @@
+name: Release
+
+# Publishes @tiavision/sinter-mail to npm.
+#
+# From GitHub's UI: Actions → Release → Run workflow (on main) → the version, such as 0.2.0. The workflow
+# sets package.json to it (commit "Release <version>"; nothing to commit when it is already there), tags
+# v<version> and pushes the tag; runs CI on it; publishes; then moves main to the release commit and makes
+# the GitHub release, with notes GitHub writes from the merged pull requests.
+#
+# Or: publish a GitHub release for a tag v<the version in package.json>: the same checks and publish.
+#
+# Nothing is published unless the tag is the package's version, it builds against a sinter from npm (not
+# `file:../sinter`), and CI passes on the tagged commit. A pre-release (0.2.0-rc.1) goes out under the
+# `next` dist-tag.
+#
+# No long-lived token once trusted publishing is set up: npm trusts this workflow through GitHub's OIDC
+# token and records a provenance attestation. Trusted publishing can only be set up for a package that
+# exists, so the first publish uses the NPM_TOKEN secret of the `release` environment (a granular token),
+# which is deleted afterwards (README.md, Releasing).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The version to release, such as 0.2.0 (0.2.0-rc.1 for a pre-release)'
+        required: true
+        type: string
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # set the version, commit and tag (workflow_dispatch only); the commit reaches main in `finish`
+  prepare:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Run the Release workflow on main, not ${GITHUB_REF#refs/heads/}"
+          exit 1
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: tag
+        env:
+          INPUT: ${{ inputs.version }}
+        run: |
+          version="${INPUT#v}"
+          tag="v$version"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then echo "\"$INPUT\" is not a version (x.y.z)"; exit 1; fi
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then echo "$tag exists already"; exit 1; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$(node -p 'require("./package.json").version')" != "$version" ]; then
+            npm version "$version" --no-git-tag-version
+            git commit -am "Release $version"
+          fi
+          git tag -a "$tag" -m "sinter-mail $version"
+          git push origin "refs/tags/$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  check:
+    needs: prepare
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      dist-tag: ${{ steps.check.outputs.dist-tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag || github.event.release.tag_name }}
+      - id: check
+        env:
+          TAG: ${{ needs.prepare.outputs.tag || github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          node -e '
+            const pkg = require("./package.json");
+            const tag = process.env.TAG;
+            const fail = (m) => { console.error(m); process.exit(1); };
+            if (tag !== `v${pkg.version}`) fail(`the tag is ${tag}, but package.json is at ${pkg.version}: run the Release workflow with the version instead`);
+            const dev = pkg.devDependencies["@tiaforge-ui/sinter"];
+            if (!/^\d+\.\d+\.\d+/.test(dev)) fail(`the devDependency on @tiaforge-ui/sinter is "${dev}": a release is built and tested against a sinter version on npm`);
+          '
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [[ "$TAG" == *-* || "$PRERELEASE" == "true" ]]; then echo "dist-tag=next"; else echo "dist-tag=latest"; fi >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: check
+    if: ${{ !failure() && !cancelled() }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.check.outputs.tag }}
+
+  publish:
+    needs: [check, ci]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # the package ships its sources: nothing to build
+      - name: publish
+        env:
+          DIST_TAG: ${{ needs.check.outputs.dist-tag }}
+          # unset once trusted publishing is configured: npm then uses the OIDC token
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          v=$(node -p 'require("./package.json").version')
+          if npm view "@tiavision/sinter-mail@$v" version >/dev/null 2>&1; then echo "already published"; exit 0; fi
+          npm publish --provenance --access public --tag "$DIST_TAG"
+
+  # workflow_dispatch only: main gets the release commit, and the tag its GitHub release
+  finish:
+    needs: [check, publish]
+    if: ${{ github.event_name == 'workflow_dispatch' && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: main to the release commit
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
+          if git merge-base --is-ancestor HEAD "$TAG"; then
+            git push origin "$TAG^{commit}:refs/heads/main"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git merge --no-ff -m "Merge release $TAG" "$TAG"
+            git push origin HEAD:refs/heads/main
+          fi
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+          DIST_TAG: ${{ needs.check.outputs.dist-tag }}
+        run: |
+          flags=()
+          if [ "$DIST_TAG" = next ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes "${flags[@]}"

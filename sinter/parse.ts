@@ -9,7 +9,7 @@
 // Pure: the same source and options give the same tree, with no globals beyond the language's and
 // `URL`, so sinter runs it at build time over a `file:` resource. The tree is kept with sinter's memo():
 // one parse per source and options, the tree frozen and shared.
-import { parseHTML, resolveStyles } from '@tiaforge-ui/sinter-mail/parser';
+import { parseHTML, resolveStyles } from '@tiavision/sinter-mail/parser';
 import { memo } from '@tiaforge-ui/sinter/memo';
 import type { RawElement, RawNode } from './raw.js';
 import { attr } from './raw.js';

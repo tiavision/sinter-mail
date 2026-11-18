@@ -38,7 +38,7 @@ beforeAll(async () => {
     let error: string | null = null;
     try {
       // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
-    await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'], static: ['index.html'] }) as never], build: { outDir: join(a.root, 'dist'), emptyOutDir: true } });
+    await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiavision/sinter-mail'], static: ['index.html'] }) as never], build: { outDir: join(a.root, 'dist'), emptyOutDir: true } });
     } catch (e) { error = (e as Error).message; }
     const dist = join(a.root, 'dist');
     out[name] = {
