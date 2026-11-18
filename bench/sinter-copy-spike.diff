@@ -1,0 +1,72 @@
+diff --git a/src/runtime/app.ts b/src/runtime/app.ts
+index 596684a..08d40b3 100644
+--- a/src/runtime/app.ts
++++ b/src/runtime/app.ts
+@@ -1010,7 +1010,13 @@ export function mount(root: Document | Element, o: MountOptions): App {
+     for (const rb of rbs) {
+       if (!process(rb, force) || !(F.LIST || F.BRANCH) || !rb.rows) continue;
+       const t = rb.t;
+-      let r = force || !t ? 2 : rowHits.get(t);
++      // SPIKE (copy growth): force 2 renders everything below (an in-place change, a takeover); force 3, a component
++      // whose props were replaced by other values with no change inside them, stops at the components below whose props
++      // did not change: their rows render forced only when their own props changed (`x.f`, set by reconcile or
++      // toggle), else as any row the round's changes reach. A component's markup reads its props, its own state and
++      // what paths track, nothing of the scope above it, so a force from above reaches it only through its props.
++      const bound = force != 2 && !!t?.item?.startsWith('$p');
++      let r = (force && !bound) || !t ? 2 : rowHits.get(t);
+       if (r == null) {
+         r = 0;
+         // a mark counts as "only marked rows" for dependencies on this list's own element; others (outer rows) reach any row
+@@ -1048,7 +1054,7 @@ export function mount(root: Document | Element, o: MountOptions): App {
+         }
+       }
+       // otherwise skip rows no dirty path can reach (unless they moved or changed), and rows created in this round
+-      for (const x of rb.rows) if (x.r != round && (r || x.f)) { walkRow(x, t!, Math.max(force, x.f)); x.f = 0; }
++      for (const x of rb.rows) if (x.r != round && (r || x.f)) { walkRow(x, t!, bound ? x.f : x.f == 2 || force == 2 ? 2 : Math.max(force, x.f)); x.f = 0; }
+       rb.pf = false;
+     }
+   }
+@@ -1066,7 +1072,7 @@ export function mount(root: Document | Element, o: MountOptions): App {
+     const els: Array<Element | null> = fns[t.find!]!(x.first), vals = meta.vals, v = x.v!;
+     for (let j = only < 0 ? 0 : only; j < vals.length; j++) {
+       const [k, b] = vals[j]!, el = els[k], prev = v[j];
+-      if (el && (force == 2 || (force == 1 && b.i) || (b.d && hit(b.d, x.s)))) {
++      if (el && (force >= 2 || (force == 1 && b.i) || (b.d && hit(b.d, x.s)))) {
+         const val = evalB(b, x.s, el, null);
+         if (!Object.is(val, prev)) { write(b, el, val, prev == UNSET ? undefined : prev, prev == UNSET); v[j] = val; }
+       }
+@@ -1076,7 +1082,7 @@ export function mount(root: Document | Element, o: MountOptions): App {
+ 
+   /** Evaluates and writes one binding if needed; false while it waits in a closed dialog. */
+   function process(rb: RB, level: number): boolean {
+-    const force = level == 2 || (level == 1 && !!rb.b.i);
++    const force = level >= 2 || (level == 1 && !!rb.b.i);
+     if (!force && !(deferred.size && deferred.has(rb)) && !(rb.b.d && hit(rb.b.d, rb.s))) return true;
+     // (an anchor's start comment is in its parent element, which a dialog's check reads)
+     if (F.DIALOG && rb.c && waits(rb.el.nodeType == 1 ? rb.el as Element : rb.el.parentElement)) { deferred.add(rb); return false; }
+@@ -1255,10 +1261,13 @@ export function mount(root: Document | Element, o: MountOptions): App {
+     const props = t.item!.startsWith('$p');
+     const reuse = (x: Inst, i: number) => {
+       const item = items[i];
+-      if (x.item !== item && !(props && sameProps(x.item, item) && !inside(rb))) { setRow(x.s, t, (x.item = item), (x.i = i)); x.f = 2; }
++      if (x.item !== item && !(props && sameProps(x.item, item) && !inside(rb))) { setRow(x.s, t, (x.item = item), (x.i = i)); x.f = inside(rb) ? 2 : 3; }
+       else if (x.i != i) { setRow(x.s, t, item, (x.i = i)); if (moved) x.f ||= 1; }
+-      // a computed list's row (`dv`): its item may have changed in place, which only the list depends on
+-      if (t.dv) x.f = 2;
++      // a computed list's row (`dv`): its item may have changed in place, which only the list depends on. SPIKE (copy
++      // growth): a change sinter knows of in place reaches the list from inside (a deeper path, a `**`): then the row
++      // renders forced to the bottom; else (the list's values were replaced) forced, stopping at components whose props
++      // did not change
++      if (t.dv) x.f = inside(rb) ? 2 : x.f == 2 ? 2 : 3;
+       rows[i] = x;
+     };
+     // rows with the same keys at the start and the end stay where they are
+@@ -1357,7 +1366,7 @@ export function mount(root: Document | Element, o: MountOptions): App {
+       // row's bindings that changes reach, as a list's row with the same item. Each render makes a new props
+       // object, so without this a recursive component re-renders its whole subtree whenever any prop's
+       // dependency changes (a tree of 2,000 elements: every binding of every element).
+-      if (ch && x && x.item !== item && !(sameProps(x.item, item) && !inside(rb))) { setRow(x.s, rb.t!, (x.item = item), 0); walkRow(x, rb.t!, 2); }
++      if (ch && x && x.item !== item && !(sameProps(x.item, item) && !inside(rb))) { setRow(x.s, rb.t!, (x.item = item), 0); walkRow(x, rb.t!, inside(rb) ? 2 : 3); }
+       return;
+     }
+     // a wrapper's anchor has no end comment: its branch ends where its row or branch does
