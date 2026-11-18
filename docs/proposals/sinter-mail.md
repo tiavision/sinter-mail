@@ -1,8 +1,93 @@
 # Proposal: sinter-mail, email bodies rendered by sinter templates
 
-Status: proposed. Nothing is built yet. Sections are numbered in the order of the [Plan](#plan); every
-design choice is recorded in [Decisions](#decisions), and what is left depends on measurements
-([Open questions](#open-questions)).
+Status: built (version 0.1, not released), steps 2 to 7 of the [Plan](#plan); the guide is
+[docs/mail.md](../mail.md). It needs changes to sinter, made on its branch `ccr-dc349183-ubeji7`
+([sinter changes](#sinter-changes)). Where the build departs from this text is listed in
+[Implementation status](#implementation-status); the sections below are the design as proposed. Sections are
+numbered in the order of the [Plan](#plan); every design choice is recorded in [Decisions](#decisions).
+
+## Implementation status
+
+Built in one session, the parts in parallel (parser, cascade, plain text, components), each reviewed and
+integrated against the tests; the spike (step 1) was skipped and its questions are answered by measurement
+below.
+
+| Step | State | Where it departs from this text |
+| --- | --- | --- |
+| 1, the spike | skipped | the parser was chosen without it: see section 2 below |
+| 2, tags, types, components | done | the table component, the parts' classes, the dispatch over every tag: section 6 |
+| 3, mail.parse | done | ids and fragment links: section 1 |
+| 4, styles | done | `@media`, the values kept, `text-align`: section 4 |
+| 5, mail.plain | done | as proposed |
+| 6, mail.text, mail.links, slots | done | as proposed |
+| 7, corpus, attacks, browser, docs | partly | a small corpus written for the tests; attacks checked on the tree, not rendered; Chromium only; no screenshot comparison in the tests; no recipe |
+
+### As built, by section
+
+- **1, the tree.** `Body` also has `style`: the email's `<body>` (and `<html>`) style, its text properties and
+  background, rendered on the root. `images.origins` lists every remote image's origin, whatever `images`
+  is. An id is kept only when an in-email `#fragment` link points at it and the email has it (or an
+  `<a name>`); the link then reads `#mail-…`, and the component writes the id with the prefix.
+- **2, parsing.** Our own parser, not parse5 or htmlparser2: the standard's tokenizer and every insertion
+  mode used by documents, foreign content parsed and dropped, `<template>` content parsed and discarded. It
+  equals parse5 on every targeted case and on about 450,000 random documents below the depth bound (256,
+  enforced on the stack, as Blink flattens deep trees). 15.9 kB gzip, 7.3 kB of it the HTML standard's whole
+  entity table, which an HTML parser must decode (parse5 bundled is 46 kB gzip). About 32 ms on a 101 kB
+  newsletter of 2,000 elements, in Node.
+- **3, what is kept.** 71 tags. Unknown elements are a `span` (inline, styled), not unwrapped; a few
+  known ones are renamed (`fieldset`, `legend` to `div`, `menu`, `dir` to `ul`, `big`, `label` to `span`).
+  Table structure is enforced in the tree (a table's children only caption, colgroup and sections, a row's
+  only cells), so the table component can render it with literal tags.
+- **4, styles.** 60 properties. `@media` is evaluated at a width rather than dropped: 800 px (`'wide'`, the
+  default) or 375 px (`'narrow'`), 16 px root font, light colour scheme. The legacy hints follow Chromium's,
+  including `text-align: -webkit-center` for `<center>` and `align=center` (what centres a nested table in
+  Chromium; whether Firefox and Safari read it the same is untested here). Negative margins and text
+  indents are written as 0. A matching budget (8 million steps per resolve) bounds a hostile stylesheet; past
+  it, the rest of the email keeps its hints and inline styles. `test/css.browser.test.ts` compares every
+  property on every element with Chromium's computed style and lists the accepted differences. The cascade
+  resolves in about 19 ms on a 1,756-element newsletter with 300 rules; 16.2 kB gzip.
+- **4, CSP.** An email rendered in the browser needs nothing beyond the policy in the goals: styles are set
+  with `style.setProperty`. An email folded at build time has its styles in `style` attributes, which
+  `style-src 'self'` blocks: it needs `style-src-attr 'unsafe-inline'`. (sinter's own security guide says
+  `style-src 'self'` is enough; that holds only for pages with no `data-sn-style` folded at build time.)
+- **6, components.** The dispatch (`mail-node`) maps every tag, a table part outside a table to
+  `mail-orphan` (which the parse never produces), since indexing the map by the `Tag` union must type-check.
+  `<mail-body>`'s `display: flow-root` depends on the body (`body ? 'flow-root' : null`): a constant style is
+  written into the HTML as an attribute even on pages rendered in the browser, which `style-src 'self'`
+  blocks. The parts' classes (`mail-quote`, `mail-signature`) are bound on `blockquote` and `div` only.
+- **7, three places.** Measured on a 2,005-element newsletter (Chromium, the API's answer to the content
+  painted, median of 7), against Caley's approach (DOMPurify, then a sized iframe) on the same email:
+
+  | Path | Time | Page JS gzip |
+  | --- | --- | --- |
+  | Caley's approach | 74 ms | about 27 kB |
+  | sinter-mail, a tree from the API | 94 ms | 27.1 kB |
+  | sinter-mail, HTML from the API | 143 ms | 61.8 kB |
+  | sinter-mail, a `file:` email | in the first frame | none |
+
+  A bare sinter page is 14.5 kB. A session investigates making the parse and the components smaller and
+  faster (parse5, the entity table, a scoped CSS sink in sinter that would hold the same guarantees);
+  its findings will be in `docs/proposals/sinter-mail-performance.md`.
+
+### sinter changes
+
+The components as first generated added 97.9 kB gzip to a page, and a static build could fold only trees
+about 9 elements deep. Five changes to sinter, on its branch `ccr-dc349183-ubeji7`, each with its tests and
+sinter's full suite passing:
+
+1. **SN503 accepts a choice of literal-prefixed values** (`node.attrs.id ? 'mail-' + node.attrs.id : null`).
+   Before, each tag component held its element twice (with an id, and without), which doubled everything.
+2. **`<sn-component use>` with many candidates is a lookup table**, not a chain of comparisons per candidate,
+   each with its own props: the dispatch is compiled once per place the tree recurses (66 places).
+3. **An element's `data-sn-style` entries are one binding** in the page module, its names listed once per
+   distinct list; the runtime writes the values that changed. Before, each property was a binding and a
+   function of its own, in the page module and again in every row template's creation function.
+4. **Constant data may nest 1,024 levels deep** (was 20) for build-time folding, walked without recursion.
+5. **A component a map names under two keys is one candidate**: the build-time rendering drew it twice.
+
+With them: the components add 15.7 kB gzip instead of 97.9, a 2,012-element tree renders in about 84 to 118
+ms instead of 136 to 180 (Chromium, the same machine; the range is this machine's variance), and the deep
+fixtures fold. sinter-mail depends on that branch through a sibling checkout until it is released.
 
 ## Goals
 
@@ -405,15 +490,21 @@ tree, about 8 MiB of trees kept, the least recently used dropped first.
 
 ## Open questions
 
-- **The parser**: htmlparser2's tokenizer with our tree builder, or trimmed parse5? The target is
-  about 10 kB gzip for HTML and CSS together. Decided by the spike.
-- **The style binding's cost**: is a literal list of 15 to 40 properties per element fast enough on a
-  newsletter of 2,000 elements, and small enough as generated components? If not: properties grouped by
-  how often email sets them, or a smaller list per tag.
-- **`data:` images**: the size bound, and whether to keep them at all.
-- **`media: 'narrow'`**: is 600 px the right width, and should the option be a number?
-- **Outlook's conditional comments**: are there emails whose content is only inside `<!--[if mso]>`?
-  The corpus will tell.
+Answered: the parser (our own; section 2 of the status), the style binding's cost (sinter change 3),
+`media: 'narrow'` (375 px, evaluated rather than chosen by a breakpoint).
+
+- **Size and speed** of the browser path: 47 kB gzip and about twice the iframe's time on a large
+  newsletter. Being investigated (`docs/proposals/sinter-mail-performance.md`).
+- **`data:` images**: kept up to 65,536 characters by default (`dataImages`); whether that is the right bound.
+- **Outlook's conditional comments**: dropped with their content, as the browser treats them; whether
+  emails exist whose content is only inside `<!--[if mso]>` needs a corpus of real mail.
+- **Firefox and Safari**: the cascade writes `-webkit-center` and `-webkit-left`/`-right` as Chromium's
+  hints do; the tests run in Chromium only.
+- **Reconstruction of formatting elements** can make the tree much larger than its input (many distinct
+  unclosed formatting elements, re-created after each block), as in browsers; a budget on the tree's
+  size would bound it.
+- **sinter's expansion budget** (10,000 rows and components per page at build time): a very large email
+  folded at build time renders in the browser instead (SN536).
 
 ## Later
 

@@ -1,0 +1,1343 @@
+{
+ "type": "body",
+ "style": {
+  "background-color": "rgb(238, 238, 238)",
+  "font-family": "Arial, sans-serif",
+  "color": "rgb(34, 34, 34)"
+ },
+ "images": {
+  "origins": [
+   "https://cdn.example"
+  ]
+ },
+ "children": [
+  {
+   "type": "element",
+   "tag": "center",
+   "attrs": {},
+   "style": {
+    "text-align": "center"
+   },
+   "children": [
+    {
+     "type": "element",
+     "tag": "table",
+     "attrs": {
+      "id": "top"
+     },
+     "style": {
+      "width": "600px",
+      "max-width": "100%",
+      "background-color": "rgb(255, 255, 255)",
+      "margin-left": "auto",
+      "margin-right": "auto",
+      "border-collapse": "separate",
+      "border-spacing": "0px",
+      "table-layout": "fixed",
+      "text-align": "left"
+     },
+     "children": [
+      {
+       "type": "element",
+       "tag": "tbody",
+       "attrs": {},
+       "style": {},
+       "children": [
+        {
+         "type": "element",
+         "tag": "tr",
+         "attrs": {},
+         "style": {},
+         "children": [
+          {
+           "type": "element",
+           "tag": "td",
+           "attrs": {},
+           "style": {
+            "padding-top": "8px",
+            "padding-right": "12px",
+            "padding-bottom": "8px",
+            "padding-left": "12px",
+            "vertical-align": "top",
+            "background-color": "rgb(0, 51, 102)",
+            "color": "rgb(255, 255, 255)"
+           },
+           "children": [
+            {
+             "type": "element",
+             "tag": "img",
+             "attrs": {
+              "alt": "Acme Weekly",
+              "width": "200",
+              "height": "50"
+             },
+             "style": {
+              "display": "block",
+              "border-top-width": "0px",
+              "width": "200px",
+              "height": "50px"
+             },
+             "children": []
+            },
+            {
+             "type": "element",
+             "tag": "h1",
+             "attrs": {
+              "lang": "en"
+             },
+             "style": {
+              "font-size": "24px",
+              "margin-top": "0px",
+              "margin-bottom": "0px"
+             },
+             "children": [
+              {
+               "type": "text",
+               "value": "Acme "
+              },
+              {
+               "type": "element",
+               "tag": "span",
+               "attrs": {},
+               "style": {
+                "color": "rgb(255, 204, 0)"
+               },
+               "children": [
+                {
+                 "type": "text",
+                 "value": "Weekly"
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "type": "element",
+         "tag": "tr",
+         "attrs": {},
+         "style": {},
+         "children": [
+          {
+           "type": "element",
+           "tag": "td",
+           "attrs": {},
+           "style": {
+            "padding-top": "8px",
+            "padding-right": "12px",
+            "padding-bottom": "8px",
+            "padding-left": "12px",
+            "vertical-align": "top"
+           },
+           "children": [
+            {
+             "type": "element",
+             "tag": "header",
+             "attrs": {},
+             "style": {},
+             "children": [
+              {
+               "type": "element",
+               "tag": "h2",
+               "attrs": {},
+               "style": {
+                "font-size": "20px"
+               },
+               "children": [
+                {
+                 "type": "text",
+                 "value": "This week"
+                }
+               ]
+              },
+              {
+               "type": "element",
+               "tag": "nav",
+               "attrs": {},
+               "style": {},
+               "children": [
+                {
+                 "type": "element",
+                 "tag": "a",
+                 "attrs": {
+                  "href": "https://example.com/news"
+                 },
+                 "style": {
+                  "color": "rgb(0, 102, 204)",
+                  "text-decoration": "none"
+                 },
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "News"
+                  }
+                 ]
+                },
+                {
+                 "type": "text",
+                 "value": " | "
+                },
+                {
+                 "type": "element",
+                 "tag": "a",
+                 "attrs": {
+                  "href": "#mail-bottom",
+                  "title": "To the end"
+                 },
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "Skip"
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "type": "element",
+             "tag": "main",
+             "attrs": {},
+             "style": {},
+             "children": [
+              {
+               "type": "element",
+               "tag": "article",
+               "attrs": {},
+               "style": {},
+               "children": [
+                {
+                 "type": "element",
+                 "tag": "h3",
+                 "attrs": {},
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "A "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "em",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "short"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": " story"
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "p",
+                 "attrs": {
+                  "dir": "ltr"
+                 },
+                 "style": {
+                  "line-height": "1.5",
+                  "margin-top": "0px",
+                  "margin-bottom": "12px"
+                 },
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "Text with "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "strong",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "strong"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "i",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "italic"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "u",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "underlined"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "s",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "struck"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "strike",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "strike"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", H"
+                  },
+                  {
+                   "type": "element",
+                   "tag": "sub",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "2"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": "O, x"
+                  },
+                  {
+                   "type": "element",
+                   "tag": "sup",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "2"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "mark",
+                   "attrs": {},
+                   "style": {
+                    "background-color": "rgb(255, 255, 0)"
+                   },
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "marked"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "code",
+                   "attrs": {},
+                   "style": {
+                    "font-family": "monospace"
+                   },
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "code"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "kbd",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "Ctrl"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "samp",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "out"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "var",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "x"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "tt",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "tt"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "dfn",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "term"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "cite",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "A Book"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "q",
+                   "attrs": {
+                    "cite": "https://example.com/q"
+                   },
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "quoted"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "bdi",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "bdi"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "bdo",
+                   "attrs": {
+                    "dir": "rtl"
+                   },
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "bdo"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "time",
+                   "attrs": {
+                    "datetime": "2026-11-17"
+                   },
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "today"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", "
+                  },
+                  {
+                   "type": "element",
+                   "tag": "font",
+                   "attrs": {},
+                   "style": {
+                    "color": "rgb(204, 0, 0)",
+                    "font-size": "13px"
+                   },
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "font"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "text",
+                   "value": ", long"
+                  },
+                  {
+                   "type": "element",
+                   "tag": "wbr",
+                   "attrs": {},
+                   "style": {},
+                   "children": []
+                  },
+                  {
+                   "type": "text",
+                   "value": "word."
+                  },
+                  {
+                   "type": "element",
+                   "tag": "br",
+                   "attrs": {},
+                   "style": {},
+                   "children": []
+                  },
+                  {
+                   "type": "text",
+                   "value": "After a break."
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "h4",
+                 "attrs": {},
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "Lists"
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "ul",
+                 "attrs": {
+                  "type": "square"
+                 },
+                 "style": {
+                  "padding-left": "20px",
+                  "list-style-type": "square"
+                 },
+                 "children": [
+                  {
+                   "type": "element",
+                   "tag": "li",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "one"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "element",
+                   "tag": "li",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "two"
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "ol",
+                 "attrs": {
+                  "start": "3",
+                  "reversed": "",
+                  "type": "a"
+                 },
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "element",
+                   "tag": "li",
+                   "attrs": {
+                    "value": "5"
+                   },
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "five"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "element",
+                   "tag": "li",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "four"
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "dl",
+                 "attrs": {},
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "element",
+                   "tag": "dt",
+                   "attrs": {},
+                   "style": {
+                    "font-weight": "700"
+                   },
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "Term"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "element",
+                   "tag": "dd",
+                   "attrs": {},
+                   "style": {
+                    "margin-left": "20px"
+                   },
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "Definition"
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "h5",
+                 "attrs": {},
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "Prices"
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "table",
+                 "attrs": {},
+                 "style": {
+                  "width": "100%",
+                  "border-collapse": "collapse",
+                  "border-spacing": "0px"
+                 },
+                 "children": [
+                  {
+                   "type": "element",
+                   "tag": "caption",
+                   "attrs": {},
+                   "style": {
+                    "caption-side": "bottom",
+                    "font-size": "12px",
+                    "color": "rgb(102, 102, 102)"
+                   },
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "Prices in "
+                    },
+                    {
+                     "type": "element",
+                     "tag": "abbr",
+                     "attrs": {
+                      "title": "Euro"
+                     },
+                     "style": {},
+                     "children": [
+                      {
+                       "type": "text",
+                       "value": "EUR"
+                      }
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "type": "element",
+                   "tag": "colgroup",
+                   "attrs": {
+                    "span": "2"
+                   },
+                   "style": {
+                    "width": "50%"
+                   },
+                   "children": [
+                    {
+                     "type": "element",
+                     "tag": "col",
+                     "attrs": {},
+                     "style": {
+                      "background-color": "rgb(250, 250, 250)"
+                     },
+                     "children": []
+                    },
+                    {
+                     "type": "element",
+                     "tag": "col",
+                     "attrs": {
+                      "span": "1"
+                     },
+                     "style": {
+                      "width": "50%"
+                     },
+                     "children": []
+                    }
+                   ]
+                  },
+                  {
+                   "type": "element",
+                   "tag": "thead",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "element",
+                     "tag": "tr",
+                     "attrs": {},
+                     "style": {},
+                     "children": [
+                      {
+                       "type": "element",
+                       "tag": "th",
+                       "attrs": {
+                        "scope": "col",
+                        "abbr": "Item"
+                       },
+                       "style": {
+                        "padding-top": "8px",
+                        "padding-right": "12px",
+                        "padding-bottom": "8px",
+                        "padding-left": "12px",
+                        "vertical-align": "top",
+                        "text-align": "left"
+                       },
+                       "children": [
+                        {
+                         "type": "text",
+                         "value": "Item"
+                        }
+                       ]
+                      },
+                      {
+                       "type": "element",
+                       "tag": "th",
+                       "attrs": {
+                        "scope": "col"
+                       },
+                       "style": {
+                        "padding-top": "8px",
+                        "padding-right": "12px",
+                        "padding-bottom": "8px",
+                        "padding-left": "12px",
+                        "vertical-align": "top",
+                        "text-align": "right"
+                       },
+                       "children": [
+                        {
+                         "type": "text",
+                         "value": "Price"
+                        }
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "type": "element",
+                   "tag": "tbody",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "element",
+                     "tag": "tr",
+                     "attrs": {},
+                     "style": {},
+                     "children": [
+                      {
+                       "type": "element",
+                       "tag": "td",
+                       "attrs": {
+                        "headers": "h1"
+                       },
+                       "style": {
+                        "padding-top": "8px",
+                        "padding-right": "12px",
+                        "padding-bottom": "8px",
+                        "padding-left": "12px",
+                        "vertical-align": "top"
+                       },
+                       "children": [
+                        {
+                         "type": "element",
+                         "tag": "b",
+                         "attrs": {},
+                         "style": {},
+                         "children": [
+                          {
+                           "type": "text",
+                           "value": "Tea"
+                          }
+                         ]
+                        },
+                        {
+                         "type": "text",
+                         "value": " "
+                        },
+                        {
+                         "type": "element",
+                         "tag": "small",
+                         "attrs": {},
+                         "style": {},
+                         "children": [
+                          {
+                           "type": "text",
+                           "value": "(loose)"
+                          }
+                         ]
+                        }
+                       ]
+                      },
+                      {
+                       "type": "element",
+                       "tag": "td",
+                       "attrs": {},
+                       "style": {
+                        "padding-top": "8px",
+                        "padding-right": "12px",
+                        "padding-bottom": "8px",
+                        "padding-left": "12px",
+                        "vertical-align": "top",
+                        "text-align": "right"
+                       },
+                       "children": [
+                        {
+                         "type": "text",
+                         "value": "4,50"
+                        }
+                       ]
+                      }
+                     ]
+                    },
+                    {
+                     "type": "element",
+                     "tag": "tr",
+                     "attrs": {},
+                     "style": {
+                      "background-color": "rgb(245, 245, 245)"
+                     },
+                     "children": [
+                      {
+                       "type": "element",
+                       "tag": "td",
+                       "attrs": {
+                        "colspan": "2",
+                        "rowspan": "1"
+                       },
+                       "style": {
+                        "padding-top": "8px",
+                        "padding-right": "12px",
+                        "padding-bottom": "8px",
+                        "padding-left": "12px",
+                        "vertical-align": "top"
+                       },
+                       "children": [
+                        {
+                         "type": "element",
+                         "tag": "del",
+                         "attrs": {
+                          "datetime": "2026-01-01"
+                         },
+                         "style": {},
+                         "children": [
+                          {
+                           "type": "text",
+                           "value": "old"
+                          }
+                         ]
+                        },
+                        {
+                         "type": "text",
+                         "value": " "
+                        },
+                        {
+                         "type": "element",
+                         "tag": "ins",
+                         "attrs": {
+                          "datetime": "2026-02-01"
+                         },
+                         "style": {},
+                         "children": [
+                          {
+                           "type": "text",
+                           "value": "new"
+                          }
+                         ]
+                        }
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "type": "element",
+                   "tag": "tfoot",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "element",
+                     "tag": "tr",
+                     "attrs": {},
+                     "style": {},
+                     "children": [
+                      {
+                       "type": "element",
+                       "tag": "td",
+                       "attrs": {},
+                       "style": {
+                        "padding-top": "8px",
+                        "padding-right": "12px",
+                        "padding-bottom": "8px",
+                        "padding-left": "12px",
+                        "vertical-align": "top"
+                       },
+                       "children": [
+                        {
+                         "type": "text",
+                         "value": "Total"
+                        }
+                       ]
+                      },
+                      {
+                       "type": "element",
+                       "tag": "td",
+                       "attrs": {},
+                       "style": {
+                        "padding-top": "8px",
+                        "padding-right": "12px",
+                        "padding-bottom": "8px",
+                        "padding-left": "12px",
+                        "vertical-align": "top",
+                        "text-align": "right",
+                        "font-weight": "700"
+                       },
+                       "children": [
+                        {
+                         "type": "text",
+                         "value": "4,50"
+                        }
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "h6",
+                 "attrs": {},
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "More"
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "figure",
+                 "attrs": {},
+                 "style": {
+                  "margin-left": "0px"
+                 },
+                 "children": [
+                  {
+                   "type": "element",
+                   "tag": "img",
+                   "attrs": {
+                    "src": "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+                    "alt": "A pixel",
+                    "width": "1",
+                    "height": "1"
+                   },
+                   "style": {},
+                   "children": []
+                  },
+                  {
+                   "type": "element",
+                   "tag": "figcaption",
+                   "attrs": {},
+                   "style": {
+                    "font-style": "italic"
+                   },
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "A kept image"
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "details",
+                 "attrs": {
+                  "open": ""
+                 },
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "element",
+                   "tag": "summary",
+                   "attrs": {},
+                   "style": {},
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "Details"
+                    }
+                   ]
+                  },
+                  {
+                   "type": "element",
+                   "tag": "pre",
+                   "attrs": {},
+                   "style": {
+                    "white-space": "pre-wrap"
+                   },
+                   "children": [
+                    {
+                     "type": "text",
+                     "value": "  preformatted\n  text"
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "hr",
+                 "attrs": {},
+                 "style": {
+                  "border-top-width": "1px",
+                  "border-top-style": "solid",
+                  "border-top-color": "rgb(204, 204, 204)"
+                 },
+                 "children": []
+                }
+               ]
+              },
+              {
+               "type": "element",
+               "tag": "section",
+               "attrs": {},
+               "style": {},
+               "children": [
+                {
+                 "type": "element",
+                 "tag": "aside",
+                 "attrs": {},
+                 "style": {
+                  "float": "right",
+                  "width": "150px"
+                 },
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "Aside"
+                  }
+                 ]
+                },
+                {
+                 "type": "element",
+                 "tag": "p",
+                 "attrs": {},
+                 "style": {
+                  "clear": "both"
+                 },
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "A section."
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "type": "element",
+             "tag": "blockquote",
+             "attrs": {
+              "cite": "https://example.com/original"
+             },
+             "style": {
+              "margin-left": "0px",
+              "padding-left": "12px",
+              "border-left-width": "3px",
+              "border-left-style": "solid",
+              "border-left-color": "rgb(204, 204, 204)"
+             },
+             "part": "quote",
+             "children": [
+              {
+               "type": "element",
+               "tag": "p",
+               "attrs": {},
+               "style": {},
+               "children": [
+                {
+                 "type": "text",
+                 "value": "A quoted reply."
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "type": "element",
+             "tag": "div",
+             "attrs": {},
+             "style": {
+              "font-size": "12px",
+              "color": "rgb(102, 102, 102)"
+             },
+             "part": "signature",
+             "children": [
+              {
+               "type": "text",
+               "value": "-- "
+              },
+              {
+               "type": "element",
+               "tag": "br",
+               "attrs": {},
+               "style": {},
+               "children": []
+              },
+              {
+               "type": "text",
+               "value": "Ada, Acme"
+              }
+             ]
+            },
+            {
+             "type": "element",
+             "tag": "footer",
+             "attrs": {},
+             "style": {
+              "padding-top": "16px",
+              "text-align": "center"
+             },
+             "children": [
+              {
+               "type": "element",
+               "tag": "address",
+               "attrs": {},
+               "style": {},
+               "children": [
+                {
+                 "type": "text",
+                 "value": "Acme, 1 Main St."
+                }
+               ]
+              },
+              {
+               "type": "element",
+               "tag": "p",
+               "attrs": {
+                "id": "bottom"
+               },
+               "style": {},
+               "children": [
+                {
+                 "type": "element",
+                 "tag": "a",
+                 "attrs": {
+                  "href": "#mail-top"
+                 },
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "Back to top"
+                  }
+                 ]
+                },
+                {
+                 "type": "text",
+                 "value": " · "
+                },
+                {
+                 "type": "element",
+                 "tag": "a",
+                 "attrs": {
+                  "href": "mailto:news@example.com"
+                 },
+                 "style": {},
+                 "children": [
+                  {
+                   "type": "text",
+                   "value": "Unsubscribe"
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
