@@ -32,12 +32,12 @@ npm ci
 
 ## Releasing
 
-A GitHub release publishes the package: Releases → Draft a new release → tag `v<the version in
-package.json>` (made on publish, from `main`) → Publish release. The [Release workflow](.github/workflows/release.yml)
-checks that the tag is the package's version and that it builds against a sinter from npm, runs CI on the
-tagged commit, and publishes to npm with a provenance attestation. A pre-release (`0.2.0-rc.1`, or "Set as a
-pre-release") goes out under the `next` dist-tag. For the next version, `npm version 0.2.0 --no-git-tag-version`,
-commit and merge, then release `v0.2.0`.
+From GitHub's UI: Actions → Release → Run workflow (on `main`) → the version. The [Release
+workflow](.github/workflows/release.yml) sets package.json to it, commits and tags `v<version>`, checks that
+the package builds against a sinter from npm, runs CI on the tag, publishes to npm with a provenance
+attestation, then moves `main` to the release commit and makes the GitHub release. A pre-release
+(`0.2.0-rc.1`) goes out under the `next` dist-tag. Publishing a GitHub release for an existing tag
+`v<the version in package.json>` runs the same checks and publish.
 
 The first release waits for sinter 0.20.0 on npm, with the changes above. Then:
 
@@ -46,7 +46,7 @@ The first release waits for sinter 0.20.0 on npm, with the changes above. Then:
 2. Once: the `release` environment (Settings → Environments) with the secret `NPM_TOKEN`, a granular npm
    token that may publish under `@tiavision`. Trusted publishing can only be set up for a package that
    exists, so the first publish uses it.
-3. Release `v0.1.0`.
+3. Run the Release workflow with `0.1.0`.
 4. On npmjs.com, `@tiavision/sinter-mail` → Settings → Trusted publishing → GitHub Actions:
    `tiavision/sinter-mail`, workflow `release.yml`, environment `release`; then "disallow tokens" under
    publishing access, delete `NPM_TOKEN` and revoke the token. Later releases need no secret.
