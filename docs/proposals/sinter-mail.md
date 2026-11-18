@@ -42,8 +42,8 @@ below.
   default) or 375 px (`'narrow'`), 16 px root font, light colour scheme. The legacy hints follow Chromium's,
   including `text-align: -webkit-center` for `<center>` and `align=center` (what centres a nested table in
   Chromium; whether Firefox and Safari read it the same is untested here). Negative margins and text
-  indents are written as 0. A matching budget (8 million steps per resolve) bounds a hostile stylesheet; past
-  it, the rest of the email keeps its hints and inline styles. `test/css.browser.test.ts` compares every
+  indents are written as 0. A matching budget (2 million steps per resolve) and a cap of 10,000 author rules
+  bound a hostile stylesheet; past them, the rest of the email keeps its hints and inline styles. `test/css.browser.test.ts` compares every
   property on every element with Chromium's computed style and lists the accepted differences. The cascade
   resolves in about 19 ms on a 1,756-element newsletter with 300 rules; 16.2 kB gzip.
 - **4, CSP.** An email rendered in the browser needs nothing beyond the policy in the goals: styles are set

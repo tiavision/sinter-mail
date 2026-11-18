@@ -20,15 +20,8 @@ is checked.
 
 ## Status
 
-Version 0.1, not released. It needs sinter's `main` (tiaforge/sinter), which has the changes made for this
-library (#76, #77 and #78, after 0.19.0); until those are released, the package develops against a sibling
-checkout (`"@tiaforge-ui/sinter": "file:../sinter"`), which CI checks out and builds too:
-
-```sh
-git clone https://github.com/tiaforge/sinter ../sinter
-(cd ../sinter && npm ci && npm run build)
-npm ci
-```
+Version 0.1. It needs sinter 0.20.0 or later, the first release with the changes made for this library
+(tiaforge/sinter#76, #77 and #78); `sinter check` says so (SN537) when an app has an older one.
 
 ## Releasing
 
@@ -40,17 +33,15 @@ GitHub release and deletes the branch. A run that fails before the tag leaves no
 (`0.2.0-rc.1`) goes out under the `next` dist-tag. Publishing a GitHub release for an existing tag
 `v<the version in package.json>` runs the same checks and publish.
 
-The first release waits for sinter 0.20.0 on npm, with the changes above. Then:
+Publishing needs, once:
 
-1. `"@tiaforge-ui/sinter": "0.20.0"` in `devDependencies` and `">=0.20.0 <1"` in `peerDependencies` (before
-   that, `sinter check` rejects the range: SN537), `npm install`, and the Status above; commit and merge.
-2. Once: the `release` environment (Settings → Environments) with the secret `NPM_TOKEN`, a granular npm
-   token that may publish under `@tiavision`. Trusted publishing can only be set up for a package that
-   exists, so the first publish uses it.
-3. Run the Release workflow with `0.1.0`.
-4. On npmjs.com, `@tiavision/sinter-mail` → Settings → Trusted publishing → GitHub Actions:
-   `tiavision/sinter-mail`, workflow `release.yml`, environment `release`; then "disallow tokens" under
-   publishing access, delete `NPM_TOKEN` and revoke the token. Later releases need no secret.
+- Before the first release: the `release` environment (Settings → Environments) with the secret `NPM_TOKEN`, a
+  granular npm token that may publish under `@tiavision`. Trusted publishing can only be set up for a package
+  that exists, so the first publish uses it.
+- After it: `@tiavision/sinter-mail` → Settings → Trusted publishing → GitHub Actions: `tiavision/sinter-mail`,
+  workflow `release.yml`, environment `release`, allowed to publish (the workflow runs `npm publish`; a
+  publisher that may only stage is refused, with a 404). Then delete `NPM_TOKEN` and revoke the token: later
+  releases need no secret.
 
 ## The package
 

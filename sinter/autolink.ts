@@ -66,9 +66,13 @@ function linkAt(s: string, i: number, start: string): [number, string] | null {
   return [end, www ? 'http://' + s.slice(i, end) : s.slice(i, end)];
 }
 
-/** `s` split at its autolinks: text runs (never empty) and links, in order */
-export function autolink(s: string): Piece[] {
+/**
+ * `s` split at its autolinks: text runs (never empty) and links, in order. Past `max` links, the rest of `s`
+ * is text.
+ */
+export function autolink(s: string, max = Infinity): Piece[] {
   const out: Piece[] = [];
+  if (max <= 0) return s ? [s] : [];
   // a fresh regex per call: its lastIndex is the scan's state
   const scan = new RegExp(SCAN.source, SCAN.flags);
   let pos = 0, m: RegExpExecArray | null;
@@ -87,6 +91,7 @@ export function autolink(s: string): Piece[] {
     if (i > pos) out.push(s.slice(pos, i));
     out.push({ href: r[1], text: s.slice(i, r[0]) });
     pos = r[0];
+    if (--max <= 0) break;
   }
   if (pos < s.length) out.push(s.slice(pos));
   return out;
