@@ -8,4 +8,4 @@
 //   helpers either way: they render early and fold at build time.
 export { parse } from './parse.js';
 export { plain } from './plain.js';
-export { text, links } from './tree.js';
+export { text, links, progressive } from './tree.js';

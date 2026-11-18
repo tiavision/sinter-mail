@@ -1,0 +1,12 @@
+<!--
+  mail-body-progressive: <mail-body>, for a long body from an API: the first part of it in the task that
+  receives it, the rest once the browser has painted that. Public.
+  <mail-body-progressive data-sn-prop="{ body: mail.progressive(tree) }"></mail-body-progressive>
+  A body that mail.progressive numbered renders its first `body.head` nodes (200 by default), then, once
+  the browser has painted them, the rest (mail-body-progressive.ts raises `upto`). The rows already
+  rendered are kept: the tree's objects are the same, and rows match by item. Only an element the limit
+  cuts through gets it as a prop; the others get 1e9. A body that is not numbered renders whole, as in
+  <mail-body>. It has a script, so a page that uses it ships JavaScript: use <mail-body> on a static page.
+  The same slots as <mail-body>: `link` and `image`.
+-->
+<template data-sn-component="{ body?: Body | null; link: Slot<{ node: Element }>; image: Slot<{ node: Element }> }"><div class="mail" data-sn-state="{ of: null, upto: 1e9 }" data-sn-let="{ limit: body && body.head ? (of === body ? upto : body.head) : 1e9 }" data-sn-style="{ display: body ? 'flow-root' : null, color: body?.style.color, 'font-family': body?.style['font-family'], 'font-size': body?.style['font-size'], 'font-style': body?.style['font-style'], 'font-weight': body?.style['font-weight'], 'font-variant': body?.style['font-variant'], 'line-height': body?.style['line-height'], 'letter-spacing': body?.style['letter-spacing'], 'word-spacing': body?.style['word-spacing'], 'text-align': body?.style['text-align'], 'text-decoration': body?.style['text-decoration'], 'text-transform': body?.style['text-transform'], 'text-indent': body?.style['text-indent'], 'white-space': body?.style['white-space'], 'word-break': body?.style['word-break'], 'overflow-wrap': body?.style['overflow-wrap'], 'background-color': body?.style['background-color'] }"><template data-sn-for="c in body ? (limit < 1e9 ? body.children.filter((y) => y.n < limit) : body.children) : []"><template data-sn-if="c.type === 'text'"><template data-sn-text="c.value"></template></template><template data-sn-else><mail-node data-sn-prop="{ node: c, limit: c.z >= limit ? limit : 1e9 }"></mail-node></template></template></div></template>

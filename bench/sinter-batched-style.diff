@@ -1,0 +1,70 @@
+diff --git a/src/runtime/app.ts b/src/runtime/app.ts
+index 62da406..d851974 100644
+--- a/src/runtime/app.ts
++++ b/src/runtime/app.ts
+@@ -7,7 +7,9 @@ import { config, SinterError, type Middleware } from './config.js';
+ import { envOf, type Env } from './env.js';
+ import { prefetched } from './handoff.js';
+ import { createRequestLayer, isAbort, readBody, toError, type RequestLayer, type SendInit } from './request.js';
+-import { schemesOf, STYLE_BAD, urlAllowed } from './security.js';
++import { declSafe, schemesOf, STYLE_BAD, urlAllowed } from './security.js';
++/** PROTOTYPE switch for measuring: `?nobatch` in the page URL writes styles property by property, as before. */
++const BATCH_STYLE = !(typeof location == 'object' && /[?&]nobatch\b/.test(location.search));
+ import { expand, readUrl as readFrom, withParams } from './url.js';
+ // the parts of the core this build's pages use (a site's build serves its own: src/core-parts.ts)
+ import * as F from './flags.js';
+@@ -597,6 +599,25 @@ export function mount(root: Document | Element, o: MountOptions): App {
+     g: F.STYLE ? (el: HTMLElement, g: number, v: any, prev?: any) => {
+       const names = ir.sg![g]!;
+       const fresh = !prev && !el.hasAttribute('style');
++      // PROTOTYPE (batched style): a first write to an element with no inline style is one declaration
++      // block, `style.cssText` (CSSOM, which `style-src` does not block, as setProperty), instead of a
++      // setProperty call per set entry. The names are the compiler's literals; each value is checked
++      // as setProperty's are (STYLE_BAD) and must stand alone as one declaration's value (declSafe);
++      // one that does not is written with setProperty after the block.
++      if (fresh && BATCH_STYLE) {
++        let css = '', rest: number[] | null = null;
++        for (let i = 0; i < names.length; i++) {
++          const x = v?.[i];
++          if (x == null || x === false) continue;
++          const sx = '' + x;
++          if (STYLE_BAD.test(sx)) { warn(8, names[i], sx); continue; }
++          if (declSafe(sx)) css += names[i] + ':' + sx + ';';
++          else (rest ??= []).push(i);
++        }
++        if (css) el.style.cssText = css;
++        if (rest) for (const i of rest) W.s!(el, names[i]!, v[i]);
++        return;
++      }
+       for (let i = 0; i < names.length; i++) {
+         const x = v?.[i];
+         if (fresh ? x != null && x !== false : !prev || !Object.is(x, prev[i])) W.s!(el, names[i]!, x);
+diff --git a/src/runtime/security.ts b/src/runtime/security.ts
+index 696e10f..ce2832e 100644
+--- a/src/runtime/security.ts
++++ b/src/runtime/security.ts
+@@ -43,3 +43,24 @@ export function urlAllowed(el: Element, name: string, value: string, base: strin
+ /** Style values that could load URLs. */
+ export const STYLE_BAD = /url\(|image(-set)?\(|\\/i;
+ 
++
++/**
++ * Whether a style value (already past STYLE_BAD) stays one declaration's value when written into a
++ * declaration block (`style.cssText`), as `setProperty` would take it alone: nothing that ends the
++ * declaration or the block (`;`, `{`, `}`), no `!` (`!important`), no comment, and its quotes and
++ * parentheses closed, so that what follows it in the block is not read as part of it. A value that is
++ * not is written with `setProperty` instead.
++ */
++export function declSafe(v: string): boolean {
++  if (!/[;{}!"'()]|\/\*/.test(v)) return true;
++  if (/[;{}!]|\/\*/.test(v)) return false;
++  let depth = 0, q = '';
++  for (let i = 0; i < v.length; i++) {
++    const c = v[i]!;
++    if (q) { if (c == q) q = ''; }
++    else if (c == '"' || c == "'") q = c;
++    else if (c == '(') depth++;
++    else if (c == ')' && --depth < 0) return false;
++  }
++  return !q && !depth;
++}

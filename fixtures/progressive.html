@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>@tiaforge-ui/sinter-mail: a long tree from an API, rendered in two tasks</title>
+</head>
+<body>
+  <!-- The API numbers the tree (mail.progressive on the server); the page could do it as well -->
+  <sn-resource name="message" src="/api/message" type="Body"></sn-resource>
+  <main>
+    <mail-body-progressive id="message" data-sn-prop="{ body: message }"></mail-body-progressive>
+  </main>
+</body>
+</html>

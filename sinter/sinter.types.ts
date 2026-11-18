@@ -66,6 +66,8 @@ export type Property =
 export interface Text {
   type: 'text';
   value: string;
+  /** (<mail-body-progressive>) the node's index in document order, set by mail.progressive */
+  n?: number;
 }
 
 export interface Element {
@@ -76,6 +78,9 @@ export interface Element {
   /** what the element is in the message: a quoted reply, the signature (mail.plain sets them) */
   part?: 'quote' | 'signature';
   children: Node[];
+  /** (<mail-body-progressive>) the node's index in document order, and the last index in its subtree (mail.progressive) */
+  n?: number;
+  z?: number;
 }
 
 export type Node = Element | Text;
@@ -86,6 +91,8 @@ export interface Body {
   style: Style;
   children: Node[];
   images: ImageInfo;
+  /** (<mail-body-progressive>) render the nodes with an index below this first, the rest after a paint (mail.progressive) */
+  head?: number;
 }
 
 export interface ImageInfo {

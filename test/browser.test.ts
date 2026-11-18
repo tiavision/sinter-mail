@@ -29,6 +29,7 @@ const BIG_COUNT = [...BIG.children.flatMap((c) => [...elements(c)])].length;
 // the API page, the same page without the components (for the bundle's size), the static page
 const apps = {
   api: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>', HEAD) }),
+  progressive: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body-progressive id="message" data-sn-prop="{ body: message }"></mail-body-progressive></main>', HEAD) }),
   plain: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><p id="message" data-sn-text="message.type"></p></main>', HEAD) }),
   static: app({ 'tree.json': STATIC, 'index.html': page('<sn-resource name="mail" src="file:./tree.json" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: mail }"></mail-body></main>') }),
 };
@@ -73,7 +74,7 @@ async function tab(): Promise<{ page: Page; violations: () => Promise<string[]>;
 
 const dist = (a: keyof typeof apps) => join(apps[a].root, 'dist');
 beforeAll(async () => {
-  for (const name of ['api', 'plain'] as const) {
+  for (const name of ['api', 'progressive', 'plain'] as const) {
     // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
     await build({ root: apps[name].root, logLevel: 'silent', plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'] }) as never], build: { outDir: dist(name), emptyOutDir: true } });
   }
@@ -188,3 +189,32 @@ test(`measured: a newsletter of ${BIG_COUNT} elements from the API, and the page
   ].join('\n'));
   expect(median).toBeLessThan(5000);
 }, 180_000);
+
+test('a long tree that mail.progressive numbered: the first part paints first, then the page is what <mail-body> renders', async () => {
+  const { progressive } = await import('../sinter/tree.js');
+  const big = newsletter(2000);
+  const html = async (app: 'api' | 'progressive', tree: Body) => {
+    message = JSON.stringify(tree);
+    const { page: p, violations, errors } = await tab();
+    // the first frame with the email in it: how many of its elements it holds
+    await p.addInitScript(() => {
+      const w = window as unknown as { __first: number };
+      const look = () => { const n = document.querySelectorAll('#message *').length; if (n) w.__first = n; else requestAnimationFrame(look); };
+      requestAnimationFrame(look);
+    });
+    await p.goto(await serve(dist(app)));
+    await p.waitForFunction((n) => document.querySelectorAll('#message *').length === n, BIG_COUNT, { polling: 50 });
+    const out = await p.$eval('#message', (m) => m.innerHTML.replace(/<!--[^>]*-->/g, ''));
+    const first = await p.evaluate(() => (window as unknown as { __first: number }).__first);
+    expect(await violations()).toEqual([]);
+    expect(errors).toEqual([]);
+    await p.close();
+    return { first, out };
+  };
+  const whole = await html('api', big), parts = await html('progressive', progressive(structuredClone(big), 200));
+  expect(whole.first).toBe(BIG_COUNT);
+  expect(parts.first).toBeLessThan(200);
+  expect(parts.out).toBe(whole.out);
+  // a tree that is not numbered renders whole, in one task
+  expect((await html('progressive', big)).first).toBe(BIG_COUNT);
+}, 120_000);

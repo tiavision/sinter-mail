@@ -13,6 +13,6 @@ test('the fixture pages check with no error and no warning', () => {
   const r = spawnSync(process.execPath, [join(PKG, 'node_modules/@tiaforge-ui/sinter/dist/cli.js'), 'check', '--strict'], { cwd: PKG, encoding: 'utf8' });
   const out = r.stdout + r.stderr;
   expect(out.split('\n').filter((l) => / (error|warning) SN\d+/.test(l))).toEqual([]);
-  expect(out).toMatch(/sinter check --strict: 3 page\(s\), 0 error\(s\), 0 warning\(s\)/);
+  expect(out).toMatch(/sinter check --strict: 4 page\(s\), 0 error\(s\), 0 warning\(s\)/);
   expect(r.status).toBe(0);
 }, 300_000);
