@@ -1,0 +1,144 @@
+diff --git a/src/runtime/app.ts b/src/runtime/app.ts
+index 596684a..5facac8 100644
+--- a/src/runtime/app.ts
++++ b/src/runtime/app.ts
+@@ -294,6 +294,14 @@ export interface App {
+    * in a text field, so a resource URL it changes waits for a pause
+    */
+   mark(path: number | string, scope?: any, typing?: boolean): void;
++  /**
++   * SPIKE (identity changes): `objs` were changed in place (a child appended to `children`, a field set). The
++   * component instances whose props hold one of them render again, and the components inside them only where
++   * their props changed. A caller that changes something deep marks the object and its ancestors.
++   */
++  changed(...objs: object[]): void;
++  /** SPIKE: touched objects no component held (a change the identity pass could not place) */
++  readonly idMisses: number;
+   flush(): void;
+   /**
+    * Runs `fn`, a server event's changes: what it marks is rendered before the next frame is painted
+@@ -614,6 +622,45 @@ export function mount(root: Document | Element, o: MountOptions): App {
+ 
+   /** Elements written through callbacks (`$.$m(row, …)`) since the last flush. */
+   const marked = new Set<unknown>();
++  /** SPIKE (identity changes): objects changed in place since the last flush (`app.changed`) */
++  const touched = new Set<object>();
++  /** SPIKE: by object, the rows of component definitions and choice cases whose props hold it */
++  const holders = new WeakMap<object, Array<[Inst, TemplateDef]>>();
++  /** SPIKE: an identity pass is running: a forced walk stops at a component whose props did not change */
++  let idPass = false;
++  /** SPIKE: `?noid` in the page URL: `changed` renders the whole page again, forced (what an in-place change costs without the index) */
++  const NOID = typeof location == 'object' && /[?&]noid\b/.test(location.search);
++  const hold = (x: Inst, t: TemplateDef, item: any) => {
++    if (!t.item?.startsWith('$p') || !item || typeof item != 'object') return;
++    for (const k in item) {
++      const v = item[k];
++      if (v && typeof v == 'object') { let a = holders.get(v); if (!a) holders.set(v, (a = [])); a.push([x, t]); }
++    }
++  };
++  const holds = (item: any, o: object) => { if (item && typeof item == 'object') for (const k in item) if (item[k] === o) return true; return false; };
++  /** SPIKE: the identity pass of a flush round: each touched object's holders render again */
++  const identity = () => {
++    const objs = [...touched];
++    touched.clear();
++    if (NOID) { walk(rootRbs, 2); return; }
++    idPass = true;
++    try {
++      for (const o of objs) {
++        const a = holders.get(o);
++        if (!a) { idMisses++; continue; }
++        let w = 0;
++        for (const e of a) {
++          const [x, t] = e;
++          // a row that left the page, or whose props no longer hold the object: dropped from the index
++          if (!x.first?.isConnected || !holds(x.item, o)) continue;
++          a[w++] = e;
++          if (x.r != round) { walkRow(x, t, 2); x.r = round; }
++        }
++        a.length = w;
++      }
++    } finally { idPass = false; }
++  };
++  let idMisses = 0;
+   /** Per flush round: how dirty paths reach a template's rows (0 not, 1 only marked elements, 2 any row). */
+   let rowHits = new Map<TemplateDef, number>();
+   /** Per flush round: the rows of a template the round's changes select by their index (null: any row). */
+@@ -797,6 +844,12 @@ export function mount(root: Document | Element, o: MountOptions): App {
+         if (!framed) { framed = true; env.frame(() => { framed = false; if (!scheduled && dirty.length) app.flush(); }); }
+       } else { scheduled = true; env.queueMicrotask(app.flush); }
+     },
++    get idMisses() { return idMisses; },
++    changed(...objs) {
++      for (const o of objs) touched.add(o);
++      dirty.push({ w: -1, v: [] });
++      if (!scheduled && !flushing) { scheduled = true; env.queueMicrotask(app.flush); }
++    },
+     streamed(fn) {
+       streaming++;
+       try { fn(); } finally { streaming--; }
+@@ -817,6 +870,7 @@ export function mount(root: Document | Element, o: MountOptions): App {
+           index(cur);
+           for (const l of loaders) { const k = hits(l.def.deps); if (k) l.changed(k == 1); }
+           walk(rootRbs, 0);
++          if (touched.size) identity();
+           syncSelects();
+           for (const h of app.afterFlush) h(cur);
+         }
+@@ -1010,7 +1064,9 @@ export function mount(root: Document | Element, o: MountOptions): App {
+     for (const rb of rbs) {
+       if (!process(rb, force) || !(F.LIST || F.BRANCH) || !rb.rows) continue;
+       const t = rb.t;
+-      let r = force || !t ? 2 : rowHits.get(t);
++      // SPIKE: in the identity pass, a component's row is forced only when its props changed (`x.f`)
++      const bound = idPass && !!t?.item?.startsWith('$p');
++      let r = (force && !bound) || !t ? 2 : rowHits.get(t);
+       if (r == null) {
+         r = 0;
+         // a mark counts as "only marked rows" for dependencies on this list's own element; others (outer rows) reach any row
+@@ -1048,7 +1104,7 @@ export function mount(root: Document | Element, o: MountOptions): App {
+         }
+       }
+       // otherwise skip rows no dirty path can reach (unless they moved or changed), and rows created in this round
+-      for (const x of rb.rows) if (x.r != round && (r || x.f)) { walkRow(x, t!, Math.max(force, x.f)); x.f = 0; }
++      for (const x of rb.rows) if (x.r != round && (r || x.f)) { walkRow(x, t!, bound ? x.f : Math.max(force, x.f)); x.f = 0; }
+       rb.pf = false;
+     }
+   }
+@@ -1255,7 +1311,7 @@ export function mount(root: Document | Element, o: MountOptions): App {
+     const props = t.item!.startsWith('$p');
+     const reuse = (x: Inst, i: number) => {
+       const item = items[i];
+-      if (x.item !== item && !(props && sameProps(x.item, item) && !inside(rb))) { setRow(x.s, t, (x.item = item), (x.i = i)); x.f = 2; }
++      if (x.item !== item && !(props && sameProps(x.item, item) && !inside(rb))) { setRow(x.s, t, (x.item = item), (x.i = i)); x.f = 2; hold(x, t, item); }
+       else if (x.i != i) { setRow(x.s, t, item, (x.i = i)); if (moved) x.f ||= 1; }
+       // a computed list's row (`dv`): its item may have changed in place, which only the list depends on
+       if (t.dv) x.f = 2;
+@@ -1292,7 +1348,7 @@ export function mount(root: Document | Element, o: MountOptions): App {
+     for (let i = a; i < ne; i++) {
+       const o = byKey.get(keys[i]);
+       if (o != null && !used[o - a]) { used[o - a] = 1; seq.push(o); reuse(old[o]!, i); }
+-      else { seq.push(-1); rows[i] = instantiate(tpl, t, scopes?.[i] ?? setRow(Object.create(rb.s), t, items[i], i), keys[i], items[i], i, undefined, inPlace, rb); }
++      else { seq.push(-1); rows[i] = instantiate(tpl, t, scopes?.[i] ?? setRow(Object.create(rb.s), t, items[i], i), keys[i], items[i], i, undefined, inPlace, rb); hold(rows[i]!, t, items[i]); }
+     }
+     // collect the nodes of rows that go or move before the DOM changes
+     const keep = lis(seq), moving = new Map<Inst, Node[]>(), gone: number[] = [];
+@@ -1357,7 +1413,7 @@ export function mount(root: Document | Element, o: MountOptions): App {
+       // row's bindings that changes reach, as a list's row with the same item. Each render makes a new props
+       // object, so without this a recursive component re-renders its whole subtree whenever any prop's
+       // dependency changes (a tree of 2,000 elements: every binding of every element).
+-      if (ch && x && x.item !== item && !(sameProps(x.item, item) && !inside(rb))) { setRow(x.s, rb.t!, (x.item = item), 0); walkRow(x, rb.t!, 2); }
++      if (ch && x && x.item !== item && !(sameProps(x.item, item) && !inside(rb))) { setRow(x.s, rb.t!, (x.item = item), 0); hold(x, rb.t!, item); walkRow(x, rb.t!, 2); }
+       return;
+     }
+     // a wrapper's anchor has no end comment: its branch ends where its row or branch does
+@@ -1392,7 +1448,9 @@ export function mount(root: Document | Element, o: MountOptions): App {
+     // an if's branch adds no names to the scope (a choice's case adds its props): it reads its anchor's own
+     const ch = rb.b.k == 'ch', t = ir.templates[ch ? rb.b.c![br - 1]! : br == 1 ? rb.b.x! : rb.b.z!]!, s = ch ? Object.create(rb.s) : rb.s;
+     if (ch) setRow(s, (rb.t = t), item, 0);
+-    return (rb.rows = [instantiate(tplOf(t.id), t, s, ch ? keyOf(t, item, s) : '', ch ? item : null, 0, nodes, at, rb)])[0]!;
++    const x = (rb.rows = [instantiate(tplOf(t.id), t, s, ch ? keyOf(t, item, s) : '', ch ? item : null, 0, nodes, at, rb)])[0]!;
++    if (ch) hold(x, t, item);
++    return x;
+   }
+ 
+   /**
