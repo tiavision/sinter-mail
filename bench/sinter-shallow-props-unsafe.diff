@@ -1,0 +1,36 @@
+diff --git a/src/runtime/app.ts b/src/runtime/app.ts
+index 62da406..3996a63 100644
+--- a/src/runtime/app.ts
++++ b/src/runtime/app.ts
+@@ -8,6 +8,16 @@ import { envOf, type Env } from './env.js';
+ import { prefetched } from './handoff.js';
+ import { createRequestLayer, isAbort, readBody, toError, type RequestLayer, type SendInit } from './request.js';
+ import { schemesOf, STYLE_BAD, urlAllowed } from './security.js';
++/** PROTOTYPE switch for measuring: `?deep` in the page URL forces a choice's row on every new props object, as before. */
++const SHALLOW = !(typeof location == 'object' && /[?&]deep\b/.test(location.search));
++/** Two props objects of the same keys whose values are each the same (Object.is). */
++const sameProps = (a: any, b: any): boolean => {
++  if (!a || !b || typeof a != 'object' || typeof b != 'object') return false;
++  const ka = Object.keys(a);
++  if (ka.length != Object.keys(b).length) return false;
++  for (const k of ka) if (!Object.is(a[k], b[k])) return false;
++  return true;
++};
+ import { expand, readUrl as readFrom, withParams } from './url.js';
+ // the parts of the core this build's pages use (a site's build serves its own: src/core-parts.ts)
+ import * as F from './flags.js';
+@@ -1322,7 +1332,13 @@ export function mount(root: Document | Element, o: MountOptions): App {
+     }
+     if (br == rb.br) {
+       const x = rb.rows?.[0];
+-      if (ch && x && x.item !== item) { setRow(x.s, rb.t!, (x.item = item), 0); walkRow(x, rb.t!, 2); }
++      // PROTOTYPE: the same case again with props that are each the same value (a new props object of the same
++      // values, as every evaluation makes) walks its row unforced, as a list's row with the same item: only what
++      // the round's changes reach renders again (an in-place change under a prop still does)
++      if (ch && x && x.item !== item) {
++        if (SHALLOW && sameProps(x.item, item)) walkRow(x, rb.t!, 0);
++        else { setRow(x.s, rb.t!, (x.item = item), 0); walkRow(x, rb.t!, 2); }
++      }
+       return;
+     }
+     // a wrapper's anchor has no end comment: its branch ends where its row or branch does

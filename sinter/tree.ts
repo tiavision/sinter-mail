@@ -120,3 +120,29 @@ export function links(body: Body | null | undefined): LinkInfo[] {
   }
   return out;
 }
+
+/**
+ * PROTOTYPE (progressive rendering): numbers the nodes of `body` in document order (`n`; `z` on an
+ * element: the last number in its subtree) and sets `body.head`, so that <mail-body> renders the first
+ * `head` nodes in one task and the rest after the browser has painted them. In place, without
+ * recursion; returns `body`. A tree without it renders whole, as before (a `file:` email, folded at
+ * build time, stays whole).
+ */
+export function progressive(body: Body, head = 200): Body {
+  let i = 0;
+  const stack: Array<[Element, number]> = [];
+  const visit = (list: Node[]) => { for (let k = list.length; k--;) stack.push([list[k] as Element, 0]); };
+  visit(body.children);
+  while (stack.length) {
+    const top = stack[stack.length - 1]!;
+    const [n, state] = top;
+    if (state === 0) {
+      n.n = i++;
+      if (n.type !== 'element') { stack.pop(); continue; }
+      top[1] = 1;
+      visit(n.children);
+    } else { n.z = i - 1; stack.pop(); }
+  }
+  body.head = head;
+  return body;
+}
