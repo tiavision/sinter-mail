@@ -1,11 +1,16 @@
 {
-  "name": "@tiaforge-ui/sinter-mail",
+  "name": "@tiavision/sinter-mail",
   "version": "0.1.0",
   "description": "Email bodies for sinter: HTML and plain-text mail parsed into a tree that folds at build time, rendered by mail-* components without an iframe.",
   "license": "MIT",
+  "author": "Tia Heinrich",
+  "homepage": "https://github.com/tiavision/sinter-mail#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tiavision/sinter-mail.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tiavision/sinter-mail/issues"
   },
   "keywords": [
     "sinter",
@@ -25,6 +30,7 @@
   },
   "files": [
     "sinter",
+    "!sinter/sinter.components.d.ts",
     "docs",
     "llms.txt",
     "README.md"

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # the Release workflow runs it on the release's tag before publishing
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Playwright's image, as sinter's CI: the browsers of this Playwright version, no apt-get. Keep the tag at
+    # the version in package-lock.json
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --ipc=host
+    env:
+      HOME: /root
+      # in the image, localhost is ::1 first: a dev server would listen there while fetch() connects to 127.0.0.1
+      NODE_OPTIONS: --dns-result-order=ipv4first
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sinter-mail
+      # While the devDependency on sinter is `file:../sinter`, sinter's main is checked out and built beside
+      # this repository (README.md, Status); once it is a version on npm, `npm ci` installs that
+      - id: sinter
+        working-directory: sinter-mail
+        run: |
+          if node -e 'process.exit(require("./package.json").devDependencies["@tiaforge-ui/sinter"].startsWith("file:") ? 0 : 1)'; then
+            echo "sibling=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.sinter.outputs.sibling
+        uses: actions/checkout@v4
+        with:
+          repository: tiaforge/sinter
+          path: sinter
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sinter-mail/package-lock.json
+      - if: steps.sinter.outputs.sibling
+        working-directory: sinter
+        run: npm ci && npm run build
+      - working-directory: sinter-mail
+        run: npm ci
+      # the generated files are what tags.ts and the entity tables make
+      - working-directory: sinter-mail
+        run: npm run build:components -- --check && npm run build:entities -- --check
+      - working-directory: sinter-mail
+        run: npx sinter check
+      - working-directory: sinter-mail
+        run: npm run typecheck
+      # the image has the browsers; this does nothing unless package-lock.json moved past its version
+      - working-directory: sinter-mail
+        run: npx playwright install chromium
+      - working-directory: sinter-mail
+        run: npm test

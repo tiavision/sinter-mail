@@ -91,7 +91,7 @@ fixtures fold. sinter-mail depends on that branch through a sibling checkout unt
 
 ## Goals
 
-`@tiaforge-ui/sinter-mail` shows the body of an email in a sinter app, the way
+`@tiavision/sinter-mail` shows the body of an email in a sinter app, the way
 [sinter-markdown](https://github.com/tiaforge/sinter/tree/main/packages/sinter-markdown) shows markdown:
 
 - **No iframe.** The email is part of the page: it scrolls, sizes, selects and prints with it, and the
@@ -152,8 +152,8 @@ Everything below exists in sinter 0.19 and is used as it is:
   `mailto:`, `tel:`, relative; `data:` and `blob:` only in media `src`).
 - **`data-sn-style`** with literal property names, set with `style.setProperty`; `null` removes the
   property; a value with `url(`, `image(`, `image-set(` or a backslash is refused at runtime.
-- **Lazy packages**: `sinter({ lazy: ['@tiaforge-ui/sinter-mail'] })` covers the package's subpaths, so
-  the parser, imported as `@tiaforge-ui/sinter-mail/parser`, loads on first need; a helper module that
+- **Lazy packages**: `sinter({ lazy: ['@tiavision/sinter-mail'] })` covers the package's subpaths, so
+  the parser, imported as `@tiavision/sinter-mail/parser`, loads on first need; a helper module that
   does not import it stays an ordinary helper.
 
 What sinter does not have, and this proposal does not add: a way to bind a stylesheet, a `<style>`, a
@@ -162,7 +162,7 @@ What sinter does not have, and this proposal does not add: a way to bind a style
 ## The package
 
 ```
-package.json              @tiaforge-ui/sinter-mail, "sinter": "./sinter", exports ".", "./parser"
+package.json              @tiavision/sinter-mail, "sinter": "./sinter", exports ".", "./parser"
 sinter/
   components/
     mail-body.html        public: one body, HTML or plain text
@@ -189,7 +189,7 @@ The prefix is `mail-`, the namespace an app writes `mail`:
 
 ```ts
 // src/sinter.helpers.ts
-export * as mail from '@tiaforge-ui/sinter-mail';
+export * as mail from '@tiavision/sinter-mail';
 ```
 
 ```html

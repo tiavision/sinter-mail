@@ -1,5 +1,5 @@
 // The tree that mail.parse (HTML) and mail.plain (plain text) return, and that <mail-body> renders. An app
-// names these in its own declarations (`export type { Body } from '@tiaforge-ui/sinter-mail'` in its
+// names these in its own declarations (`export type { Body } from '@tiavision/sinter-mail'` in its
 // src/sinter.types.ts); an API that runs the parse on the server sends this tree as JSON.
 //
 // Every element is one the browser's own parser would build from the same HTML, restricted to the tags

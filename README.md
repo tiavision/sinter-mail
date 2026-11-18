@@ -1,4 +1,4 @@
-# @tiaforge-ui/sinter-mail
+# @tiavision/sinter-mail
 
 Email for [sinter](https://github.com/tiaforge/sinter): a parser, `mail.parse`, that turns an email's HTML
 body into a tree, `mail.plain` for plain-text bodies, and a component, `<mail-body>`, that renders the tree
@@ -22,13 +22,34 @@ is checked.
 
 Version 0.1, not released. It needs sinter's `main` (tiaforge/sinter), which has the changes made for this
 library (#76, #77 and #78, after 0.19.0); until those are released, the package develops against a sibling
-checkout (`"@tiaforge-ui/sinter": "file:../sinter"`):
+checkout (`"@tiaforge-ui/sinter": "file:../sinter"`), which CI checks out and builds too:
 
 ```sh
 git clone https://github.com/tiaforge/sinter ../sinter
 (cd ../sinter && npm ci && npm run build)
 npm ci
 ```
+
+## Releasing
+
+A GitHub release publishes the package: Releases → Draft a new release → tag `v<the version in
+package.json>` (made on publish, from `main`) → Publish release. The [Release workflow](.github/workflows/release.yml)
+checks that the tag is the package's version and that it builds against a sinter from npm, runs CI on the
+tagged commit, and publishes to npm with a provenance attestation. A pre-release (`0.2.0-rc.1`, or "Set as a
+pre-release") goes out under the `next` dist-tag. For the next version, `npm version 0.2.0 --no-git-tag-version`,
+commit and merge, then release `v0.2.0`.
+
+The first release waits for sinter 0.20.0 on npm, with the changes above. Then:
+
+1. `"@tiaforge-ui/sinter": "0.20.0"` in `devDependencies` and `">=0.20.0 <1"` in `peerDependencies` (before
+   that, `sinter check` rejects the range: SN537), `npm install`, and the Status above; commit and merge.
+2. Once: the `release` environment (Settings → Environments) with the secret `NPM_TOKEN`, a granular npm
+   token that may publish under `@tiavision`. Trusted publishing can only be set up for a package that
+   exists, so the first publish uses it.
+3. Release `v0.1.0`.
+4. On npmjs.com, `@tiavision/sinter-mail` → Settings → Trusted publishing → GitHub Actions:
+   `tiavision/sinter-mail`, workflow `release.yml`, environment `release`; then "disallow tokens" under
+   publishing access, delete `NPM_TOKEN` and revoke the token. Later releases need no secret.
 
 ## The package
 
@@ -42,7 +63,7 @@ sinter/
   sinter.types.ts         the tree's types: what apps and the components name
   tags.ts                 the tag table: tags, their attributes, the properties each binds, what is dropped
   parse.ts                mail.parse: options, the tree from the raw document and the resolved styles
-  engine.ts               what mail.parse runs, behind `@tiaforge-ui/sinter-mail/parser`: parser and cascade
+  engine.ts               what mail.parse runs, behind `@tiavision/sinter-mail/parser`: parser and cascade
   parser/                 the HTML parser: the standard's tokenizer and tree construction; entities.ts generated
   css/                    the cascade: tokenizer, selectors, media, values, legacy hints
   raw.ts                  the raw tree between the parser and the cascade
@@ -84,7 +105,7 @@ docs/                     the guide and the proposals
   `file:` email. `mail.parse` keeps its trees with sinter's `memo()`; its options are normalized to
   primitives first, so equal policies share a tree.
 - **The parser is behind its own specifier.** `parse.ts` imports the parser and the cascade as
-  `@tiaforge-ui/sinter-mail/parser`, so an app that lists the package in `sinter({ lazy })` loads them on
+  `@tiavision/sinter-mail/parser`, so an app that lists the package in `sinter({ lazy })` loads them on
   demand; `plain.ts` and `tree.ts` import neither and stay ordinary helpers.
 
 ## Changing it

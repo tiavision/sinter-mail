@@ -1,0 +1,76 @@
+name: Release
+
+# Publishes @tiavision/sinter-mail to npm when a GitHub release is published (Releases → Draft a new
+# release → tag v<version in package.json> → Publish). Nothing is published unless the tag is the
+# package's version, it builds against a sinter from npm, and CI passes on the tagged commit. A
+# pre-release (0.2.0-rc.1, or "Set as a pre-release") goes out under the `next` dist-tag.
+#
+# No long-lived token: npm trusts this workflow through GitHub's OIDC token (trusted publishing) and
+# records a provenance attestation. The publish job runs in the `release` environment, so required
+# reviewers set there approve a release before it goes out. Before the package exists on npm, trusted
+# publishing cannot be set up for it: the first publish uses the NPM_TOKEN secret of that environment
+# (a granular token for this package), which can be deleted once the trusted publisher is configured.
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      dist-tag: ${{ steps.check.outputs.dist-tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          node -e '
+            const pkg = require("./package.json");
+            const tag = process.env.TAG;
+            const fail = (m) => { console.error(m); process.exit(1); };
+            if (tag !== `v${pkg.version}`) fail(`the tag is ${tag}, but package.json is at ${pkg.version}: bump it (npm version <x.y.z>), push, and release v<that version>`);
+            const dev = pkg.devDependencies["@tiaforge-ui/sinter"];
+            if (!/^\d+\.\d+\.\d+/.test(dev)) fail(`the devDependency on @tiaforge-ui/sinter is "${dev}": a release is built and tested against a sinter version on npm`);
+          '
+          if [[ "$TAG" == *-* || "$PRERELEASE" == "true" ]]; then echo "dist-tag=next"; else echo "dist-tag=latest"; fi >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: check
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: [check, ci]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # the package ships its sources: nothing to build
+      - name: publish
+        env:
+          DIST_TAG: ${{ needs.check.outputs.dist-tag }}
+          # empty once trusted publishing is configured: npm then uses the OIDC token
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          v=$(node -p 'require("./package.json").version')
+          if npm view "@tiavision/sinter-mail@$v" version >/dev/null 2>&1; then echo "already published"; exit 0; fi
+          npm publish --provenance --access public --tag "$DIST_TAG"

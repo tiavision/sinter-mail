@@ -10,8 +10,8 @@ export const PKG = resolve(import.meta.dirname, '..');
 /** the sinter this package is tested against: the one installed beside it */
 export const SINTER = realpathSync(join(PKG, 'node_modules/@tiaforge-ui/sinter'));
 
-const HELPERS = "export * as mail from '@tiaforge-ui/sinter-mail';\n";
-const TYPES = "export type { Body, Element } from '@tiaforge-ui/sinter-mail';\n";
+const HELPERS = "export * as mail from '@tiavision/sinter-mail';\n";
+const TYPES = "export type { Body, Element } from '@tiavision/sinter-mail';\n";
 
 /** a new app folder with `files` written into it; `remove()` deletes it */
 export function app(files: Record<string, string | Uint8Array>): { root: string; remove: () => void } {
@@ -22,7 +22,8 @@ export function app(files: Record<string, string | Uint8Array>): { root: string;
     writeFileSync(join(root, f), s);
   }
   mkdirSync(join(root, 'node_modules/@tiaforge-ui'), { recursive: true });
-  symlinkSync(PKG, join(root, 'node_modules/@tiaforge-ui/sinter-mail'), 'dir');
+  mkdirSync(join(root, 'node_modules/@tiavision'), { recursive: true });
+  symlinkSync(PKG, join(root, 'node_modules/@tiavision/sinter-mail'), 'dir');
   symlinkSync(SINTER, join(root, 'node_modules/@tiaforge-ui/sinter'), 'dir');
   return { root, remove: () => rmSync(root, { recursive: true, force: true }) };
 }

@@ -1,6 +1,6 @@
 # Email
 
-`@tiaforge-ui/sinter-mail` shows the body of an email in a sinter app, without an iframe. `mail.parse`
+`@tiavision/sinter-mail` shows the body of an email in a sinter app, without an iframe. `mail.parse`
 turns an email's HTML into a tree, `mail.plain` does the same for a plain-text email, and `<mail-body>`
 renders the tree as part of the page: it scrolls, selects, searches and prints with it, and takes the
 page's fonts where the email sets none.
@@ -18,7 +18,7 @@ its box. The rest of this page says what is kept, how it looks, and what the app
 ## Setup
 
 ```sh
-npm install @tiaforge-ui/sinter-mail
+npm install @tiavision/sinter-mail
 ```
 
 ```js
@@ -27,16 +27,16 @@ import { defineConfig } from 'vite';
 import sinter from '@tiaforge-ui/sinter/vite';
 
 export default defineConfig({
-  plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'] })],
+  plugins: [sinter({ components: ['@tiavision/sinter-mail'] })],
 });
 ```
 
 ```ts
 // src/sinter.helpers.ts: the helpers, as the namespace `mail`
-export * as mail from '@tiaforge-ui/sinter-mail';
+export * as mail from '@tiavision/sinter-mail';
 
 // src/sinter.types.ts: the tree's types, for your own declarations
-export type { Body, Element } from '@tiaforge-ui/sinter-mail';
+export type { Body, Element } from '@tiavision/sinter-mail';
 ```
 
 sinter-mail needs a sinter with the changes made for it (the branch `ccr-dc349183-ubeji7` of
@@ -57,7 +57,7 @@ To make the parser lazy, list the package in `lazy`; a let that calls `mail.pars
 parser has arrived, and `<mail-body>` with no body renders an empty `<div class="mail">`:
 
 ```js
-sinter({ components: ['@tiaforge-ui/sinter-mail'], lazy: ['@tiaforge-ui/sinter-mail'] })
+sinter({ components: ['@tiavision/sinter-mail'], lazy: ['@tiavision/sinter-mail'] })
 ```
 
 `mail.plain`, `mail.text` and `mail.links` live in modules that do not import the parser, so they stay
