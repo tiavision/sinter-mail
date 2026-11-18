@@ -20,12 +20,12 @@ is checked.
 
 ## Status
 
-Version 0.1, not released. It needs sinter's branch `ccr-dc349183-ubeji7` (tiaforge/sinter), which has the
-changes made for this library; until those are released, the package develops against a sibling checkout
-(`"@tiaforge-ui/sinter": "file:../sinter"`):
+Version 0.1, not released. It needs sinter's `main` (tiaforge/sinter), which has the changes made for this
+library (#76, #77 and #78, after 0.19.0); until those are released, the package develops against a sibling
+checkout (`"@tiaforge-ui/sinter": "file:../sinter"`):
 
 ```sh
-git clone -b ccr-dc349183-ubeji7 https://github.com/tiaforge/sinter ../sinter
+git clone https://github.com/tiaforge/sinter ../sinter
 (cd ../sinter && npm ci && npm run build)
 npm ci
 ```
@@ -37,8 +37,8 @@ package.json              "sinter": "./sinter", exports ".", "./parser" (the laz
 sinter/
   components/
     mail-body.html        public: one body, and the slots an app fills (`link`, `image`)
-    mail-body-progressive.html, .ts   public: a long body in two tasks (mail.progressive numbers it)
-    internal/             generated from tags.ts: one component per tag, the dispatch, the table
+    internal/             generated from tags.ts: one component per tag, the dispatch, the table, the
+                          steps of a progressive render (mail-steps.ts beside it)
   sinter.types.ts         the tree's types: what apps and the components name
   tags.ts                 the tag table: tags, their attributes, the properties each binds, what is dropped
   parse.ts                mail.parse: options, the tree from the raw document and the resolved styles

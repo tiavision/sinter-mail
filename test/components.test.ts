@@ -25,13 +25,13 @@ test('the Tag union of sinter.types.ts is the table\'s tags', () => {
 });
 
 test('one component per tag that renders on its own, the dispatch and the orphan: no other file', () => {
-  expect(internal).toEqual([...own.map((t) => `mail-${t}.html`), 'mail-node.html', 'mail-orphan.html'].sort());
+  expect(internal).toEqual([...own.map((t) => `mail-${t}.html`), 'mail-node.html', 'mail-orphan.html', 'mail-steps.html'].sort());
   // a table's parts have no component: mail-table renders them
   for (const t of inTable) expect(internal).not.toContain(`mail-${t}.html`);
 });
 
 test('mail-node maps every tag: its own component, or a table part to mail-orphan; it is the only choice', () => {
-  const use = /<sn-component use="\{ ([^}]*) \}\[node\.tag\]" data-sn-prop="\{ node, limit \}"><\/sn-component>/.exec(read(join(DIR, 'internal/mail-node.html')))![1]!;
+  const use = /<sn-component use="\{ ([^}]*) \}\[node\.tag\]" data-sn-prop="\{ node \}"><\/sn-component>/.exec(read(join(DIR, 'internal/mail-node.html')))![1]!;
   const map = Object.fromEntries(use.split(', ').map((e) => e.split(': ')).map(([k, v]) => [k!.replace(/'/g, ''), v!.slice(1, -1)]));
   expect(Object.keys(map).sort()).toEqual(tags);
   for (const t of own) expect(map[t]).toBe(`mail-${t}`);
@@ -43,7 +43,7 @@ test('mail-node maps every tag: its own component, or a table part to mail-orpha
 test('each component renders its own tag as its root (a link and an image inside their slot)', () => {
   for (const t of own) {
     const m = markup(join(DIR, 'internal', `mail-${t}.html`));
-    const root = /^<template data-sn-component="\{ node: Element; limit: number \}">([\s\S]*)<\/template>\n$/.exec(m)![1]!;
+    const root = /^<template data-sn-component="\{ node: Element \}">([\s\S]*)<\/template>\n$/.exec(m)![1]!;
     const inner = t === 'a' ? /^<slot name="link" data-sn-prop="\{ node \}">([\s\S]*)<\/slot>$/.exec(root)![1]! : t === 'img' ? /^<slot name="image" data-sn-prop="\{ node \}">([\s\S]*)<\/slot>$/.exec(root)![1]! : root;
     // the element itself, its id bound only when it has one
     expect(inner, t).toMatch(new RegExp(`^<${t}[ >]`));
@@ -55,10 +55,10 @@ test('each component renders its own tag as its root (a link and an image inside
 });
 
 test('every loop over children renders text runs itself and passes every other node to mail-node', () => {
-  // the children: all of them, or (<mail-body-progressive>) those below the limit on an element the limit cuts through
-  const KIDS = String.raw`body \? body\.children : \[\]|body \? \(limit < 1e9 \? body\.children\.filter\(\(y\) => y\.n < limit\) : body\.children\) : \[\]|(\w+)\.z >= limit \? \2\.children\.filter\(\(y\) => y\.n < limit\) : \2\.children`;
-  // a child gets the limit only when the limit cuts through it (<mail-body>: none, 1e9)
-  const RUN = new RegExp(String.raw`<template data-sn-for="(\w+) in (?:${KIDS})"><template data-sn-if="\1\.type === 'text'"><template data-sn-text="\1\.value"><\/template><\/template><template data-sn-else><mail-node data-sn-prop="\{ node: \1, limit: (?:1e9|\1\.z >= limit \? limit : 1e9) \}"><\/mail-node><\/template><\/template>`, 'g');
+  // the children, keyed by the node's number (mail.progressive) or else their position: an element's, or <mail-body>'s
+  // (the body's, or in a progressive render the step's tree)
+  const KIDS = String.raw`body \? body\.children : \[\]|shown \? shown\.children : \[\]|\w+\.children`;
+  const RUN = new RegExp(String.raw`<template data-sn-for="\((\w+), \1i\) in (?:${KIDS})" data-sn-key="\1\.n \?\? \1i"><template data-sn-if="\1\.type === 'text'"><template data-sn-text="\1\.value"><\/template><\/template><template data-sn-else><mail-node data-sn-prop="\{ node: \1 \}"><\/mail-node><\/template><\/template>`, 'g');
   let loops = 0;
   for (const f of files) {
     const src = read(f);

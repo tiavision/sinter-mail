@@ -31,3 +31,9 @@ export const INIT = () => {
   new MutationObserver(() => { const t = performance.now(); if (!window.__first) window.__first = t; window.__last = t; })
     .observe(document, { subtree: true, childList: true, attributes: true });
 };
+/** an app from a files map (index.html and any src/ files), built with sinter-mail's components */
+export async function buildFiles(files) {
+  const a = app(files);
+  await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiaforge-ui/sinter-mail'] })], build: { outDir: join(a.root, 'dist'), emptyOutDir: true, minify: !process.env.NOMIN } });
+  return a;
+}

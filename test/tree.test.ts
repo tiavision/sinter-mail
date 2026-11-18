@@ -82,6 +82,16 @@ test('mail.progressive numbers the nodes in document order, each element with th
   const [div, c] = b.children as unknown as [{ n: number; z: number; children: Array<{ n: number; z?: number; children?: Array<{ n: number }> }> }, { n: number }];
   expect([div.n, div.z, div.children[0]!.n, div.children[1]!.n, div.children[1]!.z, div.children[1]!.children![0]!.n, c.n]).toEqual([0, 3, 1, 2, 3, 3, 4]);
   expect(b.head).toBe(3);
+  // the body up to node 3 (nodes 0 to 2): the elements node 3 is in are copies (the outer one, the inner one without
+  // its text), the text before it is the same object
+  const first = (b as unknown as { first: typeof body }).first;
+  expect(first.children).toHaveLength(1);
+  const outer = first.children[0] as unknown as { n: number; children: Array<{ n: number; children?: unknown[] }> };
+  expect(outer).not.toBe(div);
+  expect(outer.n).toBe(0);
+  expect(outer.children[0]).toBe(div.children[0]);
+  expect(outer.children[1]).not.toBe(div.children[1]);
+  expect([outer.children[1]!.n, outer.children[1]!.children]).toEqual([2, []]);
   // deep trees: no recursion
   let deep: any = { type: 'text', value: 'x' };
   for (let i = 0; i < 50_000; i++) deep = { type: 'element', tag: 'span', attrs: {}, style: {}, children: [deep] };

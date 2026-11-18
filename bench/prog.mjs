@@ -9,7 +9,10 @@ const plainTree = make();
 const COUNT = plainTree.children.flatMap((c) => [...elements(c)]).length;
 const MSG = { plain: JSON.stringify(plainTree), prog: JSON.stringify(progressive(make(), +head)) };
 let cur = 'plain';
+// plain: <mail-body> with the tree as it is; prog: the same component with the tree mail.progressive numbered
 const a = await buildApi(); const srv = await serve(a.root + '/dist', () => MSG[cur]);
+const ap = await buildApi('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>');
+const srvp = await serve(ap.root + '/dist', () => MSG[cur]);
 const b = await launch();
 const INIT = () => {
   window.__last = 0; window.__long = 0; let prev = 0; const f = (t) => { if (prev && window.__api) window.__long = Math.max(window.__long, t - prev); prev = t; requestAnimationFrame(f); }; requestAnimationFrame(f);
@@ -21,19 +24,19 @@ const res = Object.fromEntries(VARIANTS.map((v) => [v, []])); const doms = {};
 for (let r = 0; r < +runs; r++) for (const v of VARIANTS) {
   const [tree, q] = v.split(':'); cur = tree;
   const p = await b.newPage(); await p.addInitScript(INIT);
-  await p.goto(srv.url + (q ? '?' + q : ''));
-  await p.waitForFunction((n) => document.querySelectorAll('#message *').length === n, COUNT, { polling: 50 });
+  await p.goto((tree === 'prog' ? srvp : srv).url + (q ? '?' + q : ''));
+  await p.waitForFunction((n) => document.querySelectorAll('#message *:not(#message > i[hidden])').length === n, COUNT, { polling: 50 });
   await p.waitForTimeout(200);
   res[v].push(await p.evaluate(() => {
     const api = performance.getEntriesByType('resource').find((e) => e.name.endsWith('/api/message'));
     const fcp = performance.getEntriesByName('first-contentful-paint')[0];
     return { first: fcp.startTime - api.responseEnd, all: __last - api.responseEnd, long: __long };
   }));
-  if (r === 0) doms[v] = await p.evaluate(() => document.querySelector('#message').innerHTML.replace(/<!--[^>]*-->/g, ''));
+  if (r === 0) doms[v] = await p.evaluate(() => document.querySelector('#message').innerHTML.replace(/<!--[^>]*-->/g, '').replace('<i hidden=""></i>', ''));
   await p.close();
 }
 const med = (x) => { const s = [...x].sort((p, q) => p - q); return s[s.length >> 1].toFixed(1); };
 console.log(`${COUNT} elements, ${MSG.plain.length} B JSON plain, ${MSG.prog.length} B progressive (head ${head}), ${runs} runs each, interleaved; medians in ms`);
 for (const v of VARIANTS) console.log(`  ${v.padEnd(22)} first paint of the email ${med(res[v].map((x) => x.first)).padStart(6)}   all rendered ${med(res[v].map((x) => x.all)).padStart(6)}   longest frame gap ${med(res[v].map((x) => x.long)).padStart(6)}`);
 console.log('  final DOM identical:', Object.values(doms).every((d) => d === Object.values(doms)[0]));
-await b.close(); srv.close(); a.remove();
+await b.close(); srv.close(); a.remove(); srvp.close(); ap.remove();
