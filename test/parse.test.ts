@@ -174,6 +174,32 @@ function invariants(b: Body, options: { images?: string } = {}): void {
   for (const v of Object.values(b.style)) expect(v).not.toMatch(BAD_STYLE);
 }
 
+describe('repeated styles', () => {
+  // the cascade computes one style per distinct (matched rules, inline style, legacy hints) and the tree
+  // shares it (css/index.ts, parse.ts projected()): equal inputs, one object; any difference, its own
+  test('elements with the same rules, inline style and hints share one style object, per tag', () => {
+    const cell = '<td class="c" width="50%" style="padding:4px">x</td>';
+    const b = parse(`<style>.c { color: red } .d { color: blue }</style><table><tr>${cell}${cell}<td class="c d" width="50%" style="padding:4px">y</td>${cell.replace('50%', '40%')}${cell.replace('4px', '5px')}</tr></table><p style="padding:4px">p</p><div style="padding:4px">d</div>`);
+    const tds = els(b).filter((e) => e.tag === 'td');
+    expect(tds[0].style).toBe(tds[1].style);
+    expect(tds[0].style).toEqual({ color: 'red', width: '50%', 'padding-top': '4px', 'padding-right': '4px', 'padding-bottom': '4px', 'padding-left': '4px' });
+    // another rule matched, other hints, another inline style: each its own
+    expect(tds[2].style.color).toBe('blue');
+    expect(tds[3].style.width).toBe('40%');
+    expect(tds[4].style['padding-top']).toBe('5px');
+    expect(new Set(tds.map((t) => t.style)).size).toBe(4);
+    // the same inline style on two tags: equal, and frozen with the tree
+    expect(first(b, 'p').style).toEqual(first(b, 'div').style);
+    expect(Object.isFrozen(tds[0].style)).toBe(true);
+  });
+
+  test('an inline style that writes a `|` does not collide with another key', () => {
+    const b = parse('<p style="font-family: \'a|1,\'">x</p><p style="font-family: \'a\'">y</p>');
+    const ps = els(b).filter((e) => e.tag === 'p');
+    expect(ps.map((p) => p.style['font-family'])).toEqual(['"a|1,"', '"a"']);
+  });
+});
+
 describe('the corpus', () => {
   const files = readdirSync(CORPUS).filter((f) => f.endsWith('.html'));
   for (const f of files) {

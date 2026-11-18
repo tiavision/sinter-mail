@@ -56,6 +56,8 @@ interface StyleRule {
 }
 
 interface Entry {
+  /** unique per entry: a list of matched entries is keyed by these */
+  id: number;
   sel: Complex;
   specificity: number;
   order: number;
@@ -67,6 +69,10 @@ interface Entry {
 // the matching work allowed for one resolve (selectors.ts, budget): a 1,800-element newsletter with
 // 300 rules takes 0.5 million steps; a hostile stylesheet stops matching here, within about a second
 const MAX_STEPS = 8_000_000;
+
+// an element's style is shared with the elements like it when it matches at most this many rules (a real
+// email's elements match a handful)
+const CACHED = 64;
 
 // `@media` nested deeper than this is dropped rather than walked
 const MAX_MEDIA_DEPTH = 16;
@@ -81,7 +87,7 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
 
   // the author rules, from every <style> in document order
   const buckets = new Map<string, Entry[]>();
-  let order = 0;
+  let order = 0, ids = 0;
   const addRules = (list: Rule[], depth: number) => {
     for (const r of list) {
       if (r.t === 'at') {
@@ -99,7 +105,7 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
         const key = bucketKey(sel);
         let b = buckets.get(key);
         if (!b) buckets.set(key, (b = []));
-        b.push({ sel, specificity: sel.specificity, order: o, normal: rule.normal, important: rule.important.props.length ? rule.important : null });
+        b.push({ id: ids++, sel, specificity: sel.specificity, order: o, normal: rule.normal, important: rule.important.props.length ? rule.important : null });
       }
     }
   };
@@ -124,6 +130,14 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
   const universal = buckets.get('*');
   const values: (string | undefined)[] = new Array(LONGHANDS.length);
   const work: Budget = { left: MAX_STEPS };
+  // Emails repeat themselves: builders write the same inline style and legacy attributes on every cell of
+  // a kind, and those cells match the same rules. So within one resolve: an inline style is parsed once
+  // per distinct text, the hints compiled once per distinct list, and an element's style is computed once
+  // per distinct (matched rules, inline style, hints) and shared, frozen with the tree, by every element
+  // that has the same. Bounded by the input: one entry per distinct string.
+  const inlines = new Map<string, StyleRule>();
+  const hinted = new Map<string, Compiled>();
+  const styles = new Map<string, Style | null>();
   {
     for (const e of all) {
       let candidates: Entry[] = [];
@@ -139,6 +153,25 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
       take(buckets.get(e.el.tag));
       take(universal);
 
+      const inline = attr(e.el, 'style');
+      const hs = hints(e, cx);
+      let hkey = '';
+      for (const [p, v] of hs) hkey += p + ':' + v + ';';
+      // the hints (no `|` in them), the matched entries' ids, then the inline text: unambiguous. Not for an
+      // element that matches more than CACHED rules (a hostile stylesheet's thousands): its key would cost
+      // as much as its style, so it is computed as it is
+      let key: string | null = null;
+      if (candidates.length <= CACHED) {
+        key = hkey + '|';
+        for (const c of candidates) key += c.id + ',';
+        key += '|' + (inline ?? '');
+        const known = styles.get(key);
+        if (known !== undefined) {
+          if (known) out.set(e.el, known);
+          continue;
+        }
+      }
+
       // from the highest precedence down, each longhand taken from the first that sets it: inline
       // !important, author !important (the last in cascade order first), inline, author, hints
       values.fill(undefined);
@@ -148,14 +181,20 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
         for (let i = 0; i < c.props.length; i++) if (values[c.props[i]] === undefined) values[c.props[i]] = c.values[i];
         s0 |= c.m0; s1 |= c.m1; s2 |= c.m2;
       };
-      const inline = attr(e.el, 'style');
-      const own = inline !== null ? compile(parseDeclarations(inline)) : null;
+      let own: StyleRule | null = null;
+      if (inline !== null) {
+        own = inlines.get(inline) ?? null;
+        if (!own) inlines.set(inline, (own = compile(parseDeclarations(inline))));
+      }
       if (own) apply(own.important);
       for (let i = candidates.length - 1; i >= 0; i--) { const imp = candidates[i].important; if (imp) apply(imp); }
       if (own) apply(own.normal);
       for (let i = candidates.length - 1; i >= 0; i--) apply(candidates[i].normal);
-      apply(compiled(hints(e, cx)));
+      let h = hinted.get(hkey);
+      if (!h) hinted.set(hkey, (h = compiled(hs)));
+      apply(h);
       const style = finish(values);
+      if (key !== null) styles.set(key, style);
       if (style) out.set(e.el, style);
     }
   }
