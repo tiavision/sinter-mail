@@ -130,6 +130,20 @@ describe('mail.plain', () => {
     }
   });
 
+  test('past 2,000 links in a body, the rest stays text', () => {
+    const s = 'x@a.b '.repeat(2_500);
+    const links: Element[] = [];
+    let text = '';
+    const walk = (n: Node) => {
+      if (n.type === 'text') text += n.value;
+      else { if (n.tag === 'a') links.push(n); n.children.forEach(walk); }
+    };
+    plain(s).children.forEach(walk);
+    expect(links.length).toBe(2_000);
+    expect(text === s).toBe(true);
+    expect(autolink('www.a.b www.c.d www.e.f', 2).map((p) => (typeof p === 'string' ? p : p.text))).toEqual(['www.a.b', ' ', 'www.c.d', ' www.e.f']);
+  });
+
   test('plain.ts imports no parser', () => {
     for (const f of ['plain.ts', 'autolink.ts']) {
       const src = readFileSync(new URL(`../sinter/${f}`, import.meta.url), 'utf8');

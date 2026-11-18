@@ -67,8 +67,14 @@ interface Entry {
 }
 
 // the matching work allowed for one resolve (selectors.ts, budget): a 1,800-element newsletter with
-// 300 rules takes 0.5 million steps; a hostile stylesheet stops matching here, within about a second
-const MAX_STEPS = 8_000_000;
+// 300 rules takes 0.5 million steps; a hostile stylesheet stops matching here, in a few hundred
+// milliseconds on a CI runner (test/css.test.ts, safety)
+const MAX_STEPS = 2_000_000;
+
+// the author rules kept for one resolve, every <style> together (one per selector of a list): a real
+// email has hundreds; past this a hostile stylesheet's rules are dropped, so compiling them, and going
+// through an element's matches, stays bounded
+const MAX_RULES = 10_000;
 
 // an element's style is shared with the elements like it when it matches at most this many rules (a real
 // email's elements match a handful)
@@ -100,6 +106,7 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
       const rule = compile(r.declarations);
       // a rule that sets nothing kept is not matched at all
       if (rule.normal.props.length === 0 && rule.important.props.length === 0) continue;
+      if (ids >= MAX_RULES) return;
       const o = order++;
       for (const sel of sels) {
         const key = bucketKey(sel);
@@ -115,6 +122,7 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
     if (m !== null && !matchMedia(m, media)) continue;
     let text = '';
     for (const c of e.el.children) if (c.type === 'text') text += c.value;
+    if (ids >= MAX_RULES) break;
     addRules(parseStylesheet(text), 0);
   }
 

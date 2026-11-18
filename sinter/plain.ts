@@ -13,6 +13,10 @@ import type { Body, Element, Node, PlainOptions } from './sinter.types.js';
 /** quote levels past this are read as this one, so a run of `>` cannot nest the tree without bound */
 const MAX_DEPTH = 32;
 
+/** links made in one body: a real one has a handful; past this, a hostile text's URLs and addresses stay text, so
+ * the tree (an element per link) stays small */
+const MAX_LINKS = 2_000;
+
 /**
  * The tree of a plain-text body under `options` (`flowed`, `delsp`: the message's `Content-Type` parameters).
  * The same text and options give the same tree, frozen: change a copy.
@@ -87,9 +91,12 @@ function blocks(input: readonly Line[]): Node[] {
   // the children of the quotes open at each depth; [0] is the root's, or the signature's once it starts
   const stack: Node[][] = [root];
   let para: string[] = [];
+  let links = MAX_LINKS;
   const flush = () => {
     if (!para.length) return;
-    const children: Node[] = autolink(para.join('\n')).map((p) =>
+    const pieces = autolink(para.join('\n'), links);
+    for (const p of pieces) if (typeof p !== 'string') links--;
+    const children: Node[] = pieces.map((p) =>
       typeof p === 'string' ? { type: 'text', value: p } : element('a', [{ type: 'text', value: p.text }], { attrs: { href: p.href } }));
     stack[stack.length - 1]!.push(element('p', children, { style: { 'white-space': 'pre-wrap' } }));
     para = [];

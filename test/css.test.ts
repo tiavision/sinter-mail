@@ -439,6 +439,10 @@ describe('safety', () => {
     // and matching works again afterwards
     expect(one('<style>p { color: red }</style><p id=x>')).toEqual({ color: 'red' });
   });
+  test('past 10,000 rules, the rest of the stylesheet is dropped', () => {
+    expect(one(`<style>${'.x{color:red}'.repeat(9_999)}p{color:blue}</style><p id=x>`)).toEqual({ color: 'blue' });
+    expect(one(`<style>${'.x{color:red}'.repeat(10_000)}p{color:blue}</style><p id=x>`)).toEqual({});
+  });
   test('deep trees and long selector chains stay fast', () => {
     let html = '<style>' + 'div '.repeat(40) + 'span { color: red } ' + 'div ~ '.repeat(30) + 'b { color: blue }</style>';
     html += '<div>'.repeat(250) + '<span id=x></span>' + '</div>'.repeat(250);

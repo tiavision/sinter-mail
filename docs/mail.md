@@ -246,8 +246,9 @@ What `mail.parse` guarantees, whatever the email:
   CSS `url()`, `@import` or `@font-face`; no other element that loads.
 - **Nothing reaches outside the email's box.** No `position` or negative margins; no stylesheet, so no
   rule of the email applies to the page; no classes; ids only as in-email link targets, prefixed.
-- **Bounded work.** Linear parsing, nesting bounded, a budget on selector matching: a hostile email of a
-  megabyte parses within a second.
+- **Bounded work.** Linear parsing, nesting bounded, a budget on selector matching (2 million steps) and
+  at most 10,000 style rules per email; a plain-text body makes at most 2,000 links, the rest stays text. A
+  hostile email of a megabyte parses in well under a second.
 
 Rendering each body of a message on its own (never joining bodies into one HTML string) keeps PGP/MIME
 open for later (EFAIL's direct exfiltration needs joined parts); reading MIME is not part of the library
