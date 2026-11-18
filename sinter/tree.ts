@@ -122,11 +122,11 @@ export function links(body: Body | null | undefined): LinkInfo[] {
 }
 
 /**
- * (<mail-body-progressive>) numbers the nodes of `body` in document order (`n`; `z` on an
- * element: the last number in its subtree) and sets `body.head`, so that <mail-body> renders the first
- * `head` nodes in one task and the rest after the browser has painted them. In place, without
- * recursion; returns `body`. A tree without it renders whole, as before (a `file:` email, folded at
- * build time, stays whole).
+ * Numbers the nodes of `body` in document order (`n`; `z` on an element: the last number in its subtree), sets
+ * `body.head` and `body.first` (the body up to `head`), and returns it: <mail-body> then renders the first `head`
+ * nodes in the task that receives the body and the rest in steps, a task each, after the browser has painted them.
+ * In place, without recursion. A body that is not numbered renders whole in one task (a `file:` email, folded at
+ * build time, stays whole and ships no JavaScript).
  */
 export function progressive(body: Body, head = 200): Body {
   let i = 0;
@@ -144,5 +144,25 @@ export function progressive(body: Body, head = 200): Body {
     } else { n.z = i - 1; stack.pop(); }
   }
   body.head = head;
+  body.first = upTo(body, head);
   return body;
+}
+
+/**
+ * A numbered `body` up to node `upto`, for a step of a progressive render: the nodes below it, an element whose
+ * subtree is all below it as it is (the same object), one that `upto` cuts copied with its children up to it. Rows
+ * are keyed by the nodes' numbers, so a copy keeps its row and only the copied elements render again.
+ */
+export function upTo(body: Body, upto: number): Body {
+  const cut = (list: Node[]): Node[] => {
+    const out: Node[] = [];
+    for (const c of list) {
+      if (c.n! >= upto) break;
+      if (c.type !== 'element' || c.z! < upto) out.push(c);
+      else out.push({ ...c, children: cut(c.children) });
+    }
+    return out;
+  };
+  const { first: _, ...rest } = body;
+  return { ...rest, children: cut(body.children) };
 }

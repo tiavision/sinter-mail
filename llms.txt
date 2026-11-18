@@ -9,7 +9,7 @@ Setup: `sinter({ components: ['@tiaforge-ui/sinter-mail'] })`; `export * as mail
 - `mail.text(node)`: the text, for previews. `mail.links(body)`: every link with its text.
 - `body.images.origins`: the origins of the remote images, for a "show images from …" control.
 - `<mail-body>` slots: `link` (`$slot.node`, its children through `<slot></slot>`) and `image` (`$slot.node.attrs.src` absent when blocked).
-- `<mail-body-progressive data-sn-prop="{ body: mail.progressive(tree) }">`: a long body in two tasks, its first 200 nodes painted first; same slots; ships JavaScript (use `<mail-body>` on static pages).
+- `mail.progressive(tree)`: `<mail-body data-sn-prop="{ body: mail.progressive(tree) }">` renders a long body progressively, its first 200 nodes first, the rest in steps of about 10 to 20 ms after a paint; a body not numbered renders whole (static pages stay script-free).
 
 Styles: the email's own win over the page's (inline); the page fills in what the email does not set (fonts, link colours). Kept: colours, fonts, text, box, borders, tables, display, float. Never: position, url(), web fonts, :hover, negative margins.
 

@@ -177,27 +177,36 @@ URLs, `www.` addresses and email addresses as links (GFM's rules), `>` quotes as
 `mail.text` is the text of a body or node, blocks separated by newlines, hidden content left out: for
 previews and search snippets. `mail.links` is every link with its text, in order.
 
-## Long messages: `<mail-body-progressive>` and `mail.progressive(body)`
+## Long messages: `mail.progressive(body)`
 
 A long email (a newsletter of 2,000 elements) takes one task of about 45 ms to render, and nothing of it
-shows until that task ends. `<mail-body-progressive>` renders the first part in the task that receives the
-body, and the rest once the browser has painted it:
+shows until that task ends; on a phone, several times that. Number the body with `mail.progressive`, and
+`<mail-body>` renders it progressively: the first part in the task that receives the body, the rest in steps
+after the browser has painted that, a task each.
 
 ```html
 <sn-resource name="message" src="/api/messages/{$url.id}"></sn-resource>
-<mail-body-progressive data-sn-prop="{ body: message.tree }"></mail-body-progressive>
+<mail-body data-sn-prop="{ body: mail.progressive(message.tree) }"></mail-body>
 ```
 
-The body must be numbered by `mail.progressive(body, head = 200)`, on the server before it is sent, or in
-the page (`data-sn-prop="{ body: mail.progressive(tree) }"`). It numbers the nodes in document order and
-sets `body.head`: the first 200 nodes render first. A body that is not numbered renders whole, as in
-`<mail-body>`, so short emails are not affected. Measured on the 2,000-element newsletter (Chromium): the
-email starts to show after about 50 ms instead of about 100, the whole email is rendered after about
-93 ms instead of 73, and the second part is still one task of about 48 ms
-([measurements](proposals/progressive-rendering.md)). The numbers make the tree's JSON about 12% larger.
+`mail.progressive(body, head = 200)` numbers the nodes in document order and sets `body.head` (the first 200
+nodes render first) and `body.first` (the body up to there). Run it in the page, as above, or on the server
+before the tree is sent; there, `body.first` repeats the first nodes in the JSON (about 18% more for the
+newsletter, less after gzip). A body that is not numbered renders whole in one task, as before, so short
+emails are not affected.
 
-It has the same slots as `<mail-body>`. It has a script, so a page that uses it ships JavaScript: a static
-page (an email from a file) uses `<mail-body>`, which folds with none.
+Measured on the 2,000-element newsletter (Chromium, [measurements](proposals/progressive-rendering.md)): the
+email starts to show after about 50 ms instead of about 100; the rest renders in steps of about 10 to 20 ms
+(400 nodes each), so the page answers input and paints between them; the whole email is in place after
+about 200 ms instead of 75.
+
+- **Static pages are not affected.** The steps need a script, which only the progressive branch of
+  `<mail-body>` has: an email from a file is not numbered, the build decides that branch away, and the page
+  ships no JavaScript. Calling `mail.progressive` on a static page's body is `SN322` (the page would ship
+  JavaScript).
+- **One element more.** A progressive render ends with a hidden empty element (`<i hidden>`, the component
+  that runs the steps) at the end of the email: a selector like `:last-child` in the app's CSS sees it.
+- **The slots work as before.** Fills render in every step.
 
 ## Changing how links and images look
 
