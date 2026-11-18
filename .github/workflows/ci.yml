@@ -29,7 +29,7 @@ jobs:
           ref: ${{ inputs.ref }}
           path: sinter-mail
       # While the devDependency on sinter is `file:../sinter`, sinter's main is checked out and built beside
-      # this repository (README.md, Status); once it is a version on npm, `npm ci` installs that
+      # this repository (CONTRIBUTING.md, Status); once it is a version on npm, `npm ci` installs that
       - id: sinter
         working-directory: sinter-mail
         run: |

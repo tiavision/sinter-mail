@@ -17,7 +17,7 @@ name: Release
 # No long-lived token once trusted publishing is set up: npm trusts this workflow through GitHub's OIDC
 # token and records a provenance attestation. Trusted publishing can only be set up for a package that
 # exists, so the first publish uses the NPM_TOKEN secret of the `release` environment (a granular token),
-# which is deleted afterwards (README.md, Releasing).
+# which is deleted afterwards (CONTRIBUTING.md, Releasing).
 
 on:
   workflow_dispatch:
