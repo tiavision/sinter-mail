@@ -33,9 +33,10 @@ npm ci
 ## Releasing
 
 From GitHub's UI: Actions → Release → Run workflow (on `main`) → the version. The [Release
-workflow](.github/workflows/release.yml) sets package.json to it, commits and tags `v<version>`, checks that
-the package builds against a sinter from npm, runs CI on the tag, publishes to npm with a provenance
-attestation, then moves `main` to the release commit and makes the GitHub release. A pre-release
+workflow](.github/workflows/release.yml) sets package.json to it and commits on a temporary branch, checks
+that the package builds against a sinter from npm, runs CI on that commit, and only then tags it `v<version>`
+and publishes to npm with a provenance attestation; then it moves `main` to the release commit, makes the
+GitHub release and deletes the branch. A run that fails before the tag leaves nothing to clean up. A pre-release
 (`0.2.0-rc.1`) goes out under the `next` dist-tag. Publishing a GitHub release for an existing tag
 `v<the version in package.json>` runs the same checks and publish.
 

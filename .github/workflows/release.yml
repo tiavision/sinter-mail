@@ -3,9 +3,10 @@ name: Release
 # Publishes @tiavision/sinter-mail to npm.
 #
 # From GitHub's UI: Actions → Release → Run workflow (on main) → the version, such as 0.2.0. The workflow
-# sets package.json to it (commit "Release <version>"; nothing to commit when it is already there), tags
-# v<version> and pushes the tag; runs CI on it; publishes; then moves main to the release commit and makes
-# the GitHub release, with notes GitHub writes from the merged pull requests.
+# sets package.json to it (commit "Release <version>"; nothing to commit when it is already there) on a branch
+# of its own, release/v<version>; runs CI on it; only then tags it v<version> and publishes; then moves main
+# to the release commit, makes the GitHub release (notes GitHub writes from the merged pull requests) and
+# deletes the branch. A run that fails before the tag leaves nothing behind: run it again.
 #
 # Or: publish a GitHub release for a tag v<the version in package.json>: the same checks and publish.
 #
@@ -35,7 +36,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # set the version, commit and tag (workflow_dispatch only); the commit reaches main in `finish`
+  # set the version and commit (workflow_dispatch only), onto release/v<version>; tagged in `tag` once CI
+  # passed, and on main in `finish` once published
   prepare:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -43,6 +45,7 @@ jobs:
       contents: write
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      ref: ${{ steps.tag.outputs.ref }}
     steps:
       - if: github.ref != 'refs/heads/main'
         run: |
@@ -68,9 +71,9 @@ jobs:
             npm version "$version" --no-git-tag-version
             git commit -am "Release $version"
           fi
-          git tag -a "$tag" -m "sinter-mail $version"
-          git push origin "refs/tags/$tag"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          # --force: the branch of an earlier run of this version that stopped before `cleanup`
+          git push --force origin "HEAD:refs/heads/release/$tag"
+          { echo "tag=$tag"; echo "ref=release/$tag"; } >> "$GITHUB_OUTPUT"
 
   check:
     needs: prepare
@@ -80,14 +83,16 @@ jobs:
       contents: read
     outputs:
       tag: ${{ steps.check.outputs.tag }}
+      ref: ${{ steps.check.outputs.ref }}
       dist-tag: ${{ steps.check.outputs.dist-tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.tag || github.event.release.tag_name }}
+          ref: ${{ needs.prepare.outputs.ref || github.event.release.tag_name }}
       - id: check
         env:
           TAG: ${{ needs.prepare.outputs.tag || github.event.release.tag_name }}
+          REF: ${{ needs.prepare.outputs.ref || github.event.release.tag_name }}
           PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           node -e '
@@ -98,7 +103,7 @@ jobs:
             const dev = pkg.devDependencies["@tiaforge-ui/sinter"];
             if (!/^\d+\.\d+\.\d+/.test(dev)) fail(`the devDependency on @tiaforge-ui/sinter is "${dev}": a release is built and tested against a sinter version on npm`);
           '
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          { echo "tag=$TAG"; echo "ref=$REF"; } >> "$GITHUB_OUTPUT"
           if [[ "$TAG" == *-* || "$PRERELEASE" == "true" ]]; then echo "dist-tag=next"; else echo "dist-tag=latest"; fi >> "$GITHUB_OUTPUT"
 
   ci:
@@ -108,10 +113,29 @@ jobs:
       contents: read
     uses: ./.github/workflows/ci.yml
     with:
-      ref: ${{ needs.check.outputs.tag }}
+      ref: ${{ needs.check.outputs.ref }}
+
+  # workflow_dispatch only: the release commit is tagged once CI passed on it, before it is published
+  tag:
+    needs: [check, ci]
+    if: ${{ github.event_name == 'workflow_dispatch' && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.ref }}
+      - env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "sinter-mail ${TAG#v}"
+          git push origin "refs/tags/$TAG"
 
   publish:
-    needs: [check, ci]
+    needs: [check, ci, tag]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     environment: release
@@ -170,3 +194,16 @@ jobs:
           flags=()
           if [ "$DIST_TAG" = next ]; then flags+=(--prerelease); fi
           gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes "${flags[@]}"
+
+  # workflow_dispatch only, whatever happened: the release branch goes. The tag, once made, holds the commit
+  cleanup:
+    needs: [prepare, finish]
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && needs.prepare.outputs.ref != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          REF: ${{ needs.prepare.outputs.ref }}
+        run: git push origin --delete "$REF"
