@@ -149,12 +149,24 @@ Copies shipped. `<mail-body>` has two branches: a body that is not numbered rend
 decided at build time and ships no script); a numbered one renders `body.first`, then the trees a small internal
 component (`mail-steps`, the only one with a script) emits after each paint, 400 nodes further each time.
 
-| 2,012 elements | email starts showing | longest task after it | longest frame gap | whole email in place |
-| --- | --- | --- | --- | --- |
-| whole, one task | ~92-108 ms | n/a (one task of ~45 ms) | 50 ms | ~67-75 ms |
-| two phases (first version) | ~46-50 ms | ~48 ms | 50 ms | ~88-92 ms |
-| limit in 400-node steps, #77 | ~45-47 ms | ~31 ms, growing | 33 ms | ~261-264 ms |
-| **steps of copies, #78 (shipped)** | **~48-50 ms** | **~10-20 ms, flat** | **17-33 ms** | ~180-195 ms (a frame between steps) |
+The first version of the steps took twice as long as two phases: each step re-rendered most of what was on the
+page. Two leaks in sinter caused that, fixed in #78 too: the tree slots' fills a component passes down are an
+object built at each evaluation, so a component that a tree slot reaches never had equal props; and a component
+used inside itself renders through a computed list of its props, whose rule (kept rows render forced) overrode
+the props comparison. With those fixed a step walks a few hundred rows instead of every row on the page. Steps
+are then sized by time (about 12 ms of script each, the size of the next following how long the last one took)
+and follow each other without waiting a frame (a message-channel task, so input and paint still come first).
+
+One interleaved run, 25 page loads each:
+
+| 2,012 elements | email starts showing | whole email in place | longest frame gap |
+| --- | --- | --- | --- |
+| whole, one task | 107.6 ms | 81.2 ms | 66.7 ms |
+| two phases (the rest in one task) | 51.2 ms | 116.0 ms | 33.3 ms |
+| **steps (shipped)** | **53.1 ms** | **122.4 ms** | **16.8 ms** |
+
+Earlier runs, for the history: 400-node steps, one per frame, before the leaks were fixed: ~180-200 ms in place,
+steps of 10-20 ms; the limit in 400-node steps (#77): ~264 ms, steps of up to 31 ms and growing.
 
 The final DOM equals a whole render in every variant. What it changes in sinter: a computed list's kept rows,
 which rendered everything below them on every evaluation in case an item changed in place unseen, now do so only

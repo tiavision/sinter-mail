@@ -9,7 +9,7 @@
   in the browser with style.setProperty, which the policy allows. With no body (a lazy parser that has not
   arrived) it is an empty <div class="mail">.
   A body that mail.progressive numbered (`body.head`) renders progressively: its first part in the task that
-  receives it, the rest in steps after the browser has painted that, a task each (mail-steps emits each step's
+  receives it, the rest in steps after the browser has painted that, a task each, sized to about 12 ms (mail-steps emits each step's
   tree; only the elements a step cuts are copies, and rows are keyed by the nodes' numbers, so a step renders that
   path and its new rows). Any other body renders whole in one task, and a static page's (an email from a file)
   folds at build time with no JavaScript: the progressive branch, which has the script, is decided away.

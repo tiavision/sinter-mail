@@ -196,9 +196,10 @@ newsletter, less after gzip). A body that is not numbered renders whole in one t
 emails are not affected.
 
 Measured on the 2,000-element newsletter (Chromium, [measurements](proposals/progressive-rendering.md)): the
-email starts to show after about 50 ms instead of about 100; the rest renders in steps of about 10 to 20 ms
-(400 nodes each), so the page answers input and paints between them; the whole email is in place after
-about 200 ms instead of 75.
+email starts to show after about 50 ms instead of about 100; the rest renders in steps of 5 to 15 ms, each
+sized by how long the one before took (about 12 ms of script, so a step fits in a frame on any device), with
+input and paint between them; the whole email is in place about 6% later than when the rest renders in one
+task, and no frame is dropped.
 
 - **Static pages are not affected.** The steps need a script, which only the progressive branch of
   `<mail-body>` has: an email from a file is not numbered, the build decides that branch away, and the page

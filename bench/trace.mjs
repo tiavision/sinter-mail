@@ -18,9 +18,9 @@ const resp = ev.filter((e) => e.args?.data?.requestId === rid && e.name === 'Res
 const fcp = ev.find((e) => e.name === 'firstContentfulPaint');
 const ME = ev.filter((e) => e.pid === fcp.pid && e.tid === fcp.tid);
 const t0 = resp.ts;
-const NAMES = ['FunctionCall','EvaluateScript','UpdateLayoutTree','Layout','Paint','TimerFire','FireAnimationFrame','RunMicrotasks','ParseHTML'];
+const NAMES = ['HandlePostMessage','FunctionCall','EvaluateScript','UpdateLayoutTree','Layout','Paint','PrePaint','Layerize','TimerFire','FireAnimationFrame','RunMicrotasks','ParseHTML','Commit'];
 const tasks = []; let end = -1;
-for (const e of ME.filter((e) => e.dur && NAMES.includes(e.name) && e.ts > t0 - 2000).sort((x, y) => x.ts - y.ts)) { if (e.ts < end) continue; end = e.ts + e.dur; if (e.dur > 500) tasks.push({ name: e.name, at: +((e.ts - t0) / 1000).toFixed(1), ms: +(e.dur / 1000).toFixed(1) }); }
+for (const e of ME.filter((e) => e.dur && NAMES.includes(e.name) && e.ts > t0 - 2000).sort((x, y) => x.ts - y.ts)) { if (e.ts < end) continue; end = e.ts + e.dur; if (e.dur > 300) tasks.push({ name: e.name, at: +((e.ts - t0) / 1000).toFixed(1), ms: +(e.dur / 1000).toFixed(1) }); }
 const paints = ME.filter((e) => e.name === 'Paint' || e.name === 'firstContentfulPaint').map((e) => `${e.name}@${((e.ts - t0) / 1000).toFixed(1)}`);
 console.log(v, COUNT, 'elements; times from the API response (ms)'); console.table(tasks); console.log(paints.slice(0, 8).join('  '));
 await b.close(); srv.close(); a.remove();
