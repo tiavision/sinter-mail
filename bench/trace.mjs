@@ -3,12 +3,12 @@ const { progressive } = await import(new URL('../sinter/tree.ts', import.meta.ur
 const v = process.argv[2] ?? 'prog', N = +(process.argv[3] ?? 2000), head = +(process.argv[4] ?? 200);
 const t = newsletter(N); if (v === 'prog') progressive(t, head);
 const COUNT = t.children.flatMap((c) => [...elements(c)]).length, MSG = JSON.stringify(t);
-const a = await buildApi(); const srv = await serve(a.root + '/dist', () => MSG);
+const a = await buildApi(v === 'prog' ? '<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body-progressive id="message" data-sn-prop="{ body: message }"></mail-body-progressive></main>' : undefined); const srv = await serve(a.root + '/dist', () => MSG);
 const b = await launch(); const p = await b.newPage();
 await p.goto(srv.url); await p.close();               // warm the HTTP cache / compile cache
 const q = await b.newPage();
 await b.startTracing(q, { categories: ['devtools.timeline', 'blink.user_timing', 'loading'] });
-await q.goto(srv.url);
+await q.goto(srv.url + (process.env.Q ? '?' + process.env.Q : ''));
 await q.waitForFunction((n) => document.querySelectorAll('#message *').length === n, COUNT, { polling: 50 });
 await q.waitForTimeout(200);
 const ev = JSON.parse((await b.stopTracing()).toString()).traceEvents;

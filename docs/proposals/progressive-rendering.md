@@ -91,9 +91,47 @@ rendered from one answer has it. In sinter, though, the right place is the runti
   above correct, and would save every recursive component tree a forced re-walk on each render, with or
   without progressive rendering.
 
+## Streaming the tree as it arrives: not now
+
+The idea is for the API (or a parser in the browser) to stream the tree into a binding that renders while
+the answer arrives, so that receiving and rendering interleave. `bench/network.mjs` measures the newsletter
+gzipped, as a server sends it, under Chromium's throttling (medians of 3):
+
+| | first byte | body transfer | page JS arrives after the body | first paint after both |
+| --- | --- | --- | --- | --- |
+| no throttling | 4 ms | 1 ms | 1 ms | 97 ms |
+| fast 4G (9 Mbps, 85 ms RTT) | 86 ms | 9 ms | 319 ms | 84 ms |
+| slow 4G (1.6 Mbps, 150 ms RTT) | 154 ms | 48 ms | 1,784 ms | 84 ms |
+
+- **What streaming could save is the body's transfer.** The time spent rendering moves to before the
+  last byte, so the win is at most the transfer time (and the server's parse, if it streams that too, about
+  50 ms). The generated tree gzips from 402 kB to 5.3 kB, so its transfer is 1 to 48 ms. A real email
+  compresses less (a large one perhaps 30 to 60 kB gzip, about 50 to 300 ms on slow 4G), so a large email
+  on a slow network is where it would matter.
+- **The answer is not on the critical path of a first visit.** It arrives long before the page's
+  JavaScript. In an open app (the next message, scripts cached), the critical path is a round trip
+  (85 to 150 ms), the transfer, then the render. sinter's `embed` layer removes the round trip for the
+  first message, and `<mail-body-progressive>` puts the first paint about 10 ms after the answer.
+- **sinter cannot render a growing tree cheaply.** A streamed tree grows at its open spine, so each chunk
+  changes the root's descendants: in place (an append to `children`) or as new objects along the spine.
+  Either way the recursive components above it render their subtrees again, forced. That is correct:
+  a change inside a prop's value must reach the bindings that read it, and sinter's #77 keeps exactly that
+  case forced. So each chunk would cost about as much as what is already rendered, which the stepped
+  limit above measures (400-node steps: 264 ms in all, against 70 ms in one task). A cheap streamed tree
+  needs the runtime to append rows to a list without walking what is already rendered (a stream-aware
+  `data-sn-for`, or the render budget above), and the tree delivered as appends to lists (each node's
+  children as their own stream). That is a new runtime primitive, not a binding.
+- A flat list (search results, a message list) streams well today: an append reconciles the list (a key
+  per item), and only the new rows render. That, not email, is where a streamed resource would be the
+  smaller change.
+
+Not spiked: the measurements bound the gain (the body's transfer) below what embedding and the progressive
+component already give. The work is in sinter's runtime. It would be worth revisiting with a real corpus of
+large emails and an app's own latency profile.
+
 ## Running the benches
 
 `node --experimental-strip-types bench/prog.mjs [runs] [elements] [head] gen '<variants>'` (variants:
 `plain:` or `prog:step=N`, comma-separated). `bench/trace.mjs prog|plain` prints the main thread's tasks.
-`bench/micro.mjs` compares `setProperty` with `cssText`. `bench/count.mjs` counts the style calls. They
+`bench/network.mjs [elements] [runs]` splits the wait under throttling. `bench/micro.mjs` compares `setProperty` with `cssText`. `bench/count.mjs` counts the style calls. They
 need sinter built beside this package (`../sinter`, `npm run build`).
