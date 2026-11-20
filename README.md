@@ -107,7 +107,7 @@ Links and images can be restyled by filling the `link` and `image` slots of `<ma
 ## Limits
 
 Only the email's own styles apply (no `:hover`, animation or web fonts), `@media` is decided once at parse
-time, and the library is tested in Chromium so far. [The guide](docs/mail.md#limits) has the full list.
+time (but for the colour scheme: colours set by `prefers-color-scheme: dark` rules follow the page's), and the library is tested in Chromium so far. [The guide](docs/mail.md#limits) has the full list.
 
 ## License
 

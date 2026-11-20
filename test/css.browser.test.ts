@@ -248,12 +248,12 @@ interface Result {
   values: (string[] | null)[];
 }
 
-async function computed(html: string, media: 'wide' | 'narrow', styles: (Style | null)[] | null): Promise<Result & { rejected: string[] }> {
-  const page = await browser.newPage({ viewport: VIEWPORTS[media] });
+async function computed(html: string, media: 'wide' | 'narrow', styles: (Style | null)[] | null, scheme?: 'light' | 'dark'): Promise<Result & { rejected: string[] }> {
+  const page = await browser.newPage({ viewport: VIEWPORTS[media], colorScheme: scheme ?? 'light' });
   try {
     await page.setContent(html);
     return await page.evaluate(
-      ({ styles, props, attrs }) => {
+      ({ styles, props, attrs, scheme }) => {
         const els = [...document.getElementsByTagName('*')].filter((e) => e.namespaceURI === 'http://www.w3.org/1999/xhtml') as HTMLElement[];
         const rejected: string[] = [];
         if (styles) {
@@ -269,6 +269,8 @@ async function computed(html: string, media: 'wide' | 'narrow', styles: (Style |
             }
           });
         }
+        // a page that follows the system's scheme, as an app's does (light-dark() resolves by it)
+        if (scheme) document.documentElement.style.setProperty('color-scheme', 'light dark');
         const tags = els.map((e) => e.localName);
         const values = els.map((e) => {
           if (e.localName === 'style' || !e.isConnected) return null;
@@ -277,7 +279,7 @@ async function computed(html: string, media: 'wide' | 'narrow', styles: (Style |
         });
         return { tags, values, rejected };
       },
-      { styles, props: [...PROPERTIES], attrs: PRESENTATIONAL },
+      { styles, props: [...PROPERTIES], attrs: PRESENTATIONAL, scheme },
     );
   } finally {
     await page.close();
@@ -286,6 +288,49 @@ async function computed(html: string, media: 'wide' | 'narrow', styles: (Style |
 
 // the accepted differences seen, so that the list cannot keep an entry that no longer applies
 const used = new Set<string>();
+
+// emails with prefers-color-scheme rules: the colours they change are light-dark(), resolved by the page's scheme
+const SCHEMED: Record<string, string> = {
+  newsletter: `<!doctype html><html><head><meta name="color-scheme" content="light dark"><style>
+body { background-color: #f4f4f4; color: #222; margin: 0 }
+.card { background-color: #fff; border: 1px solid #ddd; padding: 16px }
+a { color: #0b57d0; text-decoration: underline #0b57d0 }
+.muted { color: #666 }
+@media (prefers-color-scheme: dark) {
+  body { background-color: #111 !important; color: #eee !important }
+  .card { background-color: #1e1e1e !important; border-color: #333 !important }
+  a { color: #8ab4f8 !important; text-decoration-color: #8ab4f8 }
+  .only-dark { color: #fc0 }
+}
+@media (prefers-color-scheme: light) { .muted { background-color: #fafafa } }
+</style><style media="(prefers-color-scheme: dark)">h1 { color: white }</style></head>
+<body><h1>Title</h1><table class="card"><tr><td><p>Text <a href="https://example.com/">a link</a>.</p>
+<p class="muted">muted</p><p class="only-dark">x</p></td></tr></table></body></html>`,
+};
+
+describe('colour schemes against Chromium', () => {
+  for (const [name, html] of Object.entries(SCHEMED)) {
+    for (const scheme of ['light', 'dark'] as const) {
+      test(`${name} (${scheme})`, async () => {
+        const styles = resolvedInOrder(html, 'wide');
+        expect(JSON.stringify(styles)).toContain('light-dark(');
+        const original = await computed(html, 'wide', null, scheme);
+        const rendered = await computed(html, 'wide', styles, scheme);
+        expect(rendered.rejected).toEqual([]);
+        const differences: string[] = [];
+        original.tags.forEach((tag, i) => {
+          const a = original.values[i];
+          const b = rendered.values[i];
+          if (!a || !b) return;
+          PROPERTIES.forEach((p, k) => {
+            if (a[k] !== b[k]) differences.push(`${name} ${tag}#${i} ${p}: ${a[k]} | ${b[k]}`);
+          });
+        });
+        expect(differences).toEqual([]);
+      });
+    }
+  }
+});
 
 describe('fidelity against Chromium', () => {
   for (const [name, html] of Object.entries(DOCS)) {

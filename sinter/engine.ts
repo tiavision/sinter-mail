@@ -3,4 +3,4 @@
 // when a let first needs mail.parse; lazy packages are matched by import specifier, so parse.ts imports
 // them by that name and never by a relative path.
 export { parseHTML } from './parser/index.js';
-export { resolveStyles } from './css/index.js';
+export { resolve, resolveStyles } from './css/index.js';

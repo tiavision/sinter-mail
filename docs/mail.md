@@ -81,8 +81,9 @@ An invalid option throws at each call (`mail.parse: \`images\` is 'block', 'allo
 same source and options give the same tree, frozen and shared: change a copy (`structuredClone(body)`).
 
 The tree (`Body`) has the email's elements (`type: 'element'`, `tag`, `attrs`, `style`, `children`) and
-texts, the body's own `style` (its background and font, rendered on the root), and `images.origins`: every
-remote image's origin, sorted, for a "show images from …" control.
+texts, the body's own `style` (its background and font, rendered on the root), `images.origins`: every
+remote image's origin, sorted, for a "show images from …" control, and `schemes` ([Colour
+schemes](#colour-schemes)).
 
 ### What is kept
 
@@ -112,7 +113,7 @@ There is no stylesheet. `mail.parse` resolves each element's styles, as a browse
 
 It keeps 60 properties (colours, fonts, text, box, borders, table layout, display, float), each
 value re-serialized. Selectors with `:hover`, `:focus`, `::before` and the like never match; `@media` rules
-are evaluated at the `media` option's width; `@import`, `@font-face`, `@keyframes` and `@supports` are
+are evaluated at the `media` option's width (and `prefers-color-scheme` for both schemes, below); `@import`, `@font-face`, `@keyframes` and `@supports` are
 dropped. Never kept: `position`, `z-index`, `transform`, `url()` in any value (background images
 included), `var()`, `calc()`, negative margins.
 
@@ -131,6 +132,35 @@ included), `var()`, `calc()`, negative margins.
 - **The email stays in its box.** The root is `display: flow-root`, so floats and margins do not escape it.
   A wide newsletter (600 px of tables) is as wide as it is: put `<mail-body>` in a box with
   `overflow-x: auto` for narrow screens.
+
+### Colour schemes
+
+Most emails are written for a white page: dark text, if they set a colour at all. Some say they work on a dark
+one too, and `body.schemes` reports it (`['light', 'dark']`; absent when the email says nothing):
+
+- **declared**: its `color-scheme` or `supported-color-schemes` meta, or `color-scheme` on `<html>` or
+  `<body>` (as a style attribute or a rule). The email's colours are kept as written: it is saying they work
+  on either page.
+- **dark rules**: `@media (prefers-color-scheme: dark)` (or a `<style media>` with it). The cascade runs for
+  both schemes, and a colour that differs (`color`, `background-color`, the border and decoration colours) is
+  written `light-dark(<light>, <dark>)`, the initial value standing in for a scheme that does not set it
+  (`light-dark(currentcolor, #fff)`). The browser picks one by the colour scheme the element is shown in: the
+  page's (`<meta name="color-scheme" content="light dark">` follows the system), or what the app sets around
+  the body. Then `schemes` includes `dark`.
+
+So an app in dark mode can show an email with `dark` in `schemes` as it is, on its own dark page, and keep any
+other email that sets colours light:
+
+```css
+.mail-light { color-scheme: light; background: Canvas; color: CanvasText; }
+```
+
+```html
+<div data-sn-class="{ 'mail-light': !tree.schemes?.includes('dark') }"><mail-body data-sn-prop="{ body: tree }"></mail-body></div>
+```
+
+A dark rule's other properties (a light logo hidden, a dark one shown) keep their light values:
+`light-dark()` takes colours only.
 
 Quotes and signatures that `mail.plain` finds carry the classes `mail-quote` and `mail-signature`, for
 your styles (`.mail-signature { opacity: .7 }`).
@@ -258,7 +288,8 @@ yet.
 
 - Only the email's own styles and the browser's: no `:hover`, no animation, no web fonts, no background
   images.
-- `@media` is decided at parse time, for one width (`media`), not as the reader resizes.
+- `@media` is decided at parse time, for one width (`media`), not as the reader resizes. Only the colour
+  scheme follows the page, and only for colours (`light-dark()`).
 - Quirks mode is not followed: class names match case-sensitively and unitless lengths are dropped.
 - The parser's size: about 32 kB gzip with the cascade, most of it the HTML standard's entity table and
   tree construction. A server that sends the tree ships none of it.

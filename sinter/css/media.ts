@@ -1,25 +1,28 @@
 // Media queries (Media Queries Level 4), evaluated once, at parse time, for one of two fixed screens:
 // 'wide' is an 800 × 600 px landscape viewport, 'narrow' a 375 × 667 px portrait one, both at 1 dppx with
-// a 16 px root font, light, colour, no hover information. There is no stylesheet to re-evaluate them
-// later, so a query is a constant. Anything this does not know (a feature, a unit, a malformed query) is
+// a 16 px root font, colour, no hover information, in the light colour scheme (or the dark one: css/index.ts
+// resolves an email whose styles change with `prefers-color-scheme` in both). There is no stylesheet to
+// re-evaluate them later, so a query is a constant. Anything this does not know (a feature, a unit, a malformed query) is
 // false, as a browser treats a query it cannot parse as `not all`.
 import { parseComponents, type CV } from './tokenize.js';
 
 export type Media = 'wide' | 'narrow';
+export type Scheme = 'light' | 'dark';
 
 interface Screen {
   width: number;
   height: number;
+  scheme: Scheme;
 }
-const SCREENS: Record<Media, Screen> = { wide: { width: 800, height: 600 }, narrow: { width: 375, height: 667 } };
+const SIZES: Record<Media, { width: number; height: number }> = { wide: { width: 800, height: 600 }, narrow: { width: 375, height: 667 } };
 
 /** a media query list (`@media`'s prelude, a `media` attribute): true when any query matches */
-export function matchMedia(list: CV[] | string, media: Media): boolean {
+export function matchMedia(list: CV[] | string, media: Media, scheme: Scheme = 'light'): boolean {
   const items = typeof list === 'string' ? parseComponents(list) : list;
   const queries = split(items);
   // an empty list matches everything
   if (queries.length === 1 && queries[0].length === 0) return true;
-  const screen = SCREENS[media];
+  const screen: Screen = { ...SIZES[media], scheme };
   return queries.some((q) => query(q, screen) === true);
 }
 
@@ -115,7 +118,7 @@ function featureValue(name: string, screen: Screen): Value | null {
     case 'height': case 'device-height': return { n: screen.height, kind: 'length' };
     case 'aspect-ratio': case 'device-aspect-ratio': return { n: screen.width / screen.height, kind: 'ratio' };
     case 'orientation': return { kw: screen.width > screen.height ? 'landscape' : 'portrait' };
-    case 'prefers-color-scheme': return { kw: 'light' };
+    case 'prefers-color-scheme': return { kw: screen.scheme };
     case 'prefers-reduced-motion': case 'prefers-reduced-transparency': return { kw: 'no-preference' };
     case 'prefers-contrast': return { kw: 'no-preference' };
     case 'forced-colors': return { kw: 'none' };

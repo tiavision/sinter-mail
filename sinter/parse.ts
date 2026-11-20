@@ -9,7 +9,7 @@
 // Pure: the same source and options give the same tree, with no globals beyond the language's and
 // `URL`, so sinter runs it at build time over a `file:` resource. The tree is kept with sinter's memo():
 // one parse per source and options, the tree frozen and shared.
-import { parseHTML, resolveStyles } from '@tiavision/sinter-mail/parser';
+import { parseHTML, resolve } from '@tiavision/sinter-mail/parser';
 import { memo } from '@tiaforge-ui/sinter/memo';
 import type { RawElement, RawNode } from './raw.js';
 import { attr } from './raw.js';
@@ -141,7 +141,7 @@ interface Context {
 
 function build(html: string, o: Options): Body {
   const root = parseHTML(html);
-  const styles = resolveStyles(root, { media: o.media });
+  const { styles, colorScheme, dark } = resolve(root, { media: o.media });
   const body = root.children.find((n): n is RawElement => n.type === 'element' && n.tag === 'body');
   const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, projected: new Map() };
   if (body) collectTargets(body, cx.targets);
@@ -153,7 +153,11 @@ function build(html: string, o: Options): Body {
     if (!s) continue;
     for (const p of ROOT_PROPS) if (s[p] !== undefined) style[p] = s[p];
   }
-  return { type: 'body', style, children, images: { origins: [...cx.origins].sort() } };
+  const out: Body = { type: 'body', style, children, images: { origins: [...cx.origins].sort() } };
+  // the schemes it is written for: what it declares, and dark too when its colours change with the scheme
+  const schemes = (['light', 'dark'] as const).filter((s) => colorScheme.includes(s) || (s === 'dark' && dark));
+  if (schemes.length) out.schemes = schemes;
+  return out;
 }
 
 const ROOT_PROPS: readonly Property[] = [...TEXT, 'background-color'];
