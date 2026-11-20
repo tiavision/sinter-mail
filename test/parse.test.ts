@@ -194,6 +194,36 @@ describe('colour schemes', () => {
   });
 });
 
+describe('pictures', () => {
+  const imgs = (b: Body) => els(b).filter((e) => e.tag === 'img').map((e) => [e.attrs.src ?? null, e.scheme ?? null]);
+  test('the img of a <picture> is kept, with what the picture would show', () => {
+    expect(imgs(parse('<p><picture><img src="https://x.example/a.png" alt="a"></picture></p>', { images: 'allow' }))).toEqual([['https://x.example/a.png', null]]);
+    expect(shape(parse('<p>x<picture><img alt="a"></picture>y</p>'))).toEqual([['p', 'x', ['img'], 'y']]);
+    // a picture without an img shows nothing
+    expect(shape(parse('<p><picture><source srcset="https://x.example/a.png"></picture></p>'))).toEqual([['p']]);
+  });
+  test('the first source that matches, at the parse width; an unknown type is passed over', () => {
+    const html = `<picture><source media="(max-width: 600px)" srcset="https://x.example/narrow.png 1x, https://x.example/narrow2.png 2x">
+      <source type="image/jxl" srcset="https://x.example/a.jxl"><source type="image/webp" srcset="https://x.example/a.webp">
+      <img src="https://x.example/a.png"></picture>`;
+    expect(imgs(parse(html, { images: 'allow' }))).toEqual([['https://x.example/a.webp', null]]);
+    expect(imgs(parse(html, { images: 'allow', media: 'narrow' }))).toEqual([['https://x.example/narrow.png', null]]);
+  });
+  test('a source for dark mode: an img for each scheme, shown in its scheme only, through the image policy', () => {
+    const b = parse(`<a href="https://x.example/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://x.example/logo-dark.png">
+      <img src="https://x.example/logo.png" alt="Logo" width="120"></picture></a>`, { images: 'proxy', proxy: '/img?url={url}' });
+    expect(imgs(b)).toEqual([['/img?url=https%3A%2F%2Fx.example%2Flogo.png', 'light'], ['/img?url=https%3A%2F%2Fx.example%2Flogo-dark.png', 'dark']]);
+    expect(first(b, 'img').attrs).toMatchObject({ alt: 'Logo', width: '120' });
+    expect(b.schemes).toEqual(['dark']);
+    expect(b.images.origins).toEqual(['https://x.example']);
+    // blocked: neither has a src, both keep their box
+    expect(imgs(parse(`<picture><source media="(prefers-color-scheme: dark)" srcset="https://x.example/d.png"><img src="https://x.example/l.png"></picture>`))).toEqual([[null, 'light'], [null, 'dark']]);
+  });
+  test('a source the email may not load is no image', () => {
+    expect(imgs(parse('<picture><source srcset="javascript:alert(1)"><img src="https://x.example/a.png"></picture>', { images: 'allow' }))).toEqual([[null, null]]);
+  });
+});
+
 describe('shown in one scheme only', () => {
   test('a logo for each scheme: each marked with its scheme', () => {
     const b = parse(`<style>.dark { display: none } @media (prefers-color-scheme: dark) { .light { display: none !important } .dark { display: block !important } }</style>

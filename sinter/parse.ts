@@ -9,7 +9,7 @@
 // Pure: the same source and options give the same tree, with no globals beyond the language's and
 // `URL`, so sinter runs it at build time over a `file:` resource. The tree is kept with sinter's memo():
 // one parse per source and options, the tree frozen and shared.
-import { parseHTML, resolve } from '@tiavision/sinter-mail/parser';
+import { matchMedia, parseHTML, resolve } from '@tiavision/sinter-mail/parser';
 import { memo } from '@tiaforge-ui/sinter/memo';
 import type { RawElement, RawNode } from './raw.js';
 import { attr } from './raw.js';
@@ -137,6 +137,10 @@ interface Context {
   styles: Map<RawElement, Style>;
   /** the elements shown in one colour scheme only (css/index.ts) */
   only: Map<RawElement, 'light' | 'dark'>;
+  /** the scheme the elements being built are shown in only, an ancestor's `only`; null in both */
+  inside: 'light' | 'dark' | null;
+  /** a picture chose an image for each scheme */
+  pictures: boolean;
   /** projected(): the style kept per resolved style and tag */
   projected: Map<Style, Map<Tag, Style>>;
 }
@@ -145,7 +149,7 @@ function build(html: string, o: Options): Body {
   const root = parseHTML(html);
   const { styles, colorScheme, dark, only } = resolve(root, { media: o.media });
   const body = root.children.find((n): n is RawElement => n.type === 'element' && n.tag === 'body');
-  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, only, projected: new Map() };
+  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, only, inside: null, pictures: false, projected: new Map() };
   if (body) collectTargets(body, cx.targets);
   const children = body ? nodes(body, 'body', cx) : [];
   // the body's style is the root's: its text properties and its background, the <html> element's under it
@@ -157,7 +161,7 @@ function build(html: string, o: Options): Body {
   }
   const out: Body = { type: 'body', style, children, images: { origins: [...cx.origins].sort() } };
   // the schemes it is written for: what it declares, and dark too when its colours change with the scheme
-  const schemes = (['light', 'dark'] as const).filter((s) => colorScheme.includes(s) || (s === 'dark' && dark));
+  const schemes = (['light', 'dark'] as const).filter((s) => colorScheme.includes(s) || (s === 'dark' && (dark || cx.pictures)));
   if (schemes.length) out.schemes = schemes;
   return out;
 }
@@ -221,6 +225,10 @@ function nodes(el: RawElement, tag: string, cx: Context): Node[] {
       else if (c.value) out.push({ type: 'text', value: c.value });
       continue;
     }
+    if (c.tag === 'picture') {
+      if (!allowed) out.push(...picture(c, cx));
+      continue;
+    }
     const n = element(c, cx);
     if (!n) continue;
     if (allowed && !allowed.has(n.tag)) continue;
@@ -250,12 +258,64 @@ function element(el: RawElement, cx: Context): Element | null {
       attrs.id = name;
     }
   }
-  if (tag === 'img') image(el, attrs, cx);
+  if (tag === 'img') image((attr(el, 'src') ?? '').trim(), attrs, cx);
   const style = projected(cx.styles.get(el), tag, cx);
-  const out: Element = { type: 'element', tag, attrs, style, children: info.void ? [] : nodes(el, tag, cx) };
   const scheme = cx.only.get(el);
+  const outer = cx.inside;
+  if (scheme) cx.inside = scheme;
+  const out: Element = { type: 'element', tag, attrs, style, children: info.void ? [] : nodes(el, tag, cx) };
+  cx.inside = outer;
   if (scheme) out.scheme = scheme;
   return out;
+}
+
+/**
+ * A `<picture>`: its `<img>`, with the source a browser picks (the first `<source>` whose `media` matches,
+ * at the `media` option's width, and whose `type` is an image type, else the img's own `src`). Picked for
+ * each colour scheme: when they differ (a logo for dark mode as a `<source media="(prefers-color-scheme:
+ * dark)">`), an img for each, shown in its scheme only. The picture itself renders as nothing of its own.
+ */
+function picture(el: RawElement, cx: Context): Element[] {
+  const img = el.children.find((c): c is RawElement => c.type === 'element' && c.tag === 'img');
+  if (!img) return [];
+  const pick = (scheme: 'light' | 'dark'): string => {
+    for (const s of el.children) {
+      if (s.type !== 'element') continue;
+      if (s === img) break;
+      if (s.tag !== 'source') continue;
+      const media = attr(s, 'media');
+      if (media !== null && !matchMedia(media, cx.o.media, scheme)) continue;
+      const type = attr(s, 'type')?.trim().toLowerCase();
+      if (type && !IMAGE_TYPES.has(type)) continue;
+      const url = firstCandidate(attr(s, 'srcset') ?? '');
+      if (url) return url;
+    }
+    return attr(img, 'src') ?? '';
+  };
+  const light = pick('light');
+  const dark = pick('dark');
+  const one = (src: string, scheme: 'light' | 'dark' | null): Element => {
+    const n = element(img, cx)!;
+    const attrs = { ...n.attrs };
+    delete attrs.src;
+    image(src, attrs, cx);
+    const out: Element = { ...n, attrs };
+    if (scheme) out.scheme = scheme;
+    return out;
+  };
+  if (cx.inside) return [one(cx.inside === 'dark' ? dark : light, null)];
+  if (light === dark) return [one(light, null)];
+  cx.pictures = true;
+  return [one(light, 'light'), one(dark, 'dark')];
+}
+
+/** the image types a `<source type>` may name for an email's picture: the rasters, and SVG (a remote image, through the app's proxy) */
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/avif', 'image/svg+xml']);
+
+/** the URL of a srcset's first candidate (its width or density left out: the email's layout sizes the image) */
+function firstCandidate(srcset: string): string | null {
+  const m = /^[\s,]*([^\s,][^\s]*?),?(?:\s|$)/.exec(srcset);
+  return m ? m[1] : null;
 }
 
 /** each tag's attributes, GLOBAL included (attrsOf), listed once */
@@ -340,8 +400,8 @@ function attribute(tag: Tag, name: keyof Attrs, value: string, cx: Context): str
 }
 
 /** an image's `src` under the options, and its origin counted */
-function image(el: RawElement, attrs: Attrs, cx: Context): void {
-  const src = (attr(el, 'src') ?? '').trim();
+function image(value: string, attrs: Attrs, cx: Context): void {
+  const src = value.trim();
   const { o } = cx;
   if (/^cid:/i.test(src)) {
     const id = contentId(src.slice(4));

@@ -136,7 +136,7 @@ export const attrsOf = (tag: Tag): readonly AttrName[] => [...GLOBAL, ...TAGS[ta
  */
 export const DROP: ReadonlySet<string> = new Set([
   'script', 'style', 'template', 'noscript', 'noembed', 'noframes', 'iframe', 'frame', 'frameset', 'object',
-  'embed', 'applet', 'param', 'video', 'audio', 'source', 'track', 'canvas', 'map', 'area', 'picture',
+  'embed', 'applet', 'param', 'video', 'audio', 'source', 'track', 'canvas', 'map', 'area',
   'form', 'input', 'button', 'select', 'option', 'optgroup', 'datalist', 'textarea', 'output', 'progress',
   'meter', 'keygen', 'link', 'meta', 'base', 'basefont', 'title', 'head', 'dialog', 'slot', 'portal',
   'marquee', 'blink', 'xmp', 'plaintext', 'listing', 'image', 'math', 'svg',

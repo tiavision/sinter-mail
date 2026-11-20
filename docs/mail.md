@@ -98,6 +98,10 @@ schemes](#colour-schemes)).
   opens in a new tab with `rel="noopener noreferrer"`. A `#fragment` link keeps its `href` only when the
   email has its target, which keeps its id, written `mail-…`.
 - **Images**: as the options say. `data:` images only as base64 PNG, JPEG, GIF, WebP or AVIF, never SVG.
+  A `<picture>` is its `<img>` with the source a browser picks: the first `<source>` whose `media` matches
+  (at the `media` option's width) and whose `type` is an image type, else the img's `src`. When the light
+  and dark schemes pick different ones (`<source media="(prefers-color-scheme: dark)">`), there is an img
+  for each, shown in its scheme only ([Colour schemes](#colour-schemes)).
 - **The structure the browser would build**: the parser follows the HTML standard's tree construction
   (implied end tags, tables, misnested formatting), so the tree is the browser's own, and a page built at
   build time is not reparsed into another one. Nesting deeper than 256 elements is flattened.
