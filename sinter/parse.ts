@@ -135,15 +135,17 @@ interface Context {
   ids: Set<string>;
   origins: Set<string>;
   styles: Map<RawElement, Style>;
+  /** the elements shown in one colour scheme only (css/index.ts) */
+  only: Map<RawElement, 'light' | 'dark'>;
   /** projected(): the style kept per resolved style and tag */
   projected: Map<Style, Map<Tag, Style>>;
 }
 
 function build(html: string, o: Options): Body {
   const root = parseHTML(html);
-  const { styles, colorScheme, dark } = resolve(root, { media: o.media });
+  const { styles, colorScheme, dark, only } = resolve(root, { media: o.media });
   const body = root.children.find((n): n is RawElement => n.type === 'element' && n.tag === 'body');
-  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, projected: new Map() };
+  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, only, projected: new Map() };
   if (body) collectTargets(body, cx.targets);
   const children = body ? nodes(body, 'body', cx) : [];
   // the body's style is the root's: its text properties and its background, the <html> element's under it
@@ -250,7 +252,10 @@ function element(el: RawElement, cx: Context): Element | null {
   }
   if (tag === 'img') image(el, attrs, cx);
   const style = projected(cx.styles.get(el), tag, cx);
-  return { type: 'element', tag, attrs, style, children: info.void ? [] : nodes(el, tag, cx) };
+  const out: Element = { type: 'element', tag, attrs, style, children: info.void ? [] : nodes(el, tag, cx) };
+  const scheme = cx.only.get(el);
+  if (scheme) out.scheme = scheme;
+  return out;
 }
 
 /** each tag's attributes, GLOBAL included (attrsOf), listed once */

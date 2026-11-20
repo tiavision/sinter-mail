@@ -89,6 +89,6 @@ test('every attribute and property of the table is bound where its tag renders, 
   const p = markup(join(DIR, 'internal/mail-p.html'));
   for (const prop of TAGS.p.props) expect(p).toContain(`'${prop}': node.style['${prop}']`.replace(/^'([a-z]+)': node\.style\['\1'\]$/, '$1: node.style.$1'));
   expect(p).toContain("id: node.attrs.id ? 'mail-' + node.attrs.id : null");
-  expect(read(join(DIR, 'internal/mail-a.html'))).toContain(`<a target="_blank" rel="noopener noreferrer" data-sn-attr="{ dir: node.attrs.dir, lang: node.attrs.lang, title: node.attrs.title, id: node.attrs.id ? 'mail-' + node.attrs.id : null, href: node.attrs.href }"`);
+  expect(read(join(DIR, 'internal/mail-a.html'))).toContain(`<a target="_blank" rel="noopener noreferrer" data-sn-attr="{ dir: node.attrs.dir, lang: node.attrs.lang, title: node.attrs.title, id: node.attrs.id ? 'mail-' + node.attrs.id : null, href: node.attrs.href, 'data-mail-scheme': node.scheme }"`);
   expect(read(join(DIR, 'internal/mail-img.html'))).toContain('srcset: null');
 });

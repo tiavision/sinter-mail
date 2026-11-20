@@ -159,8 +159,22 @@ other email that sets colours light:
 <div data-sn-class="{ 'mail-light': !tree.schemes?.includes('dark') }"><mail-body data-sn-prop="{ body: tree }"></mail-body></div>
 ```
 
-A dark rule's other properties (a light logo hidden, a dark one shown) keep their light values:
-`light-dark()` takes colours only.
+A dark rule's other properties keep their light values (`light-dark()` takes colours only), with one
+exception: an element that one scheme's rules hide (`display: none`) and the other's show is shown in that
+scheme only, a light logo beside a dark one. It carries `scheme` in the tree (`'light'` or `'dark'`), rendered
+as `data-mail-scheme`, and has that scheme's styles whole, as has everything inside it, so the hacks that hide
+a dark logo from Outlook (`max-height: 0`, `width: 0`) are undone with it. The library ships no CSS, so the
+app hides such elements in the other scheme:
+
+```css
+@media (prefers-color-scheme: light) { .mail [data-mail-scheme="dark"] { display: none !important; } }
+@media (prefers-color-scheme: dark) { .mail [data-mail-scheme="light"] { display: none !important; } }
+```
+
+These follow the system's scheme, as the page's `color-scheme: light dark` does; an app with a theme switch of
+its own writes them for its own selector (`[data-theme="dark"] .mail [data-mail-scheme="light"]`). An email
+with such elements always has `dark` in `schemes`, so an app that keeps light only the emails without it
+never shows one on a light canvas in dark mode.
 
 Quotes and signatures that `mail.plain` finds carry the classes `mail-quote` and `mail-signature`, for
 your styles (`.mail-signature { opacity: .7 }`).

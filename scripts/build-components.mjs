@@ -15,6 +15,7 @@
 //   null`: every id it can set starts with the literal, which sinter's SN503 accepts.
 // - `data-sn-style`: the properties its tag binds, literal keys; a property the tree leaves out is
 //   `undefined`, and nothing is written.
+// - `data-mail-scheme`: the colour scheme it is shown in only (`node.scheme`), absent on most elements.
 // - `data-sn-class`: the parts (`mail-quote`, `mail-signature`), on the tags they occur on (PARTS).
 // - its children, unless void: text runs first, every element through mail-node.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -40,7 +41,7 @@ const read = (obj, k) => (IDENT.test(k) ? `${obj}.${k}` : `${obj}['${k}']`);
 /** `data-sn-attr` for the element `v` of `tag`; `id`: with the prefixed id */
 function attrs(v, tag, id, extra = []) {
   const entries = attrsOf(tag).flatMap((a) => a === 'id' ? (id ? [`id: ${v}.attrs.id ? 'mail-' + ${v}.attrs.id : null`] : []) : [`${key(a)}: ${read(`${v}.attrs`, a)}`]);
-  const all = [...entries, ...extra];
+  const all = [...entries, `'data-mail-scheme': ${v}.scheme`, ...extra];
   return all.length ? ` data-sn-attr="{ ${all.join(', ')} }"` : '';
 }
 /** `data-sn-style` for the element `v` of `tag`: the properties its tag binds */

@@ -317,6 +317,30 @@ describe('colour schemes', () => {
     expect(resolved(`<style>@media (prefers-color-scheme: dark) { .none { color: white } }</style><p>`).dark).toBe(false);
     expect(resolved(`<p style="color: red">`).dark).toBe(false);
   });
+  test('an element one scheme hides is shown in the other only, with that scheme\'s styles, and what it holds too', () => {
+    const html = `<style>.d { display: none; max-height: 0; color: #111 } .d b { width: 0 }
+      @media (prefers-color-scheme: dark) { .l { display: none !important } .d { display: block !important; max-height: none !important; color: #eee } .d b { width: 9px } }</style>
+      <p id=l class=l style="color: #222">light</p><div id=d class=d><b id=b>dark</b></div><p id=both>both</p>`;
+    const root = reference(html);
+    const r = resolve(root, { media: 'wide' });
+    const byId = (id: string) => {
+      const find = (el: RawElement): RawElement | null => attr(el, 'id') === id ? el : el.children.reduce<RawElement | null>((f, c) => f ?? (c.type === 'element' ? find(c) : null), null);
+      return find(root)!;
+    };
+    expect(r.only.get(byId('l'))).toBe('light');
+    expect(r.only.get(byId('d'))).toBe('dark');
+    // inside a dark-only element: its styles are the dark ones, and it is not marked again
+    expect(r.only.has(byId('b'))).toBe(false);
+    expect(r.styles.get(byId('d'))).toEqual({ color: '#eee', display: 'block', 'max-height': 'none' });
+    expect(r.styles.get(byId('b'))).toEqual({ width: '9px' });
+    expect(r.styles.get(byId('l'))).toEqual({ color: '#222' });
+    expect(r.only.has(byId('both'))).toBe(false);
+    expect(r.dark).toBe(true);
+  });
+  test('an element hidden in both schemes, or in neither, is in no scheme only', () => {
+    const r = resolve(reference(`<style>p { display: none } @media (prefers-color-scheme: dark) { p { display: none !important; color: red } }</style><p>`), { media: 'wide' });
+    expect(r.only.size).toBe(0);
+  });
   test('colorScheme: the metas, and the property on <html> and <body>', () => {
     const cs = (html: string) => resolved(html).colorScheme;
     expect(cs('<p>')).toEqual([]);

@@ -194,6 +194,15 @@ describe('colour schemes', () => {
   });
 });
 
+describe('shown in one scheme only', () => {
+  test('a logo for each scheme: each marked with its scheme', () => {
+    const b = parse(`<style>.dark { display: none } @media (prefers-color-scheme: dark) { .light { display: none !important } .dark { display: block !important } }</style>
+      <div class="light"><img alt="light"></div><div class="dark"><img alt="dark"></div><p>both</p>`);
+    expect(els(b).filter((e) => e.scheme).map((e) => [e.tag, e.scheme])).toEqual([['div', 'light'], ['div', 'dark']]);
+    expect(b.schemes).toEqual(['dark']);
+  });
+});
+
 describe('repeated styles', () => {
   // the cascade computes one style per distinct (matched rules, inline style, legacy hints) and the tree
   // shares it (css/index.ts, parse.ts projected()): equal inputs, one object; any difference, its own

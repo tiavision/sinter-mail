@@ -77,6 +77,11 @@ export interface Element {
   style: Style;
   /** what the element is in the message: a quoted reply, the signature (mail.plain sets them) */
   part?: 'quote' | 'signature';
+  /**
+   * Shown in this colour scheme only: the email's rules hide it in the other (a dark logo beside the light
+   * one). Rendered as `data-mail-scheme`; the app's CSS hides it in the other scheme (docs/mail.md).
+   */
+  scheme?: 'light' | 'dark';
   children: Node[];
   /** the node's index in document order, and the last index in its subtree (mail.progressive) */
   n?: number;

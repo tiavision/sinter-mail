@@ -9,7 +9,9 @@
 // `prefers-color-scheme` is evaluated for both schemes, and an element whose colours differ between them
 // gets `light-dark(<light>, <dark>)`, which the browser resolves by the colour scheme the element is shown in
 // (the page's, unless the app gives the email another). Anything else a dark rule changes keeps its light
-// value: light-dark() takes colours only.
+// value: light-dark() takes colours only. But an element that one scheme's rules hide (`display: none`) is
+// shown in the other scheme only (`only`: a dark logo beside the light one), it and everything inside it
+// with that scheme's styles whole (the hacks that hide it from Outlook, `max-height: 0`, undone with it).
 //
 // Inheritance is not computed: the tree keeps the document's structure, so an inline style inherits in
 // the app as it did in the email.
@@ -42,7 +44,12 @@ export interface Resolved {
    * `supported-color-schemes` metas name, and the `color-scheme` property of its `<html>` and `<body>`
    */
   colorScheme: Scheme[];
-  /** some element's colours change with `prefers-color-scheme`: its style has `light-dark()` */
+  /**
+   * The elements shown in one scheme only: one scheme's rules hide them (`display: none`), the other's
+   * show them. Their styles, and those of the elements inside them, are that scheme's.
+   */
+  only: Map<RawElement, Scheme>;
+  /** the email's styles change with `prefers-color-scheme`: a colour (`light-dark()`), or an element in `only` */
   dark: boolean;
 }
 
@@ -64,6 +71,7 @@ const COLORS = new Map<number, string>([
 ].map(([l, v]) => [ID.get(l as Longhand)!, v]));
 const WIDE = new Set(['inherit', 'initial', 'unset']);
 const SCHEME = ID.get('color-scheme')!;
+const DISPLAY = ID.get('display')!;
 
 // the schemes a rule applies in, as bits
 const LIGHT = 1, DARK = 2, BOTH = LIGHT | DARK;
@@ -202,9 +210,14 @@ export function resolve(root: RawElement, options: ResolveOptions): Resolved {
   // that has the same. Bounded by the input: one entry per distinct string.
   const inlines = new Map<string, StyleRule>();
   const hinted = new Map<string, Compiled>();
-  const styles = new Map<string, Style | null>();
+  const styles = new Map<string, { style: Style | null; only: Scheme | null }>();
+  // the scheme an element is shown in only, by its own rules or an ancestor's (document order: a parent
+  // comes before its children); the ones whose own rules decide it are the result's `only`
+  const within = new Map<RawElement, Scheme>();
+  const only = new Map<RawElement, Scheme>();
   {
     for (const e of all) {
+      const inside = e.parent ? within.get(e.parent.el) ?? null : null;
       let candidates: Entry[] = [];
       const take = (list: Entry[] | undefined) => {
         if (!list || exhausted(work)) return;
@@ -229,12 +242,15 @@ export function resolve(root: RawElement, options: ResolveOptions): Resolved {
       const rootOrBody = e.el === root || e === body;
       let key: string | null = null;
       if (candidates.length <= CACHED && !rootOrBody) {
-        key = hkey + '|';
+        key = (inside ?? '') + '|' + hkey + '|';
         for (const c of candidates) key += c.id + ',';
         key += '|' + (inline ?? '');
         const known = styles.get(key);
         if (known !== undefined) {
-          if (known) out.set(e.el, known);
+          if (known.style) out.set(e.el, known.style);
+          const shown = inside ?? known.only;
+          if (shown) within.set(e.el, shown);
+          if (known.only) only.set(e.el, known.only);
           continue;
         }
       }
@@ -264,27 +280,39 @@ export function resolve(root: RawElement, options: ResolveOptions): Resolved {
         apply(h);
       };
       cascade(values, LIGHT);
-      // rules of one scheme only: the dark cascade too, and the colours that differ as light-dark()
+      // rules of one scheme only: the dark cascade too. Inside an element shown in one scheme, that scheme's
+      // styles; an element that one scheme hides and the other shows, the other's, and it is shown in that
+      // one only; any other, the colours that differ as light-dark()
+      let shownIn: Scheme | null = null;
       if (candidates.some((c) => c.schemes !== BOTH)) {
         cascade(dark, DARK);
-        for (const [i, initial] of COLORS) {
-          const l = values[i], d = dark[i];
-          if (l === d || (l !== undefined && WIDE.has(l)) || (d !== undefined && WIDE.has(d))) continue;
-          values[i] = `light-dark(${l ?? initial}, ${d ?? initial})`;
-          anyDark = true;
+        if (!inside && (values[DISPLAY] === 'none') !== (dark[DISPLAY] === 'none')) shownIn = values[DISPLAY] === 'none' ? 'dark' : 'light';
+        const scheme = inside ?? shownIn;
+        if (scheme === 'dark') for (let i = 0; i < values.length; i++) values[i] = dark[i];
+        else if (scheme === null) {
+          for (const [i, initial] of COLORS) {
+            const l = values[i], d = dark[i];
+            if (l === d || (l !== undefined && WIDE.has(l)) || (d !== undefined && WIDE.has(d))) continue;
+            values[i] = `light-dark(${l ?? initial}, ${d ?? initial})`;
+            anyDark = true;
+          }
         }
+        if (shownIn) anyDark = true;
       }
+      const shown = inside ?? shownIn;
+      if (shown) within.set(e.el, shown);
+      if (shownIn) only.set(e.el, shownIn);
       if (rootOrBody) {
         const v = values[SCHEME];
         if (v !== undefined && !WIDE.has(v)) for (const n of v.split(' ')) colorScheme.add(n);
       }
       const style = finish(values);
-      if (key !== null) styles.set(key, style);
+      if (key !== null) styles.set(key, { style, only: shownIn });
       if (style) out.set(e.el, style);
     }
   }
   const schemes = (['light', 'dark'] as const).filter((s) => colorScheme.has(s));
-  return { styles: out, colorScheme: schemes, dark: anyDark };
+  return { styles: out, colorScheme: schemes, only, dark: anyDark };
 }
 
 /** two lists in cascade order as one */

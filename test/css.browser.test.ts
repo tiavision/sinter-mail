@@ -4,7 +4,7 @@
 // must then agree on every element, but for the differences listed in ACCEPTED, each with its reason.
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { chromium, type Browser } from 'playwright';
-import { resolveStyles } from '../sinter/css/index.js';
+import { resolve } from '../sinter/css/index.js';
 import { PROPERTIES } from '../sinter/tags.js';
 import type { RawElement } from '../sinter/raw.js';
 import type { Style } from '../sinter/sinter.types.js';
@@ -222,15 +222,16 @@ const DOCS: Record<string, string> = {
 </body></html>`,
 };
 
-/** the resolved styles of a document, in document order of its HTML elements */
-function resolvedInOrder(html: string, media: 'wide' | 'narrow'): (Style | null)[] {
+/** the resolved styles of a document, in document order of its HTML elements; `only`: the scheme each is shown in only */
+function resolvedInOrder(html: string, media: 'wide' | 'narrow', only?: (string | null)[]): (Style | null)[] {
   const root = reference(html);
-  const map = resolveStyles(root, { media });
+  const { styles: map, only: shownIn } = resolve(root, { media });
   const out: (Style | null)[] = [];
   const stack: RawElement[] = [root];
   while (stack.length) {
     const el = stack.pop()!;
     out.push(map.get(el) ?? null);
+    only?.push(shownIn.get(el) ?? null);
     for (let i = el.children.length - 1; i >= 0; i--) {
       const c = el.children[i];
       if (c.type === 'element') stack.push(c);
@@ -248,12 +249,16 @@ interface Result {
   values: (string[] | null)[];
 }
 
-async function computed(html: string, media: 'wide' | 'narrow', styles: (Style | null)[] | null, scheme?: 'light' | 'dark'): Promise<Result & { rejected: string[] }> {
+// what an app writes for the elements shown in one scheme only (docs/mail.md, Colour schemes)
+const SCHEME_CSS = `@media (prefers-color-scheme: light) { [data-mail-scheme="dark"] { display: none !important } }
+@media (prefers-color-scheme: dark) { [data-mail-scheme="light"] { display: none !important } }`;
+
+async function computed(html: string, media: 'wide' | 'narrow', styles: (Style | null)[] | null, scheme?: 'light' | 'dark', only?: (string | null)[]): Promise<Result & { rejected: string[] }> {
   const page = await browser.newPage({ viewport: VIEWPORTS[media], colorScheme: scheme ?? 'light' });
   try {
     await page.setContent(html);
     return await page.evaluate(
-      ({ styles, props, attrs, scheme }) => {
+      ({ styles, props, attrs, scheme, only, css }) => {
         const els = [...document.getElementsByTagName('*')].filter((e) => e.namespaceURI === 'http://www.w3.org/1999/xhtml') as HTMLElement[];
         const rejected: string[] = [];
         if (styles) {
@@ -269,17 +274,26 @@ async function computed(html: string, media: 'wide' | 'narrow', styles: (Style |
             }
           });
         }
-        // a page that follows the system's scheme, as an app's does (light-dark() resolves by it)
+        // a page that follows the system's scheme, as an app's does (light-dark() resolves by it), with the
+        // app's rule for the elements shown in one scheme only
         if (scheme) document.documentElement.style.setProperty('color-scheme', 'light dark');
+        if (only) {
+          els.forEach((e, i) => { if (only[i]) e.setAttribute('data-mail-scheme', only[i]!); });
+          const s = document.createElement('style');
+          s.textContent = css;
+          document.head.append(s);
+        }
         const tags = els.map((e) => e.localName);
         const values = els.map((e) => {
           if (e.localName === 'style' || !e.isConnected) return null;
+          // with schemes, an element not shown is compared by that alone: its other styles are not seen
+          if (scheme && !e.checkVisibility()) return props.map((p) => (p === 'display' ? 'hidden' : ''));
           const cs = getComputedStyle(e);
           return props.map((p) => cs.getPropertyValue(p));
         });
         return { tags, values, rejected };
       },
-      { styles, props: [...PROPERTIES], attrs: PRESENTATIONAL, scheme },
+      { styles, props: [...PROPERTIES], attrs: PRESENTATIONAL, scheme, only, css: SCHEME_CSS },
     );
   } finally {
     await page.close();
@@ -306,16 +320,32 @@ a { color: #0b57d0; text-decoration: underline #0b57d0 }
 </style><style media="(prefers-color-scheme: dark)">h1 { color: white }</style></head>
 <body><h1>Title</h1><table class="card"><tr><td><p>Text <a href="https://example.com/">a link</a>.</p>
 <p class="muted">muted</p><p class="only-dark">x</p></td></tr></table></body></html>`,
+  // a logo for each scheme, the dark one hidden as Litmus's guide hides it (Outlook too), and a cell whose
+  // dark rules hide it; a dark-only block with styles of its own inside
+  swap: `<!doctype html><html><head><meta name="color-scheme" content="light dark"><style>
+.dark-img { display: none; overflow: hidden; float: left; width: 0; max-height: 0; max-width: 0; line-height: 0 }
+@media (prefers-color-scheme: dark) {
+  .light-img { display: none !important }
+  .dark-img { display: block !important; width: auto !important; overflow: visible !important; float: none !important; max-height: none !important; max-width: none !important; line-height: normal !important }
+  .dark-img img { width: 120px !important }
+  .light-cell { display: none }
+  .note { color: #eee }
+}
+.dark-img img { width: 0 }
+</style></head><body><div class="light-img"><img src="https://example.com/l.png" alt="light" width="120" height="40"></div>
+<div class="dark-img"><img src="https://example.com/d.png" alt="dark" height="40"><p class="note">only in the dark</p></div>
+<table><tr><td class="light-cell">light only</td><td>both</td></tr></table></body></html>`,
 };
 
 describe('colour schemes against Chromium', () => {
   for (const [name, html] of Object.entries(SCHEMED)) {
     for (const scheme of ['light', 'dark'] as const) {
       test(`${name} (${scheme})`, async () => {
-        const styles = resolvedInOrder(html, 'wide');
-        expect(JSON.stringify(styles)).toContain('light-dark(');
+        const only: (string | null)[] = [];
+        const styles = resolvedInOrder(html, 'wide', only);
+        expect(JSON.stringify(styles) + JSON.stringify(only)).toMatch(/light-dark\(|"dark"/);
         const original = await computed(html, 'wide', null, scheme);
-        const rendered = await computed(html, 'wide', styles, scheme);
+        const rendered = await computed(html, 'wide', styles, scheme, only);
         expect(rendered.rejected).toEqual([]);
         const differences: string[] = [];
         original.tags.forEach((tag, i) => {
