@@ -5,6 +5,12 @@
 // element's style, rendered inline by data-sn-style: there is no stylesheet to evaluate later, so
 // `@media` is decided here too (the `media` option), and selectors are matched against the raw tree.
 //
+// The colour scheme is the one thing an email's styles may change with that the app's page still decides:
+// `prefers-color-scheme` is evaluated for both schemes, and an element whose colours differ between them
+// gets `light-dark(<light>, <dark>)`, which the browser resolves by the colour scheme the element is shown in
+// (the page's, unless the app gives the email another). Anything else a dark rule changes keeps its light
+// value: light-dark() takes colours only.
+//
 // Inheritance is not computed: the tree keeps the document's structure, so an inline style inherits in
 // the app as it did in the email.
 //
@@ -13,7 +19,7 @@ import { attr, type RawElement } from '../raw.js';
 import { PROPERTIES } from '../tags.js';
 import type { Property, Style } from '../sinter.types.js';
 import { hints, legacyColor } from './hints.js';
-import { matchMedia, type Media } from './media.js';
+import { matchMedia, type Media, type Scheme } from './media.js';
 import { parseDeclarations, parseStylesheet, rules as parseRules, type Declaration, type Rule } from './parse.js';
 import { bucketKey, exhausted, indexTree, matches, parseSelectorList, type Budget, type Complex } from './selectors.js';
 import { expand, joinOverflow, joinTextDecoration, type Assignment, type Longhand } from './values.js';
@@ -28,13 +34,39 @@ export interface ResolveOptions {
   media: Media;
 }
 
+export interface Resolved {
+  /** every element's resolved style; elements whose style is empty have no entry */
+  styles: Map<RawElement, Style>;
+  /**
+   * the schemes the email is written for, `light` before `dark`: those its `color-scheme` and
+   * `supported-color-schemes` metas name, and the `color-scheme` property of its `<html>` and `<body>`
+   */
+  colorScheme: Scheme[];
+  /** some element's colours change with `prefers-color-scheme`: its style has `light-dark()` */
+  dark: boolean;
+}
+
 // every tracked longhand by number: an element's values are an array, not a map, since a hostile
 // stylesheet can match thousands of rules on every element
 const LONGHANDS: Longhand[] = [
   ...(PROPERTIES.filter((p) => p !== 'text-decoration' && p !== 'overflow') as Longhand[]),
   'text-decoration-line', 'text-decoration-style', 'text-decoration-color', 'overflow-x', 'overflow-y',
+  'color-scheme',
 ];
 const ID = new Map(LONGHANDS.map((l, i) => [l, i]));
+
+// the colour longhands, by number, with their initial values: what light-dark() is written for, the
+// initial value standing in for the scheme whose rules do not set one (`currentcolor` in `color` is the
+// inherited colour)
+const COLORS = new Map<number, string>([
+  ['color', 'currentcolor'], ['background-color', 'transparent'], ['text-decoration-color', 'currentcolor'],
+  ['border-top-color', 'currentcolor'], ['border-right-color', 'currentcolor'], ['border-bottom-color', 'currentcolor'], ['border-left-color', 'currentcolor'],
+].map(([l, v]) => [ID.get(l as Longhand)!, v]));
+const WIDE = new Set(['inherit', 'initial', 'unset']);
+const SCHEME = ID.get('color-scheme')!;
+
+// the schemes a rule applies in, as bits
+const LIGHT = 1, DARK = 2, BOTH = LIGHT | DARK;
 
 /**
  * Assignments as parallel arrays of longhand numbers and values, the last one per longhand only, and
@@ -64,6 +96,8 @@ interface Entry {
   normal: Compiled;
   /** null when the rule has no !important declaration */
   important: Compiled | null;
+  /** the schemes its `@media` (or its `<style media>`) applies in: LIGHT, DARK or BOTH */
+  schemes: number;
 }
 
 // the matching work allowed for one resolve (selectors.ts, budget): a 1,800-element newsletter with
@@ -88,16 +122,27 @@ const MAX_MEDIA_DEPTH = 16;
  * Elements whose style is empty have no entry.
  */
 export function resolveStyles(root: RawElement, options: ResolveOptions): Map<RawElement, Style> {
+  return resolve(root, options).styles;
+}
+
+/** the styles of resolveStyles(), and what the email says about colour schemes */
+export function resolve(root: RawElement, options: ResolveOptions): Resolved {
   const media = options.media;
+  /** the schemes a media query list matches in, within `outer` */
+  const schemesOf = (list: Parameters<typeof matchMedia>[0], outer: number) =>
+    outer & ((matchMedia(list, media, 'light') ? LIGHT : 0) | (matchMedia(list, media, 'dark') ? DARK : 0));
   const all = indexTree(root);
 
   // the author rules, from every <style> in document order
   const buckets = new Map<string, Entry[]>();
   let order = 0, ids = 0;
-  const addRules = (list: Rule[], depth: number) => {
+  const addRules = (list: Rule[], depth: number, schemes: number) => {
     for (const r of list) {
       if (r.t === 'at') {
-        if (r.name === 'media' && r.block && depth < MAX_MEDIA_DEPTH && matchMedia(r.prelude, media)) addRules(parseRules(r.block.items, false), depth + 1);
+        if (r.name === 'media' && r.block && depth < MAX_MEDIA_DEPTH) {
+          const inner = schemesOf(r.prelude, schemes);
+          if (inner) addRules(parseRules(r.block.items, false), depth + 1, inner);
+        }
         // @import, @font-face, @keyframes, @supports, @layer, @page, @charset and the rest: dropped
         continue;
       }
@@ -112,18 +157,19 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
         const key = bucketKey(sel);
         let b = buckets.get(key);
         if (!b) buckets.set(key, (b = []));
-        b.push({ id: ids++, sel, specificity: sel.specificity, order: o, normal: rule.normal, important: rule.important.props.length ? rule.important : null });
+        b.push({ id: ids++, sel, specificity: sel.specificity, order: o, normal: rule.normal, important: rule.important.props.length ? rule.important : null, schemes });
       }
     }
   };
   for (const e of all) {
     if (e.el.tag !== 'style' || !isCss(e.el)) continue;
     const m = attr(e.el, 'media');
-    if (m !== null && !matchMedia(m, media)) continue;
+    const schemes = m === null ? BOTH : schemesOf(m, BOTH);
+    if (!schemes) continue;
     let text = '';
     for (const c of e.el.children) if (c.type === 'text') text += c.value;
     if (ids >= MAX_RULES) break;
-    addRules(parseStylesheet(text), 0);
+    addRules(parseStylesheet(text), 0, schemes);
   }
 
   const body = all.find((e) => e.el.tag === 'body' && e.parent?.el === root) ?? null;
@@ -137,6 +183,17 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
   const out = new Map<RawElement, Style>();
   const universal = buckets.get('*');
   const values: (string | undefined)[] = new Array(LONGHANDS.length);
+  const dark: (string | undefined)[] = new Array(LONGHANDS.length);
+  const colorScheme = new Set<string>();
+  let anyDark = false;
+  for (const e of all) {
+    if (e.el.tag !== 'meta') continue;
+    const name = attr(e.el, 'name')?.trim().toLowerCase();
+    const content = attr(e.el, 'content');
+    if ((name !== 'color-scheme' && name !== 'supported-color-schemes') || content === null) continue;
+    const v = expand('color-scheme', content)?.[0]?.[1];
+    if (v && !WIDE.has(v)) for (const n of v.split(' ')) colorScheme.add(n);
+  }
   const work: Budget = { left: MAX_STEPS };
   // Emails repeat themselves: builders write the same inline style and legacy attributes on every cell of
   // a kind, and those cells match the same rules. So within one resolve: an inline style is parsed once
@@ -168,8 +225,10 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
       // the hints (no `|` in them), the matched entries' ids, then the inline text: unambiguous. Not for an
       // element that matches more than CACHED rules (a hostile stylesheet's thousands): its key would cost
       // as much as its style, so it is computed as it is
+      // <html> and <body> are not shared: their `color-scheme` is read below
+      const rootOrBody = e.el === root || e === body;
       let key: string | null = null;
-      if (candidates.length <= CACHED) {
+      if (candidates.length <= CACHED && !rootOrBody) {
         key = hkey + '|';
         for (const c of candidates) key += c.id + ',';
         key += '|' + (inline ?? '');
@@ -180,33 +239,52 @@ export function resolveStyles(root: RawElement, options: ResolveOptions): Map<Ra
         }
       }
 
-      // from the highest precedence down, each longhand taken from the first that sets it: inline
-      // !important, author !important (the last in cascade order first), inline, author, hints
-      values.fill(undefined);
-      let s0 = 0, s1 = 0, s2 = 0;
-      const apply = (c: Compiled) => {
-        if (!((c.m0 & ~s0) | (c.m1 & ~s1) | (c.m2 & ~s2))) return;
-        for (let i = 0; i < c.props.length; i++) if (values[c.props[i]] === undefined) values[c.props[i]] = c.values[i];
-        s0 |= c.m0; s1 |= c.m1; s2 |= c.m2;
-      };
       let own: StyleRule | null = null;
       if (inline !== null) {
         own = inlines.get(inline) ?? null;
         if (!own) inlines.set(inline, (own = compile(parseDeclarations(inline))));
       }
-      if (own) apply(own.important);
-      for (let i = candidates.length - 1; i >= 0; i--) { const imp = candidates[i].important; if (imp) apply(imp); }
-      if (own) apply(own.normal);
-      for (let i = candidates.length - 1; i >= 0; i--) apply(candidates[i].normal);
       let h = hinted.get(hkey);
       if (!h) hinted.set(hkey, (h = compiled(hs)));
-      apply(h);
+      // from the highest precedence down, each longhand taken from the first that sets it: inline
+      // !important, author !important (the last in cascade order first), inline, author, hints; the
+      // author's rules those of `scheme` only
+      const cascade = (into: (string | undefined)[], scheme: number) => {
+        into.fill(undefined);
+        let s0 = 0, s1 = 0, s2 = 0;
+        const apply = (c: Compiled) => {
+          if (!((c.m0 & ~s0) | (c.m1 & ~s1) | (c.m2 & ~s2))) return;
+          for (let i = 0; i < c.props.length; i++) if (into[c.props[i]] === undefined) into[c.props[i]] = c.values[i];
+          s0 |= c.m0; s1 |= c.m1; s2 |= c.m2;
+        };
+        if (own) apply(own.important);
+        for (let i = candidates.length - 1; i >= 0; i--) { const c = candidates[i]; if (c.important && c.schemes & scheme) apply(c.important); }
+        if (own) apply(own.normal);
+        for (let i = candidates.length - 1; i >= 0; i--) { const c = candidates[i]; if (c.schemes & scheme) apply(c.normal); }
+        apply(h);
+      };
+      cascade(values, LIGHT);
+      // rules of one scheme only: the dark cascade too, and the colours that differ as light-dark()
+      if (candidates.some((c) => c.schemes !== BOTH)) {
+        cascade(dark, DARK);
+        for (const [i, initial] of COLORS) {
+          const l = values[i], d = dark[i];
+          if (l === d || (l !== undefined && WIDE.has(l)) || (d !== undefined && WIDE.has(d))) continue;
+          values[i] = `light-dark(${l ?? initial}, ${d ?? initial})`;
+          anyDark = true;
+        }
+      }
+      if (rootOrBody) {
+        const v = values[SCHEME];
+        if (v !== undefined && !WIDE.has(v)) for (const n of v.split(' ')) colorScheme.add(n);
+      }
       const style = finish(values);
       if (key !== null) styles.set(key, style);
       if (style) out.set(e.el, style);
     }
   }
-  return out;
+  const schemes = (['light', 'dark'] as const).filter((s) => colorScheme.has(s));
+  return { styles: out, colorScheme: schemes, dark: anyDark };
 }
 
 /** two lists in cascade order as one */

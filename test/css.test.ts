@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { attr, type RawElement } from '../sinter/raw.js';
-import { resolveStyles } from '../sinter/css/index.js';
+import { resolve, resolveStyles } from '../sinter/css/index.js';
 import { parseComponents, tokenize } from '../sinter/css/tokenize.js';
 import { parseDeclarations, parseStylesheet } from '../sinter/css/parse.js';
 import { matchMedia } from '../sinter/css/media.js';
@@ -278,6 +278,67 @@ describe('media', () => {
       <style media="print">p { font-size: 99px }</style><style media="(max-width: 480px)">p { height: 2px }</style><p id=x>`;
     expect(one(html)).toEqual({ color: 'red' });
     expect(one(html, 'narrow')).toEqual({ color: 'blue', width: '1px', height: '2px' });
+  });
+});
+
+describe('colour schemes', () => {
+  const resolved = (html: string) => resolve(reference(html), { media: 'wide' });
+  test('prefers-color-scheme in both schemes', () => {
+    expect(matchMedia('(prefers-color-scheme: dark)', 'wide', 'dark')).toBe(true);
+    expect(matchMedia('(prefers-color-scheme: light)', 'wide', 'dark')).toBe(false);
+    expect(matchMedia('(prefers-color-scheme: dark) and (max-width: 600px)', 'narrow', 'dark')).toBe(true);
+    expect(matchMedia('(prefers-color-scheme: dark) and (max-width: 600px)', 'wide', 'dark')).toBe(false);
+  });
+  test('colours a dark rule changes are light-dark(); what it sets that a light one does not, the initial value in light', () => {
+    const s = styles(`<style>p { color: #222; background-color: #fff; width: 10px }
+      @media (prefers-color-scheme: dark) { p { color: #eee !important; background-color: #111; width: 20px; border-left: 1px solid #333 } }
+      .t { text-decoration: underline #00f } @media (prefers-color-scheme: dark) { .t { text-decoration-color: #9cf } }</style>
+      <p id=x>a</p><p id=y class=t>b</p>`);
+    expect(s.x).toMatchObject({
+      color: 'light-dark(#222, #eee)', 'background-color': 'light-dark(#fff, #111)', width: '10px',
+      'border-left-color': 'light-dark(currentcolor, #333)',
+    });
+    // a non-colour property keeps its light value: light-dark() takes colours only
+    expect(s.x['border-left-width']).toBeUndefined();
+    expect(s.y).toMatchObject({ 'text-decoration': 'underline light-dark(#00f, #9cf)' });
+  });
+  test('<style media>, a rule for light only, nesting', () => {
+    expect(one(`<style media="(prefers-color-scheme: dark)">p { color: white }</style><p id=x>`)).toEqual({ color: 'light-dark(currentcolor, white)' });
+    expect(one(`<style>@media (prefers-color-scheme: light) { p { color: navy } }</style><p id=x>`)).toEqual({ color: 'light-dark(navy, currentcolor)' });
+    expect(one(`<style>@media (max-width: 600px) { @media (prefers-color-scheme: dark) { p { color: white } } }</style><p id=x>`)).toEqual({});
+    expect(one(`<style>@media screen { @media (prefers-color-scheme: dark) { p { color: white } } }</style><p id=x>`)).toEqual({ color: 'light-dark(currentcolor, white)' });
+  });
+  test('a CSS-wide keyword in one scheme keeps the light value', () => {
+    expect(one(`<style>p { color: red } @media (prefers-color-scheme: dark) { p { color: inherit } }</style><p id=x>`)).toEqual({ color: 'red' });
+  });
+  test('dark: whether a colour changes', () => {
+    expect(resolved(`<style>@media (prefers-color-scheme: dark) { p { color: white } }</style><p>`).dark).toBe(true);
+    expect(resolved(`<style>@media (prefers-color-scheme: dark) { p { width: 1px } } p { color: red }</style><p>`).dark).toBe(false);
+    expect(resolved(`<style>@media (prefers-color-scheme: dark) { .none { color: white } }</style><p>`).dark).toBe(false);
+    expect(resolved(`<p style="color: red">`).dark).toBe(false);
+  });
+  test('colorScheme: the metas, and the property on <html> and <body>', () => {
+    const cs = (html: string) => resolved(html).colorScheme;
+    expect(cs('<p>')).toEqual([]);
+    expect(cs('<meta name="color-scheme" content="light dark"><p>')).toEqual(['light', 'dark']);
+    expect(cs('<meta name="supported-color-schemes" content="dark light"><p>')).toEqual(['light', 'dark']);
+    expect(cs('<meta name="Color-Scheme" content="only light"><p>')).toEqual(['light']);
+    expect(cs('<meta name="color-scheme" content="normal"><p>')).toEqual([]);
+    expect(cs('<meta name="color-scheme" content="light, dark"><p>')).toEqual([]);
+    expect(cs('<html style="color-scheme: light dark"><p>')).toEqual(['light', 'dark']);
+    expect(cs('<style>:root { color-scheme: dark }</style><p>')).toEqual(['dark']);
+    expect(cs('<style>body { color-scheme: light dark }</style><p>')).toEqual(['light', 'dark']);
+    // on another element it says nothing about the email, and is never kept
+    expect(cs('<p style="color-scheme: dark">')).toEqual([]);
+    expect(one('<p id=x style="color-scheme: dark; color: red">')).toEqual({ color: 'red' });
+  });
+  test('color-scheme values', () => {
+    expect(ex('color-scheme', 'light dark')).toEqual({ 'color-scheme': 'light dark' });
+    expect(ex('color-scheme', 'dark light only')).toEqual({ 'color-scheme': 'light dark' });
+    expect(ex('color-scheme', 'only')).toBeNull();
+    expect(ex('color-scheme', 'light only dark')).toBeNull();
+    expect(ex('color-scheme', 'sepia')).toEqual({ 'color-scheme': 'normal' });
+    expect(ex('color-scheme', 'normal light')).toBeNull();
   });
 });
 

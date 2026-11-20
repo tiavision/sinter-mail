@@ -91,6 +91,15 @@ export interface Body {
   style: Style;
   children: Node[];
   images: ImageInfo;
+  /**
+   * The colour schemes the email is written for, `light` before `dark`; absent when it says nothing (it was
+   * written for a white page). Those its `color-scheme` and `supported-color-schemes` metas name, or the
+   * `color-scheme` property of its `<html>` or `<body>`; and `dark` whenever its colours change with
+   * `prefers-color-scheme`: then those colours are `light-dark(<light>, <dark>)` in the elements' styles, and
+   * follow the colour scheme the body is shown in. With `dark` here, the email may be shown on a dark page as
+   * it is; without, an app keeps it light there (`color-scheme: light` around it).
+   */
+  schemes?: ('light' | 'dark')[];
   /** set by mail.progressive: <mail-body> renders the nodes with an index below this first, the rest after the browser has painted them */
   head?: number;
   /** set by mail.progressive: the body up to `head`, the subtrees it holds whole shared with the body */

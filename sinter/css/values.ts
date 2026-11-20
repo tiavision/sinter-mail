@@ -12,13 +12,15 @@ import type { Property } from '../sinter.types.js';
 import { parseComponents, type CV, type Func } from './tokenize.js';
 
 /**
- * What the cascade tracks: the kept properties, and the longhands of the two kept properties that are
- * shorthands in CSS (`text-decoration`, `overflow`), joined back when the element's style is written.
+ * What the cascade tracks: the kept properties, the longhands of the two kept properties that are
+ * shorthands in CSS (`text-decoration`, `overflow`), joined back when the element's style is written, and
+ * `color-scheme`, read on the email's `<html>` and `<body>` (the schemes it is written for) and never kept.
  */
 export type Longhand =
   | Exclude<Property, 'text-decoration' | 'overflow'>
   | 'text-decoration-line' | 'text-decoration-style' | 'text-decoration-color'
-  | 'overflow-x' | 'overflow-y';
+  | 'overflow-x' | 'overflow-y'
+  | 'color-scheme';
 
 export type Assignment = [Longhand, string];
 
@@ -339,6 +341,7 @@ const SHORTHANDS: Record<string, Longhand[]> = {
   'font-family': ['font-family'],
   'border-spacing': ['border-spacing'],
   'word-wrap': ['overflow-wrap'],
+  'color-scheme': ['color-scheme'],
   ...Object.fromEntries(CORNERS.map((c) => [`border-${c}-radius`, [`border-${c}-radius` as Longhand]])),
 };
 
@@ -404,8 +407,27 @@ export function expand(name: string, value: CV[] | string): Assignment[] | null 
       const v = xs.length === 1 ? SINGLE['overflow-wrap']!(xs[0]) : null;
       return v === null ? null : [['overflow-wrap', v]];
     }
+    case 'color-scheme': {
+      const v = colorScheme(xs);
+      return v === null ? null : [['color-scheme', v]];
+    }
   }
   return null;
+}
+
+/**
+ * `color-scheme`: `normal`, or the schemes (`light`, `dark`, names of others) with `only` before or after
+ * them; written as the known schemes, `light dark` in that order, or `normal` when it names neither
+ */
+function colorScheme(xs: CV[]): string | null {
+  const names = xs.map(kw);
+  if (names.includes(null)) return null;
+  if (names.length === 1 && names[0] === 'normal') return 'normal';
+  if (names.includes('normal') || names.filter((n) => n === 'only').length > 1) return null;
+  if (names.indexOf('only') > 0 && names.indexOf('only') < names.length - 1) return null;
+  const known = (['light', 'dark'] as const).filter((s) => names.includes(s));
+  if (names.filter((n) => n !== 'only').length === 0) return null;
+  return known.length ? known.join(' ') : 'normal';
 }
 
 /** `border` and `border-<side>`: width || style || colour, each at most once; the rest initial */

@@ -174,6 +174,26 @@ function invariants(b: Body, options: { images?: string } = {}): void {
   for (const v of Object.values(b.style)) expect(v).not.toMatch(BAD_STYLE);
 }
 
+describe('colour schemes', () => {
+  test('schemes: absent for an email that says nothing', () => {
+    expect(parse('<p style="color: #333">a</p>').schemes).toBeUndefined();
+  });
+  test('an email declaring light and dark, with no rules for them, keeps its colours as written', () => {
+    const b = parse(`<html lang="en" style="color-scheme: light dark"><head><meta name="color-scheme" content="light dark">
+      <meta name="supported-color-schemes" content="light dark"></head><body><p><a href="https://example.com/" style="color: #a85fb0">a</a></p></body></html>`);
+    expect(b.schemes).toEqual(['light', 'dark']);
+    expect(first(b, 'a').style.color).toBe('#a85fb0');
+  });
+  test('an email with dark rules: dark, light-dark() on the elements and the root', () => {
+    const b = parse(`<style>body { background-color: #f4f4f4; color: #111 } .card { background-color: #fff }
+      @media (prefers-color-scheme: dark) { body { background-color: #000 !important; color: #ddd !important } .card { background-color: #1c1c1c !important } }</style>
+      <body><div class="card">a</div></body>`);
+    expect(b.schemes).toEqual(['dark']);
+    expect(b.style).toMatchObject({ 'background-color': 'light-dark(#f4f4f4, #000)', color: 'light-dark(#111, #ddd)' });
+    expect(first(b, 'div').style['background-color']).toBe('light-dark(#fff, #1c1c1c)');
+  });
+});
+
 describe('repeated styles', () => {
   // the cascade computes one style per distinct (matched rules, inline style, legacy hints) and the tree
   // shares it (css/index.ts, parse.ts projected()): equal inputs, one object; any difference, its own
