@@ -100,6 +100,18 @@ describe('images', () => {
   test('data: images up to the bound', () => {
     expect(srcs(parse(HTML, { dataImages: 10 }))[3]).toBeUndefined();
   });
+  test('a pixel (at most 1 × 1, by attributes or CSS) is left out, and its origin is not listed', () => {
+    const alts = (html: string) => els(parse(html, { images: 'allow' })).filter((e) => e.tag === 'img').map((e) => e.attrs.alt);
+    const img = (alt: string, rest = '') => `<img src="https://t.example/${alt}.gif" alt="${alt}"${rest}>`;
+    expect(alts([
+      img('attrs', ' width="1" height="1"'), img('zero', ' width="0" height="0"'), img('css', ' style="width:1px;height:1px"'),
+      img('half', ' style="width:0.5px;height:0"'), img('mixed', ' width="1" style="height:1px"'),
+      img('spacer', ' width="1" height="20"'), img('stretched', ' width="1" height="1" style="width:100px"'),
+      img('wide', ' width="600"'), img('unsized'),
+    ].join(''))).toEqual(['spacer', 'stretched', 'wide', 'unsized']);
+    expect(parse(img('p', ' width="1" height="1"'), { images: 'allow' }).images.origins).toEqual([]);
+    expect(parse(`<p>a${img('p', ' width="1" height="1"')}b</p>`).children).toEqual([expect.objectContaining({ tag: 'p', children: [{ type: 'text', value: 'ab' }] })]);
+  });
 });
 
 describe('options', () => {
@@ -236,7 +248,9 @@ describe('the corpus', () => {
     expect(h1.style['font-size']).toBe('28px');
     expect(parse(readFileSync(join(CORPUS, 'newsletter.html'), 'utf8'), { media: 'narrow' }).children.length).toBeGreaterThan(0);
     expect(first(parse(readFileSync(join(CORPUS, 'newsletter.html'), 'utf8'), { media: 'narrow' }), 'h1').style['font-size']).toBe('22px');
-    expect(b.images.origins).toEqual(['https://images.example.com', 'https://track.example.net']);
+    // the open-tracking pixel is left out: no request, and its origin is not offered to allow
+    expect(b.images.origins).toEqual(['https://images.example.com']);
+    expect(els(b).some((e) => e.attrs.alt === '' && e.tag === 'img')).toBe(false);
     const a = els(b).find((e) => e.tag === 'a' && e.attrs.href?.includes('/tools'))!;
     expect(a.style.color).toBe('#ffffff');
     // the preheader is hidden, as in every client

@@ -107,7 +107,7 @@ export interface Body {
 }
 
 export interface ImageInfo {
-  /** every remote image's origin (`https://cdn.example`), sorted, once each, whatever `images` is */
+  /** every remote image's origin (`https://cdn.example`), sorted, once each, whatever `images` is; not a 1 × 1 pixel's, which is left out */
   origins: string[];
 }
 

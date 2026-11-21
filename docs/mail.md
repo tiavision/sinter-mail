@@ -82,7 +82,7 @@ same source and options give the same tree, frozen and shared: change a copy (`s
 
 The tree (`Body`) has the email's elements (`type: 'element'`, `tag`, `attrs`, `style`, `children`) and
 texts, the body's own `style` (its background and font, rendered on the root), `images.origins`: every
-remote image's origin, sorted, for a "show images from …" control, and `schemes` ([Colour
+remote image's origin (a left-out pixel's not), sorted, for a "show images from …" control, and `schemes` ([Colour
 schemes](#colour-schemes)).
 
 ### What is kept
@@ -98,6 +98,8 @@ schemes](#colour-schemes)).
   opens in a new tab with `rel="noopener noreferrer"`. A `#fragment` link keeps its `href` only when the
   email has its target, which keeps its id, written `mail-…`.
 - **Images**: as the options say. `data:` images only as base64 PNG, JPEG, GIF, WebP or AVIF, never SVG.
+  An image of at most 1 × 1 pixel (`width` and `height`, as attributes or CSS) is left out, whatever the
+  options: it shows nothing, and what it is for is telling the sender when the email was opened.
 - **The structure the browser would build**: the parser follows the HTML standard's tree construction
   (implied end tags, tables, misnested formatting), so the tree is the browser's own, and a page built at
   build time is not reparsed into another one. Nesting deeper than 256 elements is flattened.
@@ -117,7 +119,11 @@ are evaluated at the `media` option's width (and `prefers-color-scheme` for both
 dropped. Never kept: `position`, `z-index`, `transform`, `url()` in any value (background images
 included), `var()`, `calc()`, negative margins.
 
-`<mail-body>` writes each element's styles inline. So:
+`<mail-body>` writes each element's styles inline, and leaves out what the email hides: an element whose
+`display` is `none` at the parsed width is not in the page, nor anything inside it, so a mobile-only copy of
+an image is not downloaded on a wide screen (and the other way round), and the page has fewer elements to
+build. To follow the reader's width, parse again with the other `media` when it crosses your breakpoint: the
+new tree shows what that width shows, and its images load then. So:
 
 - **The email's styles win over the page's.** An inline style beats every normal rule of your stylesheets,
   and the legacy attributes are inline too, so `td { padding: 1rem }` in your CSS does not undo
@@ -168,8 +174,10 @@ your styles (`.mail-signature { opacity: .7 }`).
 ## Images and a proxy
 
 Remote images are left out by default: a tracking pixel never loads, and a left-out image keeps its box
-(`width`, `height`, `alt`), so the layout does not move when images are shown. `body.images.origins` lists
-the origins the email would load from.
+(`width`, `height`, `alt`). The layout stays put when images are shown only if the email gives both sizes,
+in attributes or in CSS. An image with only a width (common in responsive templates, `width="600"
+height="auto"`) has no height until its first bytes arrive, so the text below it moves when it loads.
+`body.images.origins` lists the origins the email would load from.
 
 With a proxy, every remote image goes through your server and the sender never sees the reader's
 address, browser, or when the email was opened:
@@ -184,10 +192,11 @@ address, browser, or when the email was opened:
 
 What the proxy does is yours: which origins it fetches (an allowlist the reader edits), checking the
 address (no private or loopback targets, no redirects to them), serving only what the bytes show is an
-image, with `X-Content-Type-Options: nosniff`, fetching when the email arrives so opening it is not
-tracked. A proxy that answers a refused image with a transparent pixel shows an empty box; once the
-reader allows an origin, put a version in the template (`'/img?v=3&url={url}'`) so the browser does not
-keep the pixel.
+image, with `X-Content-Type-Options: nosniff`. A proxy that fetches only when an image is shown tells
+the sender when the email was opened (from the server's address, not the reader's); one that fetches
+when the email arrives does not, at the cost of fetching images nobody looks at. A proxy that answers a
+refused image with a transparent pixel shows an empty box; once the reader allows an origin, put a
+version in the template (`'/img?v=3&url={url}'`) so the browser does not keep the pixel.
 
 The tree never rewrites the email's HTML, so a reply or a forward quotes the original image URLs.
 
@@ -288,8 +297,8 @@ yet.
 
 - Only the email's own styles and the browser's: no `:hover`, no animation, no web fonts, no background
   images.
-- `@media` is decided at parse time, for one width (`media`), not as the reader resizes. Only the colour
-  scheme follows the page, and only for colours (`light-dark()`).
+- `@media` is decided at parse time, for one width (`media`), not as the reader resizes: parse again with
+  the other `media` to switch. Only the colour scheme follows the page, and only for colours (`light-dark()`).
 - Quirks mode is not followed: class names match case-sensitively and unitless lengths are dropped.
 - The parser's size: about 32 kB gzip with the cascade, most of it the HTML standard's entity table and
   tree construction. A server that sends the tree ships none of it.
