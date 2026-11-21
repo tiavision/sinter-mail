@@ -98,6 +98,8 @@ mail.links(body)  // every link with its text
 Links and images can be restyled by filling the `link` and `image` slots of `<mail-body>`. `<mail-width>` says
 when the reader is narrow enough for the email's phone layout, so a newsletter is not a 600px page scrolled
 sideways on a phone.
+An app whose CSS resets the browser's defaults imports `@tiavision/sinter-mail/mail.css`, which gives emails back
+what they count on, and a light canvas in dark mode to an email written for a white page.
 
 ## Documentation
 

@@ -21,11 +21,12 @@
     "components"
   ],
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": ["*.css"],
   "sinter": "./sinter",
   "exports": {
     ".": "./sinter/index.ts",
     "./parser": "./sinter/engine.ts",
+    "./mail.css": "./sinter/mail.css",
     "./package.json": "./package.json"
   },
   "files": [

@@ -1,0 +1,68 @@
+/*
+ * @tiavision/sinter-mail/mail.css: what emails count on, for an app whose own CSS resets the browser's defaults.
+ *
+ * <mail-body> puts the email's elements in the page, so the app's stylesheets reach them: the email's own styles
+ * are inline and win, but what it leaves to the browser's defaults takes the app's reset instead (images as
+ * blocks, tables full width with padding, no margins, border-box sizing), and a newsletter falls apart. These
+ * rules give the defaults back under .mail. Compared on real emails: newsletters, legacy HTML, Outlook, Gmail
+ * replies, unstyled HTML.
+ *
+ * Import it after your reset: `import '@tiavision/sinter-mail/mail.css'`, or `@import` it where it belongs in
+ * your layers. Every rule is .mail plus :where(), one class's specificity, so any rule of yours with more wins.
+ */
+
+/* the box model emails are written for: their widths with padding are content-box widths */
+.mail,
+.mail :where(*) {
+  box-sizing: content-box;
+}
+
+/* tables and images as the browser draws them: layout tables get no lines or padding, inline images stay inline */
+.mail :where(table, caption, colgroup, col, thead, tbody, tfoot, tr, td, th, img) {
+  all: revert;
+}
+
+/* an image no wider than the reader */
+.mail :where(img) {
+  max-inline-size: 100%;
+}
+
+/* the spacing a reset takes away; an email's own margins are inline and replace it */
+.mail :where(p, ul, ol, h1, h2, h3, h4, h5, h6) {
+  margin-block: 1em;
+}
+
+.mail :where(blockquote) {
+  margin: 1em 40px;
+}
+
+/*
+ * An email written for a white page (body.light: colours of its own, nothing saying they work on a dark page) on
+ * a dark one: the light scheme's canvas, text and links around it, so its dark text stays readable. Its own colours
+ * are inline and win; colours it writes light-dark() follow this light scheme.
+ */
+.mail-light {
+  color-scheme: light;
+  background: Canvas;
+  color: CanvasText;
+}
+
+.mail-light :where(a) {
+  color: LinkText;
+}
+
+/*
+ * An email wider than its box (a 600 px newsletter on a phone) scrolls sideways in it, the page vertically:
+ * <div class="mail-scroll"><mail-body …></mail-body></div>. The email's root is at least the box's width and as wide
+ * as the email, so its background (a newsletter's grey) covers what scrolls in too.
+ */
+.mail-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.mail-scroll > .mail {
+  box-sizing: border-box;
+  inline-size: fit-content;
+  min-inline-size: 100%;
+}

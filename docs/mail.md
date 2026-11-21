@@ -60,8 +60,8 @@ parser has arrived, and `<mail-body>` with no body renders an empty `<div class=
 sinter({ components: ['@tiavision/sinter-mail'], lazy: ['@tiavision/sinter-mail'] })
 ```
 
-`mail.plain`, `mail.text` and `mail.links` live in modules that do not import the parser, so they stay
-ordinary helpers either way.
+`mail.plain`, `mail.text`, `mail.links`, `mail.progressive` and `mail.unquoted` live in modules that do not
+import the parser, so they stay ordinary helpers either way.
 
 A server that sends the tree (`/api/messages/42/body` answering `mail.parse(html, options)` as JSON) is the
 cheapest for the browser: on a 2,000-element newsletter, the page's JavaScript is the components' and
@@ -136,11 +136,34 @@ images load then. So:
   its own default font (Gmail and Outlook use a sans-serif); to do the same, give the root one:
   `.mail { font-family: Arial, sans-serif; }`.
 - **Where your page still wins**: a rule with `!important`, and what the email takes from browser defaults
-  when your CSS resets them (a reset that makes images `display: block`, headings unsized, lists unmarked).
-  For newsletters exactly as sent, restore the defaults under `.mail` in your stylesheet.
+  when your CSS resets them (a reset that makes images `display: block`, tables full width with padding,
+  margins zero, `border-box` sizing). [`mail.css`](#mailcss) gives those defaults back under `.mail`.
 - **The email stays in its box.** The root is `display: flow-root`, so floats and margins do not escape it.
-  A wide newsletter (600 px of tables) is as wide as it is: put `<mail-body>` in a box with
-  `overflow-x: auto` for narrow screens.
+  A wide newsletter (600 px of tables) is as wide as it is: `mail.css`'s `mail-scroll` box around
+  `<mail-body>` scrolls it sideways on a narrow screen (or parse for the reader's width, with
+  [`<mail-width>`](#the-readers-width-mail-width), and it shows its phone layout).
+
+### `mail.css`
+
+An optional stylesheet for apps whose CSS resets the browser's defaults:
+
+```js
+import '@tiavision/sinter-mail/mail.css'; // or @import it in your CSS, before its other rules
+```
+
+- Tables and images as the browser draws them (`all: revert`): layout tables get no lines or padding, inline
+  images stay inline. Images no wider than the reader. `content-box` sizing, which emails' widths are written
+  for. Paragraphs, headings, lists and quotes get their margins back.
+- `.mail-light`: the light scheme's canvas, text and link colours, for an email written for a white page
+  (below).
+- `.mail-scroll`, a box you put around `<mail-body>`: an email wider than it scrolls sideways, its background
+  covering what scrolls in.
+- Every rule is `.mail` (or the class) plus `:where()`: one class's specificity, so it beats a reset's element
+  selectors wherever it is imported, and any rule of yours with more specificity beats it. The email's own
+  styles are inline and win over all of it.
+
+Compared on real emails (newsletters, legacy HTML, Outlook, Gmail replies, unstyled HTML) in an app with a
+reset; without it, an app restores these itself.
 
 ### Colour schemes
 
@@ -157,22 +180,56 @@ one too, and `body.schemes` reports it (`['light', 'dark']`; absent when the ema
   page's (`<meta name="color-scheme" content="light dark">` follows the system), or what the app sets around
   the body. Then `schemes` includes `dark`.
 
-So an app in dark mode can show an email with `dark` in `schemes` as it is, on its own dark page, and keep any
-other email that sets colours light:
+So an app in dark mode can show an email with `dark` in `schemes` as it is, on its own dark page; an email that
+sets no colours takes the page's, light or dark; and one that sets colours of its own without saying they work on
+a dark page was written for a white one. `mail.parse` marks that one `body.light` (a text or background colour
+anywhere it shows, its body's included, and no `dark` in `schemes`), and `<mail-body>` puts `mail-light` on its
+root. [`mail.css`](#mailcss) gives `.mail-light` a light canvas, or write your own:
 
 ```css
 .mail-light { color-scheme: light; background: Canvas; color: CanvasText; }
-```
-
-```html
-<div data-sn-class="{ 'mail-light': !tree.schemes?.includes('dark') }"><mail-body data-sn-prop="{ body: tree }"></mail-body></div>
+.mail-light :where(a) { color: LinkText; }
 ```
 
 A dark rule's other properties (a light logo hidden, a dark one shown) keep their light values:
 `light-dark()` takes colours only.
 
-Quotes and signatures that `mail.plain` finds carry the classes `mail-quote` and `mail-signature`, for
-your styles (`.mail-signature { opacity: .7 }`).
+## Quoted history and signatures
+
+A reply carries the messages it answers. `mail.parse` marks that history `part: 'quote'` and a signature
+`part: 'signature'`, from what mail clients write around them; `mail.plain` does the same from `>` lines and
+`-- `. They render with the classes `mail-quote` and `mail-signature`, for your styles
+(`.mail-signature { opacity: .7 }`), and `body.quotes` says the email has history.
+
+| Client | Quoted history | Signature |
+| --- | --- | --- |
+| Gmail | `div.gmail_quote` (its "On … wrote:" line inside) | `div.gmail_signature` |
+| Apple Mail | `blockquote type="cite"` | |
+| Thunderbird | `blockquote type="cite"`, and its "On … wrote:" line (`div.moz-cite-prefix`) | `div.moz-signature` |
+| Outlook on the web | from `#appendonsend` (or the rule before `#divRplyFwdMsg`) to the end of its parent | `#Signature` |
+| Outlook for Windows | from its header block (From:, Sent:, in any language) to the end of its parent | |
+| new Outlook, Outlook on phones | `#mail-editor-reference-message-container` | `#ms-outlook-mobile-signature` |
+| Yahoo, Proton | `div.yahoo_quoted`, `.protonmail_quote` | |
+
+Outlook writes no element around its history: the tree wraps it, from the marker to the end of the parent, in
+one `div` (the only element the tree adds; blocks to the end of their parent lay out the same in it). A history
+that quotes history in turn is a quote in the quote. A plain `<blockquote>` (a newsletter's quotation) is not
+history, nor is Apple Mail's "On … wrote:" line, which it writes as an ordinary `div` before its quote.
+
+To show a reply without its history until the reader asks, as mail clients do, render `mail.unquoted(body)`:
+the body without the elements of `part: 'quote'`, so a long thread renders only what the reply says.
+
+```html
+<article data-sn-state="{ history: false }" data-sn-let="{ tree: mail.parse(msg.html) }">
+  <mail-body data-sn-prop="{ body: mail.progressive(history ? tree : mail.unquoted(tree)) }"></mail-body>
+  <template data-sn-if="tree.quotes && !history"><button data-sn-on-click="history = true">…</button></template>
+</article>
+```
+
+`mail.unquoted` returns a copy (the tree is not changed; the same tree gives the same copy), or the body itself
+when it quotes nothing or when leaving the quotes out would leave nothing to read: a message forwarded without
+a word of its own is all quote (Gmail and Outlook write a forward as they write a reply), and stays whole.
+Number its result, not the other way round: `mail.progressive(mail.unquoted(tree))`.
 
 ## Images and a proxy
 
