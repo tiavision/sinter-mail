@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>@tiavision/sinter-mail: the email's layout for the reader's width</title>
+</head>
+<body>
+  <!-- An email's HTML, parsed in the page for the width <mail-width> reports: its phone layout in a narrow
+       reader, its desktop one in a wide one, parsed again when the reader crosses the breakpoint. Until it has
+       reported (before the first paint), media is null and nothing is parsed: one parse, for the right width. -->
+  <sn-resource name="html" src="/api/html" type="string"></sn-resource>
+  <main data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }">
+    <mail-width data-sn-on-media="media = $event.detail"></mail-width>
+    <mail-body data-sn-prop="{ body: html && media ? mail.parse(html, { media }) : null }"></mail-body>
+  </main>
+</body>
+</html>

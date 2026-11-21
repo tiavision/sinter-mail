@@ -55,6 +55,17 @@ describe('elements', () => {
   });
 });
 
+test('a layout table keeps role="presentation" (or none), and no other role is kept anywhere', () => {
+  const roles = (html: string) => els(parse(html)).map((e) => e.attrs.role);
+  expect(roles('<table role="presentation"><tr><td>a</td></tr></table>')).toEqual(['presentation', undefined, undefined, undefined]);
+  expect(roles('<table role=" None "><tr><td>a</td></tr></table>')[0]).toBe('none');
+  // ARIA's fallback list: the first role decides
+  expect(roles('<table role="presentation none"><tr><td>a</td></tr></table>')[0]).toBe('presentation');
+  expect(roles('<table role="grid presentation"><tr><td>a</td></tr></table>')[0]).toBeUndefined();
+  // a role elsewhere, or another one on a table, is dropped: an email does not make buttons or alerts of the page
+  expect(roles('<div role="presentation">a</div><span role="button">b</span><table role="alert"><tr><td role="presentation">c</td></tr></table>').filter(Boolean)).toEqual([]);
+});
+
 describe('links', () => {
   test('http, https, mailto and tel only, normalized', () => {
     const hrefs = ['https://a.example/x y', 'HTTP://A.example', 'mailto:a@b.example', 'tel:+1 555', 'javascript:alert(1)', ' jav\tascript:alert(1)', 'data:text/html,x', 'vbscript:x', '/relative', 'ftp://x.example', '//x.example']

@@ -110,7 +110,8 @@ export const TAGS: Record<Tag, TagInfo> = {
   sub: t(),
   summary: t(),
   sup: t(),
-  table: t([], [...FLOW, ...TABLE]),
+  // role: `presentation` or `none`, which email builders put on layout tables so a screen reader does not read them as data
+  table: t(['role'], [...FLOW, ...TABLE]),
   tbody: t([], FLOW, { inTable: true }),
   td: t(['colspan', 'rowspan', 'headers', 'abbr'], FLOW, { inTable: true }),
   tfoot: t([], FLOW, { inTable: true }),

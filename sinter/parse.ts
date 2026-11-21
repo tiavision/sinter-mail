@@ -325,6 +325,11 @@ function attribute(tag: Tag, name: keyof Attrs, value: string, cx: Context): str
     case 'type':
       return tag === 'ol' ? (['1', 'a', 'A', 'i', 'I'].includes(value.trim()) ? value.trim() : null)
         : ['disc', 'circle', 'square'].includes(value.trim().toLowerCase()) ? value.trim().toLowerCase() : null;
+    case 'role': {
+      // ARIA's list of roles, the first one the browser knows taken: only the ones that say a table is for layout
+      const v = value.trim().toLowerCase().split(/\s+/)[0]!;
+      return v === 'presentation' || v === 'none' ? v : null;
+    }
     case 'dir':
     case 'scope': {
       const v = value.trim().toLowerCase();

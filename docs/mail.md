@@ -92,8 +92,10 @@ schemes](#colour-schemes)).
   iframes, objects, media, SVG and MathML are dropped with their content. An unknown element (`<o:p>`, a
   custom tag) is a `span`, as the browser renders one.
 - **Each tag's own attributes**, values checked: `href` on links, `src`, `alt`, `width`, `height` on images,
-  `colspan`, `rowspan` on cells, `dir`, `lang`, `title` everywhere. No `class`, no `style` attribute (its
-  declarations are in the element's `style`), no handler.
+  `colspan`, `rowspan` on cells, `role="presentation"` (or `none`) on tables, which email builders write on
+  layout tables so a screen reader does not read them as data, and `dir`, `lang`, `title` everywhere. No other
+  `role` is kept. No `class`, no `style` attribute (its declarations are in the element's `style`), no
+  handler.
 - **Links**: `http:`, `https:`, `mailto:` and `tel:`, normalized; anything else loses its `href`. Every link
   opens in a new tab with `rel="noopener noreferrer"`. A `#fragment` link keeps its `href` only when the
   email has its target, which keeps its id, written `mail-…`.
@@ -122,8 +124,9 @@ included), `var()`, `calc()`, negative margins.
 `<mail-body>` writes each element's styles inline, and leaves out what the email hides: an element whose
 `display` is `none` at the parsed width is not in the page, nor anything inside it, so a mobile-only copy of
 an image is not downloaded on a wide screen (and the other way round), and the page has fewer elements to
-build. To follow the reader's width, parse again with the other `media` when it crosses your breakpoint: the
-new tree shows what that width shows, and its images load then. So:
+build. To follow the reader's width, parse again with the other `media` when it crosses your breakpoint
+([`<mail-width>`](#the-readers-width-mail-width) says when): the new tree shows what that width shows, and its
+images load then. So:
 
 - **The email's styles win over the page's.** An inline style beats every normal rule of your stylesheets,
   and the legacy attributes are inline too, so `td { padding: 1rem }` in your CSS does not undo
@@ -216,6 +219,35 @@ URLs, `www.` addresses and email addresses as links (GFM's rules), `>` quotes as
 `mail.text` is the text of a body or node, blocks separated by newlines, hidden content left out: for
 previews and search snippets. `mail.links` is every link with its text, in order.
 
+## The reader's width: `<mail-width>`
+
+An email's `@media` rules are decided when it is parsed, for one width: `media: 'wide'` (800 px) or `'narrow'`
+(375 px, its phone layout). `<mail-width>` says which one fits the space the email is shown in, and says it
+again when the reader is resized across the breakpoint:
+
+```html
+<main data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }">
+  <mail-width data-sn-on-media="media = $event.detail"></mail-width>
+  <mail-body data-sn-prop="{ body: media ? mail.parse(message.html, { media }) : null }"></mail-body>
+</main>
+```
+
+Parse only once `media` is known, as above: the email is parsed once, for the right width. Starting with a
+width instead (`'wide'`) parses twice on a phone, and the first parse's images (the desktop hero) are requested
+before the second replaces it. Waiting costs under a frame: `<mail-width>` reports as it is put in the page
+(in Chromium, the email was in the page 9 ms later than with a fixed `media`).
+
+- Put it in the same box as `<mail-body>`: it measures its own width, an empty `<div aria-hidden="true">` of
+  no height, as wide as the box.
+- Its `media` event is `'narrow'` below `breakpoint` (640 px by default; mobile layouts are written for 480 to
+  640 px) and `'wide'` above, once when it is first laid out and again at each crossing, never while the
+  width stays on one side. Another breakpoint: `<mail-width data-sn-prop="{ breakpoint: 560 }">`.
+- The new parse is another tree (cached as every parse is: switching back costs nothing): what the new width
+  hides is left out and what it shows renders, its images loading then.
+- It needs the browser (a `ResizeObserver`); a static page chooses its `media` at build time. In a reader that
+  is hidden (`display: none`) it reports once the reader is shown.
+- The state's type is written with a JSDoc cast, as state is typed by its initial value.
+
 ## Long messages: `mail.progressive(body)`
 
 A long email (a newsletter of 2,000 elements) takes one task of about 45 ms to render, and nothing of it
@@ -228,8 +260,11 @@ after the browser has painted that, a task each.
 <mail-body data-sn-prop="{ body: mail.progressive(message.tree) }"></mail-body>
 ```
 
-`mail.progressive(body, head = 200)` numbers the nodes in document order and sets `body.head` (the first 200
-nodes render first) and `body.first` (the body up to there). Run it in the page, as above, or on the server
+`mail.progressive(body, head = 200)` returns the body numbered: a copy whose nodes carry their number in
+document order, with `head` (the first 200 nodes render first) and `first` (the body up to there). `body` is
+not changed, so a tree from `mail.parse` (frozen) goes in as it is: `mail.progressive(mail.parse(html))`. The
+copy shares the tree's styles and attributes, and the same tree gives the same copy, which `<mail-body>` needs
+to carry its steps from one render to the next. Run it in the page, as above, or on the server
 before the tree is sent; there, `body.first` repeats the first nodes in the JSON (about 18% more for the
 newsletter, less after gzip). A body that is not numbered renders whole in one task, as before, so short
 emails are not affected.
@@ -298,7 +333,7 @@ yet.
 - Only the email's own styles and the browser's: no `:hover`, no animation, no web fonts, no background
   images.
 - `@media` is decided at parse time, for one width (`media`), not as the reader resizes: parse again with
-  the other `media` to switch. Only the colour scheme follows the page, and only for colours (`light-dark()`).
+  the other `media` to switch, when [`<mail-width>`](#the-readers-width-mail-width) says so. Only the colour scheme follows the page, and only for colours (`light-dark()`).
 - Quirks mode is not followed: class names match case-sensitively and unitless lengths are dropped.
 - The parser's size: about 32 kB gzip with the cascade, most of it the HTML standard's entity table and
   tree construction. A server that sends the tree ships none of it.
