@@ -52,8 +52,14 @@ function style(v, tag) {
 const parts = (v, tag) => (PARTS.has(tag) ? ` data-sn-class="{ 'mail-quote': ${v}.part === 'quote', 'mail-signature': ${v}.part === 'signature' }"` : '');
 /** the start tag of the element `v` of `tag`, with its bindings */
 const open = (v, tag, { id = false, literal = '', extra = [] } = {}) => `<${tag}${literal}${attrs(v, tag, id, extra)}${style(v, tag)}${parts(v, tag)}>`;
-/** the loop over the children of `v`: text runs first, every element through mail-node */
-const children = (v, c) => `<template data-sn-for="${c} in ${v}.children"><template data-sn-if="${c}.type === 'text'"><template data-sn-text="${c}.value"></template></template><template data-sn-else><mail-node data-sn-prop="{ node: ${c} }"></mail-node></template></template>`;
+/**
+ * An element is rendered only when it is shown: one the email hides (`display: none` in its resolved style, at the
+ * width the tree was parsed for) is not in the page at all, so its images never load. A tree parsed for another
+ * width (mail.parse's `media`) is another tree, and what it shows renders then.
+ */
+const shown = (v) => `${v}.style.display !== 'none'`;
+/** the loop over the children of `v`: text runs first, every shown element through mail-node */
+const children = (v, c) => `<template data-sn-for="${c} in ${v}.children"><template data-sn-if="${c}.type === 'text'"><template data-sn-text="${c}.value"></template></template><template data-sn-else><template data-sn-if="${shown(c)}"><mail-node data-sn-prop="{ node: ${c} }"></mail-node></template></template></template>`;
 /** an if chain: the first branch whose condition holds; `last`, if given, the final else */
 function chain(branches, last = '') {
   return branches.reduceRight((rest, [cond, then]) => `<template data-sn-if="${cond}">${then}</template>${rest ? `<template data-sn-else>${rest}</template>` : ''}`, last);
@@ -69,18 +75,18 @@ const component = (what, root) => `${HEAD(what)}<template data-sn-component="{ n
 /** a table and its whole structure, chosen by chains over each child's tag */
 function table() {
   const cell = (d) => chain([
-    [`${d}.type === 'element' && ${d}.tag === 'th'`, element(d, 'th', children(d, 'n'))],
-    [`${d}.type === 'element'`, element(d, 'td', children(d, 'n'))],
+    [`${d}.type === 'element' && ${shown(d)} && ${d}.tag === 'th'`, element(d, 'th', children(d, 'n'))],
+    [`${d}.type === 'element' && ${shown(d)}`, element(d, 'td', children(d, 'n'))],
   ]);
-  const rows = (s) => `<template data-sn-for="r in ${s}.children"><template data-sn-if="r.type === 'element'">${element('r', 'tr', `<template data-sn-for="d in r.children">${cell('d')}</template>`)}</template></template>`;
+  const rows = (s) => `<template data-sn-for="r in ${s}.children"><template data-sn-if="r.type === 'element' && ${shown('r')}">${element('r', 'tr', `<template data-sn-for="d in r.children">${cell('d')}</template>`)}</template></template>`;
   const section = (tag) => element('s', tag, rows('s'));
   const cols = `<template data-sn-for="k in s.children"><template data-sn-if="k.type === 'element'">${element('k', 'col', '')}</template></template>`;
   const content = chain([
-    [`s.type === 'element' && s.tag === 'caption'`, element('s', 'caption', children('s', 'n'))],
+    [`s.type === 'element' && ${shown('s')} && s.tag === 'caption'`, element('s', 'caption', children('s', 'n'))],
     [`s.type === 'element' && s.tag === 'colgroup'`, element('s', 'colgroup', cols)],
-    [`s.type === 'element' && s.tag === 'thead'`, section('thead')],
-    [`s.type === 'element' && s.tag === 'tfoot'`, section('tfoot')],
-    [`s.type === 'element'`, section('tbody')],
+    [`s.type === 'element' && ${shown('s')} && s.tag === 'thead'`, section('thead')],
+    [`s.type === 'element' && ${shown('s')} && s.tag === 'tfoot'`, section('tfoot')],
+    [`s.type === 'element' && ${shown('s')}`, section('tbody')],
   ]);
   return element('node', 'table', `<template data-sn-for="s in node.children">${content}</template>`);
 }

@@ -248,8 +248,12 @@ function element(el: RawElement, cx: Context): Element | null {
       attrs.id = name;
     }
   }
-  if (tag === 'img') image(el, attrs, cx);
   const style = projected(cx.styles.get(el), tag, cx);
+  if (tag === 'img') {
+    // a pixel shows nothing; what it is for is telling the sender the email was opened
+    if (pixel(style)) return null;
+    image(el, attrs, cx);
+  }
   return { type: 'element', tag, attrs, style, children: info.void ? [] : nodes(el, tag, cx) };
 }
 
@@ -332,6 +336,15 @@ function attribute(tag: Tag, name: keyof Attrs, value: string, cx: Context): str
       // text: title, alt, abbr, headers, datetime; bounded, as no email needs a longer one
       return value.length > 2000 ? value.slice(0, 2000) : value;
   }
+}
+
+/**
+ * An image whose box is at most 1 × 1 pixel (its `width` and `height`, as attributes or CSS, both known): a
+ * tracking pixel or a spacer that takes no room. It is left out, so it never loads and its origin is not listed.
+ */
+function pixel(style: Style): boolean {
+  const small = (v: string | undefined) => v !== undefined && /^(?:0|\d*\.?\d+px)$/.test(v) && parseFloat(v) <= 1;
+  return small(style.width) && small(style.height);
 }
 
 /** an image's `src` under the options, and its origin counted */

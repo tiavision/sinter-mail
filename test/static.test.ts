@@ -10,6 +10,7 @@ import { JSDOM } from 'jsdom';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import sinter from '@tiaforge-ui/sinter/vite';
 import { TAGS, attrsOf } from '../sinter/tags.js';
+import { parse } from '../sinter/parse.js';
 import type { Body, Element, Node } from '../sinter/sinter.types.js';
 import { app, elements, page, PKG } from './app.js';
 
@@ -27,8 +28,18 @@ const FILLS = page(`<sn-resource name="mail" src="file:./tree.json" type="Body">
   <template data-sn-else><span class="blocked" data-sn-text="$slot.node.attrs.alt ?? 'image'"></span></template>
 </mail-body></main>`);
 
+// what the email hides is not in the page: a desktop hero and a mobile one that @media swaps, a hidden row and cell
+const HIDING = `<style>.m { display: none } @media (max-width: 480px) { .m { display: block !important } .d { display: none !important } }</style>
+<div class="d"><img src="https://img.example/desktop.jpg" width="600" alt="desktop hero"><p>Desktop only</p></div>
+<div class="m"><img src="https://img.example/mobile.jpg" width="320" alt="mobile hero"><p>Mobile only</p></div>
+<table><tr><td>Shown cell</td><td style="display:none"><img src="https://img.example/cell.jpg" alt="cell"></td></tr>
+<tr style="display:none"><td><img src="https://img.example/row.jpg" alt="row">Hidden row</td></tr></table>`;
+const hiding = (media: 'wide' | 'narrow') => JSON.stringify(parse(HIDING, { images: 'allow', media }));
+
 const apps = {
   tree: app({ 'tree.json': TREE, 'index.html': PAGE }),
+  wide: app({ 'tree.json': hiding('wide'), 'index.html': PAGE }),
+  narrow: app({ 'tree.json': hiding('narrow'), 'index.html': PAGE }),
   fills: app({ 'tree.json': TREE, 'index.html': FILLS }),
   deep: app({ 'tree.json': DEEP, 'index.html': PAGE }),
 };
@@ -56,6 +67,7 @@ const escAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').
 /** the HTML the components write for a node */
 function html(n: Node): string {
   if (n.type === 'text') return esc(n.value);
+  if (n.style.display === 'none') return '';
   const attrs = attrsOf(n.tag).flatMap((a) => (n.attrs[a] === undefined ? [] : [` ${a}="${escAttr(a === 'id' ? `mail-${n.attrs[a]}` : n.attrs[a]!)}"`]));
   const style = TAGS[n.tag].props.flatMap((p) => (n.style[p] === undefined ? [] : [`${p}: ${n.style[p]}`])).join('; ');
   const cls = n.part ? ` class="mail-${n.part}"` : '';
@@ -97,8 +109,8 @@ test('every tag of the table renders, and the page parses back into the same tre
   const doc = new JSDOM(page()).window.document;
   const root = doc.querySelector('#message')!;
   const shape = (n: ChildNode): unknown => (n.nodeType === 3 ? (n as Text).data : [(n as globalThis.Element).localName, ...[...n.childNodes].map(shape)]);
-  const want = (n: Node): unknown => (n.type === 'text' ? n.value : [n.tag, ...(n as Element).children.map(want)]);
-  expect([...root.childNodes].map(shape)).toEqual(body.children.map(want));
+  const want = (n: Node): unknown => (n.type === 'text' ? n.value : [n.tag, ...(n as Element).children.filter((c) => c.type === 'text' || c.style.display !== 'none').map(want)]);
+  expect([...root.childNodes].map(shape)).toEqual(body.children.filter((c) => c.type === 'text' || c.style.display !== 'none').map(want));
   function page() { return out.tree!.html; }
 });
 
@@ -134,4 +146,21 @@ test('the slots: a fill replaces every link and every image, and folds with the 
 test('a deep tree (all.json, 12 elements deep) folds too: no JavaScript', () => {
   expect(out.deep!.error).toBeNull();
   expect(out.deep!.js).toEqual([]);
+});
+
+test('what the email hides at the width it was parsed for is not in the page, so its images never load', () => {
+  for (const name of ['wide', 'narrow'] as const) expect(out[name]!.error).toBeNull();
+  const wide = mail(out.wide!.html), narrow = mail(out.narrow!.html);
+  // at 800 px the desktop hero; at 375 px (a tree parsed with media: 'narrow') the mobile one
+  expect(wide).toContain('desktop.jpg');
+  expect(wide).toContain('Desktop only');
+  expect(wide).not.toMatch(/mobile\.jpg|Mobile only/);
+  expect(narrow).toContain('mobile.jpg');
+  expect(narrow).toContain('Mobile only');
+  expect(narrow).not.toMatch(/desktop\.jpg|Desktop only/);
+  // a hidden cell and a hidden row, at both widths; the shown cell stays
+  for (const m of [wide, narrow]) {
+    expect(m).toContain('Shown cell');
+    expect(m).not.toMatch(/cell\.jpg|row\.jpg|Hidden row/);
+  }
 });
