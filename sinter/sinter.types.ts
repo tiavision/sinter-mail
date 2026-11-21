@@ -38,6 +38,8 @@ export interface Attrs {
   open?: string;
   cite?: string;
   datetime?: string;
+  /** on a table: `presentation` (or `none`), a layout table, not data; no other role is kept */
+  role?: string;
 }
 
 /**

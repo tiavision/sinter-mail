@@ -1,0 +1,12 @@
+<!--
+  mail-width: which of mail.parse's widths (`media`) fits the space an email is shown in. Public.
+  <mail-width data-sn-on-media="media = $event.detail"></mail-width> beside a <mail-body>, in the same box:
+  a `media` event, 'narrow' when the box is narrower than `breakpoint` (640 px by default, as mobile layouts
+  are written for 480 to 640 px) and 'wide' otherwise, once when it is first laid out and again whenever its
+  width crosses the breakpoint (mail-width.ts, a ResizeObserver). Parse with it, `mail.parse(html, { media })`,
+  and the email shows its phone layout in a phone-sized reader, and its desktop layout again when the reader
+  widens; what the new width hides is left out and what it shows renders then, its images included.
+  Its root is an empty <div aria-hidden="true">, as wide as its box and no height: it measures, and shows nothing.
+  It runs in the browser only: a static page (an email from a file) chooses its `media` at build time.
+-->
+<template data-sn-component="{ breakpoint?: number }" data-sn-emits="{ media: 'wide' | 'narrow' }"><div class="mail-width" aria-hidden="true"></div></template>

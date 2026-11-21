@@ -95,7 +95,9 @@ mail.text(body)   // the text, blocks separated by newlines
 mail.links(body)  // every link with its text
 ```
 
-Links and images can be restyled by filling the `link` and `image` slots of `<mail-body>`.
+Links and images can be restyled by filling the `link` and `image` slots of `<mail-body>`. `<mail-width>` says
+when the reader is narrow enough for the email's phone layout, so a newsletter is not a 600px page scrolled
+sideways on a phone.
 
 ## Documentation
 

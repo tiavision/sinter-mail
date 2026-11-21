@@ -98,3 +98,28 @@ test('mail.progressive numbers the nodes in document order, each element with th
   const d = progressive({ type: 'body', style: {}, images: { origins: [] }, children: [deep] } as never);
   expect((d.children[0] as { z: number }).z).toBe(50_000);
 });
+
+test('mail.progressive takes a tree as mail.parse gives it: frozen, unchanged, the same copy for the same tree', async () => {
+  const { progressive } = await import('../sinter/tree.js');
+  const { parse } = await import('../sinter/parse.js');
+  const tree = parse('<div style="color:red"><p>One <b>two</b></p></div><p>three</p>');
+  expect(Object.isFrozen(tree)).toBe(true);
+  const before = JSON.stringify(tree);
+  const b = progressive(tree, 2);
+  expect(b).not.toBe(tree);
+  expect(JSON.stringify(tree)).toBe(before);
+  expect([b.head, (b.children[0] as Element).n, (b.children[0] as Element).z]).toEqual([2, 0, 4]);
+  // its styles and attributes are the tree's own objects
+  expect((b.children[0] as Element).style).toBe((tree.children[0] as Element).style);
+  expect((b.children[0] as Element).attrs).toBe((tree.children[0] as Element).attrs);
+  // the same tree, the same copy: <mail-body> carries its steps across renders by identity; another head, another
+  expect(progressive(tree, 2)).toBe(b);
+  expect(progressive(b, 2)).toBe(b);
+  const c = progressive(tree, 3);
+  expect(c).not.toBe(b);
+  expect(c.head).toBe(3);
+  expect(b.head).toBe(2);
+  // a numbered body given again with another head is numbered again, from its own nodes
+  expect(progressive(b, 3).head).toBe(3);
+  expect(text(b)).toBe(text(tree));
+});

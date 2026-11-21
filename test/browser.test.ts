@@ -31,17 +31,28 @@ const apps = {
   api: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>', HEAD) }),
   plain: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><p id="message" data-sn-text="message.type"></p></main>', HEAD) }),
   static: app({ 'tree.json': STATIC, 'index.html': page('<sn-resource name="mail" src="file:./tree.json" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: mail }"></mail-body></main>') }),
+  // an email's HTML parsed in the page for the width <mail-width> reports
+  width: app({ 'index.html': page(`<sn-resource name="html" src="/api/html" type="string"></sn-resource>
+<main data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }"><mail-width data-sn-on-media="media = $event.detail"></mail-width><mail-body id="message" data-sn-prop="{ body: html && media ? mail.parse(html, { images: 'allow', media }) : null }"></mail-body></main>`, HEAD) }),
+  // the same email parsed for a phone from the start, without <mail-width>: what waiting for it is compared with
+  narrow: app({ 'index.html': page(`<sn-resource name="html" src="/api/html" type="string"></sn-resource>
+<main><mail-body id="message" data-sn-prop="{ body: html ? mail.parse(html, { images: 'allow', media: 'narrow' }) : null }"></mail-body></main>`, HEAD) }),
 };
 const servers: Server[] = [];
 let browser: Browser;
 /** what /api/message answers */
 let message = ALL;
+/** what /api/html answers (a JSON string), and the images requested from /img/ */
+let mailHtml = '""';
+const images: string[] = [];
 
 /** a build and its API; `csp`: the policy header of each page, by its query (`?attr`) */
 function serve(dir: string, csp?: (q: URLSearchParams) => string): Promise<string> {
   const s = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://x');
     if (url.pathname === '/api/message') { res.setHeader('Content-Type', 'application/json'); return res.end(message); }
+    if (url.pathname === '/api/html') { res.setHeader('Content-Type', 'application/json'); return res.end(mailHtml); }
+    if (url.pathname.startsWith('/img/')) { images.push(url.pathname.slice(5)); res.statusCode = 404; return res.end(); }
     const path = url.pathname === '/' ? '/index.html' : url.pathname;
     try {
       const body = readFileSync(join(dir, path));
@@ -73,7 +84,7 @@ async function tab(): Promise<{ page: Page; violations: () => Promise<string[]>;
 
 const dist = (a: keyof typeof apps) => join(apps[a].root, 'dist');
 beforeAll(async () => {
-  for (const name of ['api', 'plain'] as const) {
+  for (const name of ['api', 'plain', 'width', 'narrow'] as const) {
     // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
     await build({ root: apps[name].root, logLevel: 'silent', plugins: [sinter({ components: ['@tiavision/sinter-mail'] }) as never], build: { outDir: dist(name), emptyOutDir: true } });
   }
@@ -212,8 +223,79 @@ test('a long tree that mail.progressive numbered: the first part paints first, t
     await p.close();
     return { first, out };
   };
-  const whole = await html(big), parts = await html(progressive(structuredClone(big), 200));
+  const whole = await html(big), parts = await html(progressive(big, 200));
   expect(whole.first).toBe(BIG_COUNT);
   expect(parts.first).toBeLessThan(200);
   expect(parts.out).toBe(whole.out);
 }, 120_000);
+
+test('<mail-width>: a reader that narrows gets the email\'s phone layout, parsed again, and only then its mobile image', async () => {
+  const url = await serve(dist('width'));
+  const img = (name: string) => `${url}img/${name}`;
+  mailHtml = JSON.stringify(`<style>.m { display: none } @media (max-width: 480px) { .m { display: block !important } .d { display: none !important } }</style>
+<div class="d"><img src="${img('desktop.jpg')}" alt="desktop" width="600"><p>Desktop layout</p></div>
+<div class="m"><img src="${img('mobile.jpg')}" alt="mobile" width="320"><p>Mobile layout</p></div>`);
+  images.length = 0;
+  const { page: p, violations, errors } = await tab();
+  await p.setViewportSize({ width: 1000, height: 700 });
+  await p.goto(url);
+  await p.waitForFunction(() => document.querySelector('#message')?.textContent?.includes('layout'));
+  expect((await p.textContent('#message'))?.trim()).toBe('Desktop layout');
+  await p.waitForTimeout(200);
+  expect(images).toEqual(['desktop.jpg']);
+  // narrower than the breakpoint: the event, a new parse for 375 px, the mobile block rendered and its image requested
+  await p.setViewportSize({ width: 400, height: 700 });
+  await p.waitForFunction(() => document.querySelector('#message')?.textContent?.trim() === 'Mobile layout');
+  await p.waitForTimeout(200);
+  expect(images).toEqual(['desktop.jpg', 'mobile.jpg']);
+  expect(await p.$$eval('#message img', (is) => is.map((i) => i.getAttribute('alt')))).toEqual(['mobile']);
+  // and back
+  await p.setViewportSize({ width: 1000, height: 700 });
+  await p.waitForFunction(() => document.querySelector('#message')?.textContent?.trim() === 'Desktop layout');
+  // it measures and shows nothing
+  expect(await p.$eval('.mail-width', (e) => [e.getAttribute('aria-hidden'), e.getBoundingClientRect().height])).toEqual(['true', 0]);
+  expect(await violations()).toEqual([]);
+  expect(errors.filter((e) => !e.includes('404'))).toEqual([]);
+});
+
+/** the page opened at a phone's width: every text the email's box held, the images requested, and how long after its
+ * HTML arrived the email was in the page */
+async function phone(name: keyof typeof apps) {
+  const url = await serve(dist(name));
+  const img = (n: string) => `${url}img/${n}`;
+  mailHtml = JSON.stringify(`<style>.m { display: none } @media (max-width: 480px) { .m { display: block !important } .d { display: none !important } }</style>
+<div class="d"><img src="${img('desktop.jpg')}" alt="desktop" width="600"><p>Desktop layout</p></div>
+<div class="m"><img src="${img('mobile.jpg')}" alt="mobile" width="320"><p>Mobile layout</p></div>`);
+  images.length = 0;
+  const { page: p, errors } = await tab();
+  await p.addInitScript(() => {
+    const w = window as unknown as { __seen: Set<string>; __shown: number };
+    w.__seen = new Set(); w.__shown = 0;
+    new MutationObserver(() => {
+      const t = document.querySelector('#message')?.textContent?.trim();
+      if (t) { w.__seen.add(t); w.__shown ||= performance.now(); }
+    }).observe(document, { subtree: true, childList: true, characterData: true });
+  });
+  await p.setViewportSize({ width: 400, height: 700 });
+  await p.goto(url);
+  await p.waitForFunction(() => document.querySelector('#message')?.textContent?.trim() === 'Mobile layout');
+  await p.waitForTimeout(200);
+  const seen = await p.evaluate(() => [...(window as unknown as { __seen: Set<string> }).__seen]);
+  const gap = await p.evaluate(() => (window as unknown as { __shown: number }).__shown - (performance.getEntriesByType('resource') as PerformanceResourceTiming[]).find((e) => e.name.endsWith('/api/html'))!.responseEnd);
+  await p.close();
+  return { seen, images: [...images], gap, errors: errors.filter((e) => !e.includes('404')) };
+}
+
+test('<mail-width>: opened on a phone, the email is parsed once, for the phone: its desktop layout and image never come', async () => {
+  const runs: Array<Record<'width' | 'narrow', Awaited<ReturnType<typeof phone>>>> = [];
+  for (let i = 0; i < 5; i++) runs.push({ width: await phone('width'), narrow: await phone('narrow') });
+  for (const r of runs) {
+    expect(r.width.seen).toEqual(['Mobile layout']);
+    expect(r.width.images).toEqual(['mobile.jpg']);
+    expect(r.width.errors).toEqual([]);
+  }
+  // waiting for <mail-width> costs no frame: the email is in the page as soon after its HTML as with a fixed width
+  const med = (k: 'width' | 'narrow') => runs.map((r) => r[k].gap).sort((a, b) => a - b)[2]!;
+  console.log(`<mail-width>: the email in the page ${med('width').toFixed(1)} ms after its HTML arrived (${med('narrow').toFixed(1)} ms parsed for a phone from the start)`);
+  expect(med('width') - med('narrow')).toBeLessThan(16);
+});
