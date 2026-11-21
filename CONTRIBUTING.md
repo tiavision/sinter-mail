@@ -2,9 +2,9 @@
 
 Notes for working on `@tiavision/sinter-mail`. For using it, see the [README](README.md) and [docs/mail.md](docs/mail.md).
 
-## Status
+## Requirements
 
-Version 0.1. It needs sinter 0.20.0 or later, the first release with the changes made for this library
+The package needs sinter 0.20.0 or later, the first release with the changes made for this library
 (tiaforge/sinter#76, #77 and #78); `sinter check` says so (SN537) when an app has an older one.
 
 ## Releasing

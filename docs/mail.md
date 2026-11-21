@@ -49,7 +49,7 @@ tiaforge/sinter, until they are released).
 | The email | Where it is parsed | What the page ships |
 | --- | --- | --- |
 | A file: `src="file:./welcome.html"` | at build time | the email as plain HTML, no JavaScript |
-| HTML from an API, in a `data-sn-let` | in the browser, once per source and options | the parser, about 32 kB gzip, and the components, about 16 kB |
+| HTML from an API, in a `data-sn-let` | in the browser, once per source and options | the parser, about 37 kB gzip, and the components, about 16 kB |
 | The same, with the package lazy | in the browser, once the parser has loaded | the parser in a chunk of its own |
 | A tree from your API (`mail.parse` run on the server, in Node) | on the server | no parser: the components only |
 
@@ -392,8 +392,9 @@ yet.
 - `@media` is decided at parse time, for one width (`media`), not as the reader resizes: parse again with
   the other `media` to switch, when [`<mail-width>`](#the-readers-width-mail-width) says so. Only the colour scheme follows the page, and only for colours (`light-dark()`).
 - Quirks mode is not followed: class names match case-sensitively and unitless lengths are dropped.
-- The parser's size: about 32 kB gzip with the cascade, most of it the HTML standard's entity table and
-  tree construction. A server that sends the tree ships none of it.
+- The parser's size: about 37 kB gzip with the cascade. The HTML parser is about 16 kB of it, nearly half of
+  that the HTML standard's entity table, and the cascade about 17.5 kB. A server that sends the tree ships
+  none of it.
 - A very large email may exceed sinter's budget of components expanded at build time (10,000): it then
   renders in the browser (SN536).
 - Tested in Chromium; Firefox and Safari are not yet part of the tests.
