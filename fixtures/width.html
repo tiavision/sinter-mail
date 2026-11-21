@@ -11,7 +11,7 @@
   <sn-resource name="html" src="/api/html" type="string"></sn-resource>
   <main data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }">
     <mail-width data-sn-on-media="media = $event.detail"></mail-width>
-    <mail-body data-sn-prop="{ body: html && media ? mail.parse(html, { media }) : null }"></mail-body>
+    <mail-body data-sn-with="{ body: html && media ? mail.parse(html, { media }) : null }"></mail-body>
   </main>
 </body>
 </html>

@@ -9,7 +9,7 @@
        progressively (mail.progressive numbers a copy). -->
   <sn-resource name="message" src="/api/message" type="Body"></sn-resource>
   <main>
-    <mail-body id="message" data-sn-prop="{ body: message && mail.progressive(message) }"></mail-body>
+    <mail-body id="message" data-sn-with="{ body: message && mail.progressive(message) }"></mail-body>
   </main>
 </body>
 </html>

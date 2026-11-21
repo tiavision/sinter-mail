@@ -21,7 +21,9 @@
     "components"
   ],
   "type": "module",
-  "sideEffects": ["*.css"],
+  "sideEffects": [
+    "*.css"
+  ],
   "sinter": "./sinter",
   "exports": {
     ".": "./sinter/index.ts",
@@ -44,7 +46,7 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "@tiaforge-ui/sinter": ">=0.20.0 <1"
+    "@tiaforge-ui/sinter": ">=0.21.0 <1"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
@@ -53,7 +55,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "@tiaforge-ui/sinter": "0.20.0",
+    "@tiaforge-ui/sinter": "0.21.0",
     "@types/jsdom": "30.0.0",
     "@types/node": "26.6.6",
     "character-entities": "2.0.2",

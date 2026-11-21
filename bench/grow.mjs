@@ -18,7 +18,7 @@ function prune(body, head) {
 }
 const MSG = { full: JSON.stringify(full), head: JSON.stringify(prune(full, +HEAD)) };
 const a = await buildFiles({
-  'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>\n<script type="module" src="/src/expose.ts"></script>'),
+  'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message }"></mail-body></main>\n<script type="module" src="/src/expose.ts"></script>'),
   'src/expose.ts': "import { instance } from '@tiaforge-ui/sinter';\n(window as any).__sn = () => instance(document);\n",
 });
 let cur = 'head';

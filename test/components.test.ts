@@ -31,7 +31,7 @@ test('one component per tag that renders on its own, the dispatch and the orphan
 });
 
 test('mail-node maps every tag: its own component, or a table part to mail-orphan; it is the only choice', () => {
-  const use = /<sn-component use="\{ ([^}]*) \}\[node\.tag\]" data-sn-prop="\{ node \}"><\/sn-component>/.exec(read(join(DIR, 'internal/mail-node.html')))![1]!;
+  const use = /<sn-component use="\{ ([^}]*) \}\[node\.tag\]" data-sn-with="\{ node \}"><\/sn-component>/.exec(read(join(DIR, 'internal/mail-node.html')))![1]!;
   const map = Object.fromEntries(use.split(', ').map((e) => e.split(': ')).map(([k, v]) => [k!.replace(/'/g, ''), v!.slice(1, -1)]));
   expect(Object.keys(map).sort()).toEqual(tags);
   for (const t of own) expect(map[t]).toBe(`mail-${t}`);
@@ -43,8 +43,8 @@ test('mail-node maps every tag: its own component, or a table part to mail-orpha
 test('each component renders its own tag as its root (a link and an image inside their slot)', () => {
   for (const t of own) {
     const m = markup(join(DIR, 'internal', `mail-${t}.html`));
-    const root = /^<template data-sn-component="\{ node: Element \}">([\s\S]*)<\/template>\n$/.exec(m)![1]!;
-    const inner = t === 'a' ? /^<slot name="link" data-sn-prop="\{ node \}">([\s\S]*)<\/slot>$/.exec(root)![1]! : t === 'img' ? /^<slot name="image" data-sn-prop="\{ node \}">([\s\S]*)<\/slot>$/.exec(root)![1]! : root;
+    const root = /^<template data-sn-props="\{ node: Element \}">([\s\S]*)<\/template>\n$/.exec(m)![1]!;
+    const inner = t === 'a' ? /^<slot name="link" data-sn-with="\{ node \}">([\s\S]*)<\/slot>$/.exec(root)![1]! : t === 'img' ? /^<slot name="image" data-sn-with="\{ node \}">([\s\S]*)<\/slot>$/.exec(root)![1]! : root;
     // the element itself, its id bound only when it has one
     expect(inner, t).toMatch(new RegExp(`^<${t}[ >]`));
     expect(inner, t).not.toMatch(/^<template data-sn-if="node\.attrs\.id">/);
@@ -58,7 +58,7 @@ test('every loop over children renders text runs itself and passes every shown e
   // the children, keyed by the node's number (mail.progressive) or else their position: an element's, or <mail-body>'s
   // (the body's, or in a progressive render the step's tree)
   const KIDS = String.raw`body \? body\.children : \[\]|shown \? shown\.children : \[\]|\w+\.children`;
-  const RUN = new RegExp(String.raw`<template data-sn-for="\((\w+), \1i\) in (?:${KIDS})" data-sn-key="\1\.n \?\? \1i"><template data-sn-if="\1\.type === 'text'"><template data-sn-text="\1\.value"><\/template><\/template><template data-sn-else><template data-sn-if="\1\.style\.display !== 'none'"><mail-node data-sn-prop="\{ node: \1 \}"><\/mail-node><\/template><\/template><\/template>`, 'g');
+  const RUN = new RegExp(String.raw`<template data-sn-for="\((\w+), \1i\) in (?:${KIDS})" data-sn-key="\1\.n \?\? \1i"><template data-sn-if="\1\.type === 'text'"><template data-sn-text="\1\.value"><\/template><\/template><template data-sn-else><template data-sn-if="\1\.style\.display !== 'none'"><mail-node data-sn-with="\{ node: \1 \}"><\/mail-node><\/template><\/template><\/template>`, 'g');
   let loops = 0;
   for (const f of files) {
     const src = read(f);

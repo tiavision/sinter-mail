@@ -80,7 +80,7 @@ await new Promise((r) => s.listen(0, '127.0.0.1', r));
 const origin = `http://127.0.0.1:${s.address().port}`;
 
 const RES = '<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n';
-const body = (fill = '') => `${RES}<main><mail-body id="message" data-sn-prop="{ body: message }">${fill}</mail-body></main>`;
+const body = (fill = '') => `${RES}<main><mail-body id="message" data-sn-with="{ body: message }">${fill}</mail-body></main>`;
 const STYLE = `data-sn-style="{ display: $slot.node.style.display, width: $slot.node.style.width, height: $slot.node.style.height, 'max-width': $slot.node.style['max-width'] }"`;
 const fill = (img) => `<template slot="image" data-sn-if="$slot.node.attrs.src">${img}</template><template data-sn-else><span></span></template>`;
 const ATTRS = 'alt: $slot.node.attrs.alt, width: $slot.node.attrs.width, height: $slot.node.attrs.height, srcset: null';
@@ -88,7 +88,7 @@ const a = app({
   'index.html': page(body()),
   'lazy.html': page(body(fill(`<img loading="lazy" data-sn-attr="{ src: $slot.node.attrs.src, ${ATTRS} }" ${STYLE}>`))),
 });
-await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiavision/sinter-mail'] })], build: { outDir: join(a.root, 'dist'), emptyOutDir: true, rollupOptions: { input: { index: join(a.root, 'index.html'), lazy: join(a.root, 'lazy.html') } } } });
+await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ libraries: ['@tiavision/sinter-mail'] })], build: { outDir: join(a.root, 'dist'), emptyOutDir: true, rollupOptions: { input: { index: join(a.root, 'index.html'), lazy: join(a.root, 'lazy.html') } } } });
 dist = join(a.root, 'dist');
 
 // which images are on the first screen: the eager page's layout once every image has arrived

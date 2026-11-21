@@ -18,11 +18,11 @@ const TREE = readFileSync(join(PKG, 'fixtures/trees/static.json'), 'utf8');
 const DEEP = readFileSync(join(PKG, 'fixtures/trees/all.json'), 'utf8');
 const body = JSON.parse(TREE) as Body;
 const PAGE = page(`<sn-resource name="mail" src="file:./tree.json" type="Body"></sn-resource>
-<main><mail-body id="message" data-sn-prop="{ body: mail }"></mail-body></main>`);
+<main><mail-body id="message" data-sn-with="{ body: mail }"></mail-body></main>`);
 
 // both slots filled, as in fixtures/fills.html
 const FILLS = page(`<sn-resource name="mail" src="file:./tree.json" type="Body"></sn-resource>
-<main><mail-body id="message" data-sn-prop="{ body: mail }">
+<main><mail-body id="message" data-sn-with="{ body: mail }">
   <a slot="link" class="out" target="_blank" rel="noopener noreferrer nofollow" data-sn-attr="{ href: $slot.node.attrs.href }"><slot></slot></a>
   <template slot="image" data-sn-if="$slot.node.attrs.src"><img loading="lazy" data-sn-attr="{ src: $slot.node.attrs.src, alt: $slot.node.attrs.alt, srcset: null }"></template>
   <template data-sn-else><span class="blocked" data-sn-text="$slot.node.attrs.alt ?? 'image'"></span></template>
@@ -54,7 +54,7 @@ beforeAll(async () => {
     let error: string | null = null;
     try {
       // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
-    await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiavision/sinter-mail'], static: ['index.html'] }) as never], build: { outDir: join(a.root, 'dist'), emptyOutDir: true } });
+    await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ libraries: ['@tiavision/sinter-mail'], static: ['index.html'] }) as never], build: { outDir: join(a.root, 'dist'), emptyOutDir: true } });
     } catch (e) { error = (e as Error).message; }
     const dist = join(a.root, 'dist');
     out[name] = {

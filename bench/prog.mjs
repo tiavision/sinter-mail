@@ -11,7 +11,7 @@ const MSG = { plain: JSON.stringify(plainTree), prog: JSON.stringify(progressive
 let cur = 'plain';
 // plain: <mail-body> with the tree as it is; prog: the same component with the tree mail.progressive numbered
 const a = await buildApi(); const srv = await serve(a.root + '/dist', () => MSG[cur]);
-const ap = await buildApi('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>');
+const ap = await buildApi('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message }"></mail-body></main>');
 const srvp = await serve(ap.root + '/dist', () => MSG[cur]);
 const b = await launch();
 const INIT = () => {
