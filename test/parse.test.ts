@@ -5,6 +5,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { parse } from '../sinter/parse.js';
+import { plain } from '../sinter/plain.js';
+const plainLight = (text: string) => plain(text).light;
 import { attrsOf, DROP, TAGS } from '../sinter/tags.js';
 import type { Body, Element, Node, Tag } from '../sinter/sinter.types.js';
 
@@ -198,6 +200,26 @@ function invariants(b: Body, options: { images?: string } = {}): void {
 }
 
 describe('colour schemes', () => {
+  test('light: an email with colours of its own and no word on dark pages keeps a light canvas', () => {
+    const light = (html: string) => parse(html).light;
+    // written for a white page: a text colour, a background, on any element or the body
+    expect(light('<p style="color:#333">a</p>')).toBe(true);
+    expect(light('<table><tr><td bgcolor="#f4f4f4">a</td></tr></table>')).toBe(true);
+    expect(light('<body style="background:#fff"><p>a</p></body>')).toBe(true);
+    expect(light('<font color="navy">a</font>')).toBe(true);
+    // no colours: it takes the page's, light or dark
+    expect(light('<p><b>a</b> <a href="https://x.example">b</a></p>')).toBeUndefined();
+    // colours only where it hides them do not count
+    expect(light('<div style="display:none;color:#333">preheader</div><p>a</p>')).toBeUndefined();
+    // it says they work on a dark page too: declared, or dark rules
+    expect(light('<meta name="color-scheme" content="light dark"><p style="color:#333">a</p>')).toBeUndefined();
+    expect(light('<style>p { color: #333 } @media (prefers-color-scheme: dark) { p { color: #eee } }</style><p>a</p>')).toBeUndefined();
+    // declared light only: still for a white page
+    expect(light('<meta name="color-scheme" content="light"><p style="color:#333">a</p>')).toBe(true);
+    // mail.plain sets no colours
+    expect(plainLight('> quoted\nhello')).toBeUndefined();
+  });
+
   test('schemes: absent for an email that says nothing', () => {
     expect(parse('<p style="color: #333">a</p>').schemes).toBeUndefined();
   });

@@ -24,6 +24,12 @@ const HEAD = `<meta http-equiv="Content-Security-Policy" content="${CSP}">`;
 const ALL = readFileSync(join(PKG, 'fixtures/trees/all.json'), 'utf8');
 const STATIC = readFileSync(join(PKG, 'fixtures/trees/static.json'), 'utf8');
 const BIG = newsletter(2000);
+/** a reset as apps write them, on a dark page */
+const RESET = `:root { color-scheme: dark; background: #111; color: #eee; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
+img { display: block; max-width: 100%; }
+table { width: 100%; border-collapse: collapse; }
+td, th { padding: 1rem; border: 1px solid #444; }`;
 const BIG_COUNT = [...BIG.children.flatMap((c) => [...elements(c)])].length;
 
 // the API page, the same page without the components (for the bundle's size), the static page
@@ -34,6 +40,9 @@ const apps = {
   // an email's HTML parsed in the page for the width <mail-width> reports
   width: app({ 'index.html': page(`<sn-resource name="html" src="/api/html" type="string"></sn-resource>
 <main data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }"><mail-width data-sn-on-media="media = $event.detail"></mail-width><mail-body id="message" data-sn-prop="{ body: html && media ? mail.parse(html, { images: 'allow', media }) : null }"></mail-body></main>`, HEAD) }),
+  // an app with a reset on a dark page, without mail.css and with it (imported through the package's export)
+  reset: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>', `${HEAD}<link rel="stylesheet" href="/src/app.css">`), 'src/app.css': RESET }),
+  mailcss: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>', `${HEAD}<link rel="stylesheet" href="/src/app.css">`), 'src/app.css': `@import '@tiavision/sinter-mail/mail.css';\n${RESET}` }),
   // the same email parsed for a phone from the start, without <mail-width>: what waiting for it is compared with
   narrow: app({ 'index.html': page(`<sn-resource name="html" src="/api/html" type="string"></sn-resource>
 <main><mail-body id="message" data-sn-prop="{ body: html ? mail.parse(html, { images: 'allow', media: 'narrow' }) : null }"></mail-body></main>`, HEAD) }),
@@ -84,7 +93,7 @@ async function tab(): Promise<{ page: Page; violations: () => Promise<string[]>;
 
 const dist = (a: keyof typeof apps) => join(apps[a].root, 'dist');
 beforeAll(async () => {
-  for (const name of ['api', 'plain', 'width', 'narrow'] as const) {
+  for (const name of ['api', 'plain', 'width', 'narrow', 'reset', 'mailcss'] as const) {
     // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
     await build({ root: apps[name].root, logLevel: 'silent', plugins: [sinter({ components: ['@tiavision/sinter-mail'] }) as never], build: { outDir: dist(name), emptyOutDir: true } });
   }
@@ -298,4 +307,41 @@ test('<mail-width>: opened on a phone, the email is parsed once, for the phone: 
   const med = (k: 'width' | 'narrow') => runs.map((r) => r[k].gap).sort((a, b) => a - b)[2]!;
   console.log(`<mail-width>: the email in the page ${med('width').toFixed(1)} ms after its HTML arrived (${med('narrow').toFixed(1)} ms parsed for a phone from the start)`);
   expect(med('width') - med('narrow')).toBeLessThan(16);
+});
+
+test('mail.css gives an email back what an app\'s reset takes, and a light canvas on a dark page to one written for white', async () => {
+  const { parse } = await import('../sinter/parse.js');
+  const tree = parse('<table><tr><td><p style="color:#333">Hello <img src="data:image/png;base64,iVBORw0KGgo=" alt="" width="20" height="20"> there</p><p>Second</p></td></tr></table>');
+  expect(tree.light).toBe(true);
+  message = JSON.stringify(tree);
+  const look = async (name: keyof typeof apps) => {
+    const { page: p, violations } = await tab();
+    await p.setViewportSize({ width: 1000, height: 700 });
+    await p.goto(await serve(dist(name)));
+    await p.waitForFunction(() => document.querySelector('#message p'));
+    const out = {
+      root: await computed(p, '#message', ['color-scheme', 'background-color', 'color']),
+      cls: await p.$eval('#message', (e) => e.className),
+      table: await p.$eval('#message table', (t) => [t.getBoundingClientRect().width < 900, getComputedStyle(t).borderCollapse]),
+      td: await computed(p, '#message td', ['padding-top', 'border-top-style']),
+      p: await computed(p, '#message p', ['margin-top', 'box-sizing']),
+      img: await computed(p, '#message img', ['display']),
+      violations: await violations(),
+    };
+    await p.close();
+    return out;
+  };
+  const without = await look('reset'), withCss = await look('mailcss');
+  // <mail-body> marks it either way; without mail.css the reset reaches the email
+  expect(without.cls).toBe('mail mail-light');
+  expect(without).toMatchObject({ table: [false, 'collapse'], td: { 'padding-top': '16px', 'border-top-style': 'solid' }, p: { 'margin-top': '0px', 'box-sizing': 'border-box' }, img: { display: 'block' } });
+  // with it: the browser's tables and inline images, the spacing, content-box, and the light canvas
+  expect(withCss).toMatchObject({
+    cls: 'mail mail-light',
+    root: { 'color-scheme': 'light', 'background-color': 'rgb(255, 255, 255)', color: 'rgb(0, 0, 0)' },
+    table: [true, 'separate'], td: { 'border-top-style': 'none' },
+    p: { 'margin-top': '16px', 'box-sizing': 'content-box' }, img: { display: 'inline' }, violations: [],
+  });
+  // the cell's padding is the browser's own again, not the reset's
+  expect(withCss.td['padding-top']).not.toBe('16px');
 });

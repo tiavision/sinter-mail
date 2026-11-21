@@ -35,6 +35,7 @@ sinter/
   components/
     mail-body.html        public: one body, and the slots an app fills (`link`, `image`)
     mail-width.html       public: the `media` that fits the reader's width, as an event (mail-width.ts beside it)
+  mail.css                optional, exported: the browser defaults emails count on, .mail-light, .mail-scroll
     internal/             generated from tags.ts: one component per tag, the dispatch, the table, the
                           steps of a progressive render (mail-steps.ts beside it)
   sinter.types.ts         the tree's types: what apps and the components name

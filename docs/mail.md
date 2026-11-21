@@ -136,11 +136,34 @@ images load then. So:
   its own default font (Gmail and Outlook use a sans-serif); to do the same, give the root one:
   `.mail { font-family: Arial, sans-serif; }`.
 - **Where your page still wins**: a rule with `!important`, and what the email takes from browser defaults
-  when your CSS resets them (a reset that makes images `display: block`, headings unsized, lists unmarked).
-  For newsletters exactly as sent, restore the defaults under `.mail` in your stylesheet.
+  when your CSS resets them (a reset that makes images `display: block`, tables full width with padding,
+  margins zero, `border-box` sizing). [`mail.css`](#mailcss) gives those defaults back under `.mail`.
 - **The email stays in its box.** The root is `display: flow-root`, so floats and margins do not escape it.
-  A wide newsletter (600 px of tables) is as wide as it is: put `<mail-body>` in a box with
-  `overflow-x: auto` for narrow screens.
+  A wide newsletter (600 px of tables) is as wide as it is: `mail.css`'s `mail-scroll` box around
+  `<mail-body>` scrolls it sideways on a narrow screen (or parse for the reader's width, with
+  [`<mail-width>`](#the-readers-width-mail-width), and it shows its phone layout).
+
+### `mail.css`
+
+An optional stylesheet for apps whose CSS resets the browser's defaults:
+
+```js
+import '@tiavision/sinter-mail/mail.css'; // or @import it in your CSS, before its other rules
+```
+
+- Tables and images as the browser draws them (`all: revert`): layout tables get no lines or padding, inline
+  images stay inline. Images no wider than the reader. `content-box` sizing, which emails' widths are written
+  for. Paragraphs, headings, lists and quotes get their margins back.
+- `.mail-light`: the light scheme's canvas, text and link colours, for an email written for a white page
+  (below).
+- `.mail-scroll`, a box you put around `<mail-body>`: an email wider than it scrolls sideways, its background
+  covering what scrolls in.
+- Every rule is `.mail` (or the class) plus `:where()`: one class's specificity, so it beats a reset's element
+  selectors wherever it is imported, and any rule of yours with more specificity beats it. The email's own
+  styles are inline and win over all of it.
+
+Compared on real emails (newsletters, legacy HTML, Outlook, Gmail replies, unstyled HTML) in an app with a
+reset; without it, an app restores these itself.
 
 ### Colour schemes
 
@@ -157,15 +180,15 @@ one too, and `body.schemes` reports it (`['light', 'dark']`; absent when the ema
   page's (`<meta name="color-scheme" content="light dark">` follows the system), or what the app sets around
   the body. Then `schemes` includes `dark`.
 
-So an app in dark mode can show an email with `dark` in `schemes` as it is, on its own dark page, and keep any
-other email that sets colours light:
+So an app in dark mode can show an email with `dark` in `schemes` as it is, on its own dark page; an email that
+sets no colours takes the page's, light or dark; and one that sets colours of its own without saying they work on
+a dark page was written for a white one. `mail.parse` marks that one `body.light` (a text or background colour
+anywhere it shows, its body's included, and no `dark` in `schemes`), and `<mail-body>` puts `mail-light` on its
+root. [`mail.css`](#mailcss) gives `.mail-light` a light canvas, or write your own:
 
 ```css
 .mail-light { color-scheme: light; background: Canvas; color: CanvasText; }
-```
-
-```html
-<div data-sn-class="{ 'mail-light': !tree.schemes?.includes('dark') }"><mail-body data-sn-prop="{ body: tree }"></mail-body></div>
+.mail-light :where(a) { color: LinkText; }
 ```
 
 A dark rule's other properties (a light logo hidden, a dark one shown) keep their light values:

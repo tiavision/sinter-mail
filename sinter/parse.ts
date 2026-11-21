@@ -157,7 +157,22 @@ function build(html: string, o: Options): Body {
   // the schemes it is written for: what it declares, and dark too when its colours change with the scheme
   const schemes = (['light', 'dark'] as const).filter((s) => colorScheme.includes(s) || (s === 'dark' && dark));
   if (schemes.length) out.schemes = schemes;
+  // written for a white page: colours of its own, and no word that they work on a dark one
+  if (!schemes.includes('dark') && colored(out)) out.light = true;
   return out;
+}
+
+/** whether the email sets a text or background colour anywhere it shows, its body included */
+function colored(body: Body): boolean {
+  if (body.style.color || body.style['background-color']) return true;
+  const stack: Node[] = [...body.children];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (n.type === 'text' || n.style.display === 'none') continue;
+    if (n.style.color || n.style['background-color']) return true;
+    for (const c of n.children) stack.push(c);
+  }
+  return false;
 }
 
 const ROOT_PROPS: readonly Property[] = [...TEXT, 'background-color'];
