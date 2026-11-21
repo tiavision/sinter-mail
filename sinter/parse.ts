@@ -137,13 +137,17 @@ interface Context {
   styles: Map<RawElement, Style>;
   /** projected(): the style kept per resolved style and tag */
   projected: Map<Style, Map<Tag, Style>>;
+  /** whether an element was marked as quoted history */
+  quoted: boolean;
+  /** Outlook's markers of a quote already started, and the elements around them: none starts another */
+  started: Set<RawElement>;
 }
 
 function build(html: string, o: Options): Body {
   const root = parseHTML(html);
   const { styles, colorScheme, dark } = resolve(root, { media: o.media });
   const body = root.children.find((n): n is RawElement => n.type === 'element' && n.tag === 'body');
-  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, projected: new Map() };
+  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, projected: new Map(), quoted: false, started: new Set() };
   if (body) collectTargets(body, cx.targets);
   const children = body ? nodes(body, 'body', cx) : [];
   // the body's style is the root's: its text properties and its background, the <html> element's under it
@@ -157,7 +161,23 @@ function build(html: string, o: Options): Body {
   // the schemes it is written for: what it declares, and dark too when its colours change with the scheme
   const schemes = (['light', 'dark'] as const).filter((s) => colorScheme.includes(s) || (s === 'dark' && dark));
   if (schemes.length) out.schemes = schemes;
+  if (cx.quoted) out.quotes = true;
+  // written for a white page: colours of its own, and no word that they work on a dark one
+  if (!schemes.includes('dark') && colored(out)) out.light = true;
   return out;
+}
+
+/** whether the email sets a text or background colour anywhere it shows, its body included */
+function colored(body: Body): boolean {
+  if (body.style.color || body.style['background-color']) return true;
+  const stack: Node[] = [...body.children];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (n.type === 'text' || n.style.display === 'none') continue;
+    if (n.style.color || n.style['background-color']) return true;
+    for (const c of n.children) stack.push(c);
+  }
+  return false;
 }
 
 const ROOT_PROPS: readonly Property[] = [...TEXT, 'background-color'];
@@ -209,9 +229,41 @@ const TABLE_CHILDREN: Readonly<Record<string, ReadonlySet<Tag>>> = {
 
 /** the children of `el`, which became `tag` */
 function nodes(el: RawElement, tag: string, cx: Context): Node[] {
+  return nodesOf(el.children, tag, cx, 0);
+}
+
+/**
+ * The nodes of `list`, children of a `tag`. Outlook writes no element around the history it quotes: from its marker
+ * (searched from `from`) to the end of the parent, the rest of `list` is one `div` of `part: 'quote'`, the only element
+ * the tree adds (a run of blocks to the end of its parent lays out the same in a div). Not in a table's structure.
+ */
+function nodesOf(list: readonly RawNode[], tag: string, cx: Context, from: number): Node[] {
   const allowed = TABLE_CHILDREN[tag];
+  const marker = allowed ? -1 : list.findIndex((c, k) => k >= from && c.type === 'element' && !!startsRest(c, cx, 0));
+  if (marker >= 0) {
+    // its header: the marker and those right after it (appendonsend, the rule, divRplyFwdMsg), each with what wraps it
+    for (let k = marker; k < list.length; k++) {
+      const c = list[k]!;
+      if (c.type === 'text') { if (c.value.trim()) break; continue; }
+      const chain = startsRest(c, cx, 0);
+      if (chain) { for (const e of chain) cx.started.add(e); continue; }
+      if (c.tag !== 'hr') break;
+    }
+    // Outlook on the web draws a rule right before it
+    let start = marker;
+    for (let j = marker - 1; j >= 0; j--) {
+      const c = list[j]!;
+      if (c.type === 'text') { if (c.value.trim()) break; continue; }
+      if (c.tag === 'hr') start = j;
+      break;
+    }
+    cx.quoted = true;
+    // in the quote, a later marker (history it quotes in turn) starts a quote in it
+    const children = nodesOf(list.slice(start), tag, cx, 0);
+    return [...nodesOf(list.slice(0, start), tag, cx, start), { type: 'element', tag: 'div', attrs: {}, style: {}, part: 'quote', children }];
+  }
   const out: Node[] = [];
-  for (const c of el.children) {
+  for (const c of list) {
     if (c.type === 'text') {
       if (allowed) continue; // whitespace between rows and cells: not rendered, and not placeable
       const last = out[out.length - 1];
@@ -254,7 +306,51 @@ function element(el: RawElement, cx: Context): Element | null {
     if (pixel(style)) return null;
     image(el, attrs, cx);
   }
-  return { type: 'element', tag, attrs, style, children: info.void ? [] : nodes(el, tag, cx) };
+  const out: Element = { type: 'element', tag, attrs, style, children: info.void ? [] : nodes(el, tag, cx) };
+  const part = partOf(el, tag);
+  if (part) {
+    out.part = part;
+    if (part === 'quote') cx.quoted = true;
+  }
+  return out;
+}
+
+// ── Quoted history and signatures ─────────────────────────────────────────────────────────────────────
+// What mail clients write around the history a reply quotes and around a signature, by class, id or type: the
+// element is the part. Only on div and blockquote, the tags that carry a part (the components' PARTS).
+
+const QUOTE_CLASSES = ['gmail_quote', 'yahoo_quoted', 'protonmail_quote', 'moz-cite-prefix'];
+const SIGNATURE_CLASSES = ['gmail_signature', 'moz-signature'];
+
+function partOf(el: RawElement, tag: Tag): Element['part'] | undefined {
+  if (tag !== 'div' && tag !== 'blockquote') return undefined;
+  const classes = (attr(el, 'class') ?? '').split(/\s+/);
+  const id = attr(el, 'id');
+  // Gmail, Yahoo, Proton, Thunderbird's "On … wrote:", new Outlook; Apple Mail's and Thunderbird's quote
+  if (QUOTE_CLASSES.some((c) => classes.includes(c)) || id === 'mail-editor-reference-message-container') return 'quote';
+  if (tag === 'blockquote' && attr(el, 'type')?.trim().toLowerCase() === 'cite') return 'quote';
+  // Gmail, Thunderbird, Outlook on the web and on phones
+  if (SIGNATURE_CLASSES.some((c) => classes.includes(c)) || attr(el, 'data-smartmail') === 'gmail_signature'
+    || id === 'Signature' || id === 'ms-outlook-mobile-signature') return 'signature';
+  return undefined;
+}
+
+/** the header block Outlook for Windows writes above the history it quotes (From:, Sent:, in the reader's language) */
+const OUTLOOK_HEADER = /^\s*border:\s*none;\s*border-top:\s*solid\s+#(?:e1e1e1|b5c4df)\s+1(?:\.0)?pt;?\s*padding:\s*3(?:\.0)?pt\s+0(?:cm|in)?\s+0(?:cm|in)?\s+0(?:cm|in)?/i;
+
+/**
+ * Where Outlook's quoted history starts: its marker (Outlook on the web's `appendonsend` or `divRplyFwdMsg`, Outlook
+ * for Windows' header block), or an element that holds one as its only content (Outlook wraps its header in a div):
+ * the elements from `el` to the marker, or null. A marker of a quote already started is none.
+ */
+function startsRest(el: RawElement, cx: Context, depth: number): RawElement[] | null {
+  if (cx.started.has(el)) return null;
+  const id = attr(el, 'id');
+  if (id === 'appendonsend' || id === 'divRplyFwdMsg' || (el.tag === 'div' && OUTLOOK_HEADER.test(attr(el, 'style') ?? ''))) return [el];
+  if (depth >= 3) return null;
+  const content = el.children.filter((c) => c.type === 'element' || c.value.trim());
+  const inner = content.length === 1 && content[0]!.type === 'element' ? startsRest(content[0] as RawElement, cx, depth + 1) : null;
+  return inner && [el, ...inner];
 }
 
 /** each tag's attributes, GLOBAL included (attrsOf), listed once */

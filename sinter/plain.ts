@@ -35,9 +35,12 @@ function flag(v: unknown, name: string): boolean {
 }
 
 /** the conversion itself, kept by its arguments (the least recently used trees go first, past 8 MiB) */
-const plainTree = memo((text: string, flowed: boolean, delsp: boolean): Body => ({
-  type: 'body', style: {}, children: blocks(lines(text, flowed, delsp)), images: { origins: [] },
-}), { maxSize: 8 * 1024 * 1024 });
+const plainTree = memo((text: string, flowed: boolean, delsp: boolean): Body => {
+  const input = lines(text, flowed, delsp);
+  const body: Body = { type: 'body', style: {}, children: blocks(input), images: { origins: [] } };
+  if (input.some((l) => l.depth > 0)) body.quotes = true;
+  return body;
+}, { maxSize: 8 * 1024 * 1024 });
 
 /** a logical line: its quote depth, its text without the quote marks, and whether the signature starts at it */
 interface Line { depth: number; text: string; signature: boolean }

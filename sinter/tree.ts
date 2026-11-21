@@ -179,3 +179,38 @@ export function upTo(body: Body, upto: number): Body {
   const { first: _, ...rest } = body;
   return { ...rest, children: cut(body.children) };
 }
+
+/** the copy of each tree mail.unquoted was given, the tree itself when nothing is left out */
+const unquotedOf = new WeakMap<Body, Body>();
+
+/**
+ * `body` without its quoted history (the elements of `part: 'quote'`, `body.quotes`): what a reply says, for a
+ * reader that shows the history only when asked, and a long thread renders that much less. A copy, `body` unchanged
+ * (a frozen tree from mail.parse goes in as it is), the same one for the same tree. `body` itself when it quotes
+ * nothing, or when leaving the quotes out would leave nothing to read (a message forwarded without a word of its
+ * own: its content is the quote). A numbered body's numbers are not kept: number the result, mail.progressive(
+ * mail.unquoted(tree)). Without recursion.
+ */
+export function unquoted(body: Body): Body {
+  const kept = unquotedOf.get(body);
+  if (kept) return kept;
+  const { first: _, head: __, quotes: ___, ...rest } = body;
+  const out: Body = { ...rest, children: [] };
+  let left = false, images = false;
+  const stack: Array<{ from: readonly Node[]; to: Node[]; k: number }> = [{ from: body.children, to: out.children, k: 0 }];
+  while (stack.length) {
+    const top = stack[stack.length - 1]!;
+    if (top.k === top.from.length) { stack.pop(); continue; }
+    const n = top.from[top.k++]!;
+    if (n.type === 'text') { const { n: _n, ...t } = n; top.to.push(t); continue; }
+    if (n.part === 'quote') { left = true; continue; }
+    if (n.tag === 'img') images = true;
+    const { n: _n, z: _z, ...e } = n;
+    const el: Element = { ...e, children: [] };
+    top.to.push(el);
+    stack.push({ from: n.children, to: el.children, k: 0 });
+  }
+  const result = left && (images || text(out) !== '') ? out : body;
+  unquotedOf.set(body, result);
+  return result;
+}

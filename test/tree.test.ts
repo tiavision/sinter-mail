@@ -123,3 +123,33 @@ test('mail.progressive takes a tree as mail.parse gives it: frozen, unchanged, t
   expect(progressive(b, 3).head).toBe(3);
   expect(text(b)).toBe(text(tree));
 });
+
+test('mail.unquoted: the reply without its history, a copy, the same for the same tree; whole when nothing would be left', async () => {
+  const { unquoted, progressive } = await import('../sinter/tree.js');
+  const { parse } = await import('../sinter/parse.js');
+  const reply = parse('<div>Yes, Friday.</div><div class="gmail_quote"><div class="gmail_attr">On Monday Sam wrote:</div><blockquote class="gmail_quote">Lunch? <img src="data:image/png;base64,iVBORw0KGgo=" alt="map" width="20" height="20"></blockquote></div>');
+  expect(reply.quotes).toBe(true);
+  const short = unquoted(reply);
+  expect(text(short)).toBe('Yes, Friday.');
+  expect(short.quotes).toBeUndefined();
+  expect(text(reply)).toContain('Lunch?');
+  expect(unquoted(reply)).toBe(short);
+  expect(unquoted(short)).toBe(short);
+  // numbered after: the numbers are the short body's
+  const numbered = progressive(short, 1);
+  expect(numbered.head).toBe(1);
+  expect(text(numbered)).toBe('Yes, Friday.');
+  // a numbered body's numbers are not kept
+  const n = progressive(reply, 2);
+  expect(unquoted(n).head).toBeUndefined();
+  expect(JSON.stringify(unquoted(n))).not.toMatch(/"[nz]":/);
+  // nothing quoted, or nothing but the quote (a forward without a word): the body itself
+  const plainOne = parse('<p>Hello</p>');
+  expect(unquoted(plainOne)).toBe(plainOne);
+  const forward = parse('<div class="gmail_quote">---------- Forwarded message ---------<br>The agenda</div>');
+  expect(unquoted(forward)).toBe(forward);
+  // mail.plain's quotes too
+  const p = plain('Agreed.\n\n> Shall we?\n> Yes');
+  expect(p.quotes).toBe(true);
+  expect(text(unquoted(p))).toBe('Agreed.');
+});

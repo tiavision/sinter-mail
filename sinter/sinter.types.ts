@@ -77,7 +77,11 @@ export interface Element {
   tag: Tag;
   attrs: Attrs;
   style: Style;
-  /** what the element is in the message: a quoted reply, the signature (mail.plain sets them) */
+  /**
+   * what the element is in the message: quoted history (a reply's earlier messages), the signature. mail.plain
+   * sets them from `>` lines and `-- `; mail.parse from what mail clients write around them (Gmail, Apple Mail,
+   * Thunderbird, Outlook, Yahoo, Proton). Rendered as the classes `mail-quote` and `mail-signature`.
+   */
   part?: 'quote' | 'signature';
   children: Node[];
   /** the node's index in document order, and the last index in its subtree (mail.progressive) */
@@ -102,6 +106,15 @@ export interface Body {
    * it is; without, an app keeps it light there (`color-scheme: light` around it).
    */
   schemes?: ('light' | 'dark')[];
+  /**
+   * Set when the email keeps a light canvas on a dark page: it sets colours of its own (a text or background colour
+   * anywhere it shows) and does not say they work on a dark page (no `dark` in `schemes`), so it was written for a
+   * white one, and its dark text would be unreadable on a dark page. <mail-body> puts `mail-light` on its root,
+   * which mail.css (or the app) gives a light canvas. Absent for an email without colours, which takes the page's.
+   */
+  light?: true;
+  /** set when an element is quoted history (`part: 'quote'`): an app can offer to show it, and mail.unquoted leaves it out */
+  quotes?: true;
   /** set by mail.progressive: <mail-body> renders the nodes with an index below this first, the rest after the browser has painted them */
   head?: number;
   /** set by mail.progressive: the body up to `head`, the subtrees it holds whole shared with the body */
