@@ -60,8 +60,8 @@ parser has arrived, and `<mail-body>` with no body renders an empty `<div class=
 sinter({ components: ['@tiavision/sinter-mail'], lazy: ['@tiavision/sinter-mail'] })
 ```
 
-`mail.plain`, `mail.text` and `mail.links` live in modules that do not import the parser, so they stay
-ordinary helpers either way.
+`mail.plain`, `mail.text`, `mail.links`, `mail.progressive` and `mail.unquoted` live in modules that do not
+import the parser, so they stay ordinary helpers either way.
 
 A server that sends the tree (`/api/messages/42/body` answering `mail.parse(html, options)` as JSON) is the
 cheapest for the browser: on a 2,000-element newsletter, the page's JavaScript is the components' and
@@ -194,8 +194,42 @@ root. [`mail.css`](#mailcss) gives `.mail-light` a light canvas, or write your o
 A dark rule's other properties (a light logo hidden, a dark one shown) keep their light values:
 `light-dark()` takes colours only.
 
-Quotes and signatures that `mail.plain` finds carry the classes `mail-quote` and `mail-signature`, for
-your styles (`.mail-signature { opacity: .7 }`).
+## Quoted history and signatures
+
+A reply carries the messages it answers. `mail.parse` marks that history `part: 'quote'` and a signature
+`part: 'signature'`, from what mail clients write around them; `mail.plain` does the same from `>` lines and
+`-- `. They render with the classes `mail-quote` and `mail-signature`, for your styles
+(`.mail-signature { opacity: .7 }`), and `body.quotes` says the email has history.
+
+| Client | Quoted history | Signature |
+| --- | --- | --- |
+| Gmail | `div.gmail_quote` (its "On … wrote:" line inside) | `div.gmail_signature` |
+| Apple Mail | `blockquote type="cite"` | |
+| Thunderbird | `blockquote type="cite"`, and its "On … wrote:" line (`div.moz-cite-prefix`) | `div.moz-signature` |
+| Outlook on the web | from `#appendonsend` (or the rule before `#divRplyFwdMsg`) to the end of its parent | `#Signature` |
+| Outlook for Windows | from its header block (From:, Sent:, in any language) to the end of its parent | |
+| new Outlook, Outlook on phones | `#mail-editor-reference-message-container` | `#ms-outlook-mobile-signature` |
+| Yahoo, Proton | `div.yahoo_quoted`, `.protonmail_quote` | |
+
+Outlook writes no element around its history: the tree wraps it, from the marker to the end of the parent, in
+one `div` (the only element the tree adds; blocks to the end of their parent lay out the same in it). A history
+that quotes history in turn is a quote in the quote. A plain `<blockquote>` (a newsletter's quotation) is not
+history, nor is Apple Mail's "On … wrote:" line, which it writes as an ordinary `div` before its quote.
+
+To show a reply without its history until the reader asks, as mail clients do, render `mail.unquoted(body)`:
+the body without the elements of `part: 'quote'`, so a long thread renders only what the reply says.
+
+```html
+<article data-sn-state="{ history: false }" data-sn-let="{ tree: mail.parse(msg.html) }">
+  <mail-body data-sn-prop="{ body: mail.progressive(history ? tree : mail.unquoted(tree)) }"></mail-body>
+  <template data-sn-if="tree.quotes && !history"><button data-sn-on-click="history = true">…</button></template>
+</article>
+```
+
+`mail.unquoted` returns a copy (the tree is not changed; the same tree gives the same copy), or the body itself
+when it quotes nothing or when leaving the quotes out would leave nothing to read: a message forwarded without
+a word of its own is all quote (Gmail and Outlook write a forward as they write a reply), and stays whole.
+Number its result, not the other way round: `mail.progressive(mail.unquoted(tree))`.
 
 ## Images and a proxy
 

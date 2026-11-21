@@ -36,8 +36,13 @@ const HIDING = `<style>.m { display: none } @media (max-width: 480px) { .m { dis
 <tr style="display:none"><td><img src="https://img.example/row.jpg" alt="row">Hidden row</td></tr></table>`;
 const hiding = (media: 'wide' | 'narrow') => JSON.stringify(parse(HIDING, { images: 'allow', media }));
 
+// a reply from Outlook on the web quoting one from Gmail, with a Gmail signature
+const REPLY = JSON.stringify(parse(`<div>Yes, Friday.</div><div id="appendonsend"></div><hr tabindex="-1"><div id="divRplyFwdMsg"><b>From:</b> Sam</div>
+<div>Lunch?<div class="gmail_signature">Sam</div><div class="gmail_quote"><div class="gmail_attr">On Monday Robin wrote:</div><blockquote class="gmail_quote">Free on Friday?</blockquote></div></div>`));
+
 const apps = {
   tree: app({ 'tree.json': TREE, 'index.html': PAGE }),
+  reply: app({ 'tree.json': REPLY, 'index.html': PAGE }),
   wide: app({ 'tree.json': hiding('wide'), 'index.html': PAGE }),
   narrow: app({ 'tree.json': hiding('narrow'), 'index.html': PAGE }),
   fills: app({ 'tree.json': TREE, 'index.html': FILLS }),
@@ -163,4 +168,14 @@ test('what the email hides at the width it was parsed for is not in the page, so
     expect(m).toContain('Shown cell');
     expect(m).not.toMatch(/cell\.jpg|row\.jpg|Hidden row/);
   }
+});
+
+test('quoted history and a signature render with their classes, the div the tree adds for Outlook included', () => {
+  expect(out.reply!.error).toBeNull();
+  const m = mail(out.reply!.html);
+  // Outlook's run: one div, from its marker to the end; in it Gmail's quote and its blockquote
+  expect(m).toMatch(/^<div>Yes, Friday\.<\/div><div class="mail-quote"><div><\/div><hr>/);
+  expect(m.match(/class="mail-quote"/g)).toHaveLength(3);
+  expect(m).toContain('<div class="mail-signature">Sam</div>');
+  expect(m).toContain('<blockquote class="mail-quote">Free on Friday?</blockquote>');
 });

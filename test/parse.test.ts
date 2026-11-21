@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { parse } from '../sinter/parse.js';
 import { plain } from '../sinter/plain.js';
+import { text } from '../sinter/tree.js';
 const plainLight = (text: string) => plain(text).light;
 import { attrsOf, DROP, TAGS } from '../sinter/tags.js';
 import type { Body, Element, Node, Tag } from '../sinter/sinter.types.js';
@@ -124,6 +125,60 @@ describe('images', () => {
     ].join(''))).toEqual(['spacer', 'stretched', 'wide', 'unsized']);
     expect(parse(img('p', ' width="1" height="1"'), { images: 'allow' }).images.origins).toEqual([]);
     expect(parse(`<p>a${img('p', ' width="1" height="1"')}b</p>`).children).toEqual([expect.objectContaining({ tag: 'p', children: [{ type: 'text', value: 'ab' }] })]);
+  });
+});
+
+describe('quoted history and signatures, as mail clients mark them', () => {
+  /** the tree as tags, a part after its tag (`div:quote`), and texts */
+  const parts = (n: Node | Body): unknown =>
+    n.type === 'text' ? n.value.trim() || null : n.type === 'body' ? n.children.map(parts).filter((x) => x !== null)
+      : [n.part ? `${n.tag}:${n.part}` : n.tag, ...n.children.map(parts).filter((x) => x !== null)];
+  test('Gmail: the gmail_quote div, its "On … wrote:" line inside (the corpus reply)', () => {
+    const b = parse(readFileSync(join(CORPUS, 'reply.html'), 'utf8'));
+    expect(b.quotes).toBe(true);
+    const quotes = els(b).filter((e) => e.part === 'quote');
+    expect(quotes[0]!.tag).toBe('div');
+    expect(text(quotes[0]!.children[0]!)).toBe('On Mon, Nov 16, 2026 at 9:12 AM Sam Example <sam@example.com> wrote:');
+    // what the reply says is not quoted
+    expect(els(b).find((e) => e.part === 'quote' && JSON.stringify(e).includes('Sounds good'))).toBeUndefined();
+  });
+  test('Apple Mail and Thunderbird: blockquote type="cite"; Thunderbird\'s "On … wrote:" too', () => {
+    expect(parts(parse('<div>Yes.</div><div><br><blockquote type="cite"><div>On Monday, Sam wrote:</div><div>Lunch?</div></blockquote></div>')))
+      .toEqual([['div', 'Yes.'], ['div', ['br'], ['blockquote:quote', ['div', 'On Monday, Sam wrote:'], ['div', 'Lunch?']]]]);
+    expect(parts(parse('<p>Yes.</p><div class="moz-cite-prefix">On 16.11.26 Sam wrote:<br></div><blockquote type="cite" cite="mid:x@y">Lunch?</blockquote>')))
+      .toEqual([['p', 'Yes.'], ['div:quote', 'On 16.11.26 Sam wrote:', ['br']], ['blockquote:quote', 'Lunch?']]);
+  });
+  test('Outlook on the web: from its marker to the end of the parent, one div, the rule before it included', () => {
+    const owa = '<div>Yes.</div><div id="appendonsend"></div><hr style="display:inline-block;width:98%" tabindex="-1"><div id="divRplyFwdMsg" dir="ltr"><b>From:</b> Sam</div><div>Lunch?</div>';
+    expect(parts(parse(owa))).toEqual([['div', 'Yes.'], ['div:quote', ['div'], ['hr'], ['div', ['b', 'From:'], 'Sam'], ['div', 'Lunch?']]]);
+    // without appendonsend: the rule right before divRplyFwdMsg starts it
+    expect(parts(parse('<p>Yes.</p><hr><div id="divRplyFwdMsg">From: Sam</div><div>Lunch?</div>')))
+      .toEqual([['p', 'Yes.'], ['div:quote', ['hr'], ['div', 'From: Sam'], ['div', 'Lunch?']]]);
+    // a thread written flat: the history it quotes in turn is a quote in the quote
+    expect(parts(parse('<p>C</p><div id="divRplyFwdMsg">From: B</div><p>B</p><div id="divRplyFwdMsg">From: A</div><p>A</p>')))
+      .toEqual([['p', 'C'], ['div:quote', ['div', 'From: B'], ['p', 'B'], ['div:quote', ['div', 'From: A'], ['p', 'A']]]]);
+  });
+  test('Outlook for Windows: its header block (in a div of its own) and what follows, in any language', () => {
+    const word = '<div class="WordSection1"><p class="MsoNormal">Yes.</p><div><div style="border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0cm 0cm 0cm"><p class="MsoNormal"><b>Von:</b> Sam</p></div></div><p class="MsoNormal">Mittag?</p></div>';
+    expect(parts(parse(word))).toEqual([['div', ['p', 'Yes.'], ['div:quote', ['div', ['div', ['p', ['b', 'Von:'], 'Sam']]], ['p', 'Mittag?']]]]);
+    // a border-top alone is not the header
+    expect(parse('<div style="border-top:1px solid #ccc">Section</div><p>more</p>').quotes).toBeUndefined();
+  });
+  test('Yahoo, Proton, new Outlook', () => {
+    for (const html of ['<div class="yahoo_quoted">x</div>', '<blockquote class="protonmail_quote">x</blockquote>', '<div id="mail-editor-reference-message-container">x</div>'])
+      expect(els(parse(html))[0]!.part, html).toBe('quote');
+  });
+  test('signatures: Gmail, Thunderbird, Outlook', () => {
+    for (const html of ['<div class="gmail_signature" data-smartmail="gmail_signature">Robin</div>', '<div data-smartmail="gmail_signature">Robin</div>', '<div class="moz-signature">-- Robin</div>', '<div id="Signature">Robin</div>', '<div id="ms-outlook-mobile-signature">Robin</div>'])
+      expect(els(parse(html))[0]!.part, html).toBe('signature');
+  });
+  test('not quoted: a newsletter\'s blockquote, a class that only reads alike, a table\'s structure', () => {
+    const b = parse('<blockquote>A quotation</blockquote><div class="quote">x</div><p class="gmail_quote_like">y</p><table><tr><td>z</td></tr></table>');
+    expect(els(b).filter((e) => e.part)).toEqual([]);
+    expect(b.quotes).toBeUndefined();
+    // a marker in a cell: the rest of the cell
+    expect(parts(parse('<table><tr><td>Yes.<div id="divRplyFwdMsg">From: Sam</div>Lunch?</td></tr></table>')))
+      .toEqual([['table', ['tbody', ['tr', ['td', 'Yes.', ['div:quote', ['div', 'From: Sam'], 'Lunch?']]]]]]);
   });
 });
 
