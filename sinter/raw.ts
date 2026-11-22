@@ -23,6 +23,7 @@ export type RawNode = RawElement | RawText;
 
 /** an attribute's value, or null */
 export function attr(el: RawElement, name: string): string | null {
-  for (const [n, v] of el.attrs) if (n === name) return v;
+  const a = el.attrs;
+  for (let i = 0; i < a.length; i++) if (a[i][0] === name) return a[i][1];
   return null;
 }

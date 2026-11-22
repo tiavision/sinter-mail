@@ -24,31 +24,30 @@ export function parseHTML(html: string, options?: ParseHTMLOptions): RawElement 
 
 /** the parse's tree as raw nodes: foreign elements and template contents left out, adjacent texts joined */
 function toRaw(root: Node, max: number): RawElement {
-  const out: RawElement = { type: 'element', tag: root.tag, attrs: copy(root), children: [], parent: null };
-  // depth first without recursion (a tree can be as deep as `max`); each entry a node, its parent and the parent's depth
-  const todo: [Node | string, RawElement, number][] = [];
+  const out: RawElement = { type: 'element', tag: root.tag, attrs: root.attrs, children: [], parent: null };
+  // three stacks side by side, not a tuple per node
+  const ns: (Node | string)[] = [], intos: RawElement[] = [], depths: number[] = [];
   const add = (n: Node, into: RawElement, depth: number): void => {
-    for (let i = n.kids.length - 1; i >= 0; i--) todo.push([n.kids[i], into, depth]);
+    const kids = n.kids;
+    for (let i = kids.length - 1; i >= 0; i--) { ns.push(kids[i]); intos.push(into); depths.push(depth); }
   };
   add(root, out, 1);
-  while (todo.length) {
-    const [n, into, depth] = todo.pop()!;
+  while (ns.length) {
+    const n = ns.pop()!, into = intos.pop()!, depth = depths.pop()!;
     if (typeof n === 'string') {
       const last = into.children[into.children.length - 1];
-      if (last?.type === 'text') last.value += n;
+      if (last !== undefined && last.type === 'text') last.value += n;
       else into.children.push({ type: 'text', value: n });
     } else if (n.ns === HTML) {
       if (depth >= max) {
-        // deeper than the bound, which only the adoption agency's moves can make: its content goes in its place
         add(n, into, depth);
         continue;
       }
-      const el: RawElement = { type: 'element', tag: n.tag, attrs: copy(n), children: [], parent: into };
+      // the parser's own list: nothing reads the parse's tree after this
+      const el: RawElement = { type: 'element', tag: n.tag, attrs: n.attrs, children: [], parent: into };
       into.children.push(el as RawNode);
       add(n, el, depth + 1);
     }
   }
   return out;
 }
-
-const copy = (n: Node): [string, string][] => n.attrs.map(([a, v]) => [a, v]);

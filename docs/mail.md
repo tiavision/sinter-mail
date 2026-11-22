@@ -39,7 +39,7 @@ export * as mail from '@tiavision/sinter-mail';
 export type { Body, Element } from '@tiavision/sinter-mail';
 ```
 
-sinter-mail needs sinter 0.21.0 or later.
+sinter-mail needs sinter 0.22.0 or later (until it is released, sinter's main).
 
 ## Three places, one function
 
@@ -304,16 +304,48 @@ before the second replaces it. Waiting costs under a frame: `<mail-width>` repor
   is hidden (`display: none`) it reports once the reader is shown.
 - The state's type is written with a JSDoc cast, as state is typed by its initial value.
 
+## How `<mail-body>` renders
+
+`<mail-body>` picks one of two ways to render each use, and the build ships only the one it picks:
+
+- **Templates**, when the build knows the email (a `file:` resource: the page gets plain HTML, no
+  JavaScript), when the use fills the `link` or `image` slot, or when it passes `templates: true`.
+- **A script builder** otherwise, which is every email that arrives from an API without slot fills. It
+  creates the elements with `createElement`, `setAttribute` and `style.setProperty`, with the same checks as
+  `data-sn-attr` and `data-sn-style` (sinter's `attrAllowed` and `styleAllowed`), and it never writes HTML.
+  On the 2,000-element newsletter it renders about 7 times faster than the templates.
+
+The choice is made per use at build time, with sinter's `$build` and `$slots`, so a page with only
+API emails does not ship the templates:
+
+```html
+<mail-body data-sn-with="{ body }"></mail-body>                   <!-- script builder -->
+<mail-body data-sn-with="{ body, templates: true }"></mail-body>  <!-- templates -->
+```
+
+Two more things help a page that parses the email in the browser:
+
+- `sinter({ compileHints: true })` asks V8 to compile the page's module eagerly, which shortens the parser's
+  first run.
+- `<mail-warm></mail-warm>` on the page parses a small sample email while the page waits for its API, so
+  the parser is compiled before the real email arrives. It renders a hidden empty element.
+
+A tree parsed on the server is still the fastest: the page ships no parser (about 15 kB gzip of JavaScript
+in total), and the newsletter is in place about 33 ms after its response, against about 55 ms for an
+iframe with DOMPurify (Chromium).
+
 ## Long messages: `mail.progressive(body)`
 
 A long email (a newsletter of 2,000 elements) takes one task of about 45 ms to render, and nothing of it
 shows until that task ends; on a phone, several times that. Number the body with `mail.progressive`, and
 `<mail-body>` renders it progressively: the first part in the task that receives the body, the rest in steps
-after the browser has painted that, a task each.
+after the browser has painted that, a task each. The steps belong to the templates, so pass `templates: true`
+too; the script builder renders a numbered body whole, as it renders the newsletter in about the time of the
+templates' first step.
 
 ```html
 <sn-resource name="message" src="/api/messages/{$url.id}"></sn-resource>
-<mail-body data-sn-with="{ body: mail.progressive(message.tree) }"></mail-body>
+<mail-body data-sn-with="{ body: mail.progressive(message.tree), templates: true }"></mail-body>
 ```
 
 `mail.progressive(body, head = 200)` returns the body numbered: a copy whose nodes carry their number in

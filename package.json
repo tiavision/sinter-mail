@@ -55,7 +55,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "@tiaforge-ui/sinter": "0.21.0",
+    "@tiaforge-ui/sinter": "file:../sinter",
     "@types/jsdom": "30.0.0",
     "@types/node": "26.6.6",
     "character-entities": "2.0.2",
