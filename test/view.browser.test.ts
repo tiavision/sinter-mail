@@ -10,7 +10,6 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { chromium, type Browser } from 'playwright';
 import sinter from '@tiaforge-ui/sinter/vite';
 import { parse } from '../sinter/parse.js';
-import { progressive } from '../sinter/tree.js';
 import { app, el, newsletter, page, PKG } from './app.js';
 
 const CSP = "script-src 'self'; style-src 'self'; require-trusted-types-for 'script'";
@@ -64,7 +63,7 @@ const trees: [string, string][] = [
   ['fixtures/trees/all.json', readFileSync(join(PKG, 'fixtures/trees/all.json'), 'utf8')],
   ['fixtures/trees/static.json', readFileSync(join(PKG, 'fixtures/trees/static.json'), 'utf8')],
   ...corpus.map((f): [string, string] => [f, JSON.stringify(parse(readFileSync(join(PKG, 'test/corpus', f), 'utf8'), { images: 'allow' }))]),
-  ...corpus.map((f): [string, string] => [`${f} (narrow, numbered)`, JSON.stringify(progressive(parse(readFileSync(join(PKG, 'test/corpus', f), 'utf8'), { media: 'narrow' }), 20))]),
+  ...corpus.map((f): [string, string] => [`${f} (narrow)`, JSON.stringify(parse(readFileSync(join(PKG, 'test/corpus', f), 'utf8'), { media: 'narrow' }))]),
   ['a newsletter of 2,000 elements', JSON.stringify(newsletter(2000))],
   ['a tree the table does not allow', JSON.stringify(HOSTILE)],
 ];
@@ -89,7 +88,6 @@ test('the same tree gives the same DOM as <mail-body>, its anchors apart, under 
   for (const [name, tree] of trees) {
     message = tree;
     await p.goto(url);
-    // a progressive body's steps end with the whole body
     await expect.poll(async () => { const r = await read(); return r.a === r.b && r.b.length; }, { message: name, timeout: 20_000 }).toBeTruthy().catch(() => {});
     const r = await read();
     // #a renders through the templates (`templates`), #b through the fast path

@@ -59,7 +59,7 @@ parser has arrived, and `<mail-body>` with no body renders an empty `<div class=
 sinter({ libraries: ['@tiavision/sinter-mail'], lazy: ['@tiavision/sinter-mail'] })
 ```
 
-`mail.plain`, `mail.text`, `mail.links`, `mail.progressive` and `mail.unquoted` live in modules that do not
+`mail.plain`, `mail.text`, `mail.links` and `mail.unquoted` live in modules that do not
 import the parser, so they stay ordinary helpers either way.
 
 A server that sends the tree (`/api/messages/42/body` answering `mail.parse(html, options)` as JSON) is the
@@ -220,7 +220,7 @@ the body without the elements of `part: 'quote'`, so a long thread renders only 
 
 ```html
 <article data-sn-state="{ history: false }" data-sn-let="{ tree: mail.parse(msg.html) }">
-  <mail-body data-sn-with="{ body: mail.progressive(history ? tree : mail.unquoted(tree)) }"></mail-body>
+  <mail-body data-sn-with="{ body: history ? tree : mail.unquoted(tree) }"></mail-body>
   <template data-sn-if="tree.quotes && !history"><button data-sn-on-click="history = true">…</button></template>
 </article>
 ```
@@ -228,7 +228,6 @@ the body without the elements of `part: 'quote'`, so a long thread renders only 
 `mail.unquoted` returns a copy (the tree is not changed; the same tree gives the same copy), or the body itself
 when it quotes nothing or when leaving the quotes out would leave nothing to read: a message forwarded without
 a word of its own is all quote (Gmail and Outlook write a forward as they write a reply), and stays whole.
-Number its result, not the other way round: `mail.progressive(mail.unquoted(tree))`.
 
 ## Images and a proxy
 
@@ -334,42 +333,11 @@ A tree parsed on the server is still the fastest: the page ships no parser (abou
 in total), and the newsletter is in place about 33 ms after its response, against about 55 ms for an
 iframe with DOMPurify (Chromium).
 
-## Long messages: `mail.progressive(body)`
+## Long messages
 
-A long email (a newsletter of 2,000 elements) takes one task of about 45 ms to render, and nothing of it
-shows until that task ends; on a phone, several times that. Number the body with `mail.progressive`, and
-`<mail-body>` renders it progressively: the first part in the task that receives the body, the rest in steps
-after the browser has painted that, a task each. The steps belong to the templates, so pass `templates: true`
-too; the script builder renders a numbered body whole, as it renders the newsletter in about the time of the
-templates' first step.
-
-```html
-<sn-resource name="message" src="/api/messages/{$url.id}"></sn-resource>
-<mail-body data-sn-with="{ body: mail.progressive(message.tree), templates: true }"></mail-body>
-```
-
-`mail.progressive(body, head = 200)` returns the body numbered: a copy whose nodes carry their number in
-document order, with `head` (the first 200 nodes render first) and `first` (the body up to there). `body` is
-not changed, so a tree from `mail.parse` (frozen) goes in as it is: `mail.progressive(mail.parse(html))`. The
-copy shares the tree's styles and attributes, and the same tree gives the same copy, which `<mail-body>` needs
-to carry its steps from one render to the next. Run it in the page, as above, or on the server
-before the tree is sent; there, `body.first` repeats the first nodes in the JSON (about 18% more for the
-newsletter, less after gzip). A body that is not numbered renders whole in one task, as before, so short
-emails are not affected.
-
-Measured on the 2,000-element newsletter (Chromium, [measurements](proposals/progressive-rendering.md)): the
-email starts to show after about 50 ms instead of about 100; the rest renders in steps of 5 to 15 ms, each
-sized by how long the one before took (about 12 ms of script, so a step fits in a frame on any device), with
-input and paint between them; the whole email is in place about 6% later than when the rest renders in one
-task, and no frame is dropped.
-
-- **Static pages are not affected.** The steps need a script, which only the progressive branch of
-  `<mail-body>` has: an email from a file is not numbered, the build decides that branch away, and the page
-  ships no JavaScript. Calling `mail.progressive` on a static page's body is `SN322` (the page would ship
-  JavaScript).
-- **One element more.** A progressive render ends with a hidden empty element (`<i hidden>`, the component
-  that runs the steps) at the end of the email: a selector like `:last-child` in the app's CSS sees it.
-- **The slots work as before.** Fills render in every step.
+The script builder renders the 2,000-element newsletter whole in about 35 ms (Chromium), about the time the
+first part of a progressive render used to take, so `<mail-body>` no longer renders in steps. `mail.progressive`
+is deprecated: it gives the body back as it is, and will be removed; drop the call.
 
 ## Changing how links and images look
 

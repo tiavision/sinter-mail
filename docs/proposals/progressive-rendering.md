@@ -1,7 +1,8 @@
 # Rendering faster: two ideas, measured
 
-Status: built: `<mail-body>` renders a body that `mail.progressive` numbered progressively, in steps ([the
-guide](../mail.md#long-messages-mailprogressivebody)), on sinter's #77 and #78. Measured against sinter `main` built
+Status: removed. `<mail-body>` rendered a body that `mail.progressive` numbered progressively, in steps, on
+sinter's #77 and #78; the script builder (`<mail-view>`) renders the newsletter whole in about the time the first
+step took, so the steps were removed and `mail.progressive` is deprecated. Kept as the record of the measurements. Measured against sinter `main` built
 from source, not a release. Chromium (Playwright's headless build), the 2,012-element generated newsletter of
 `test/app.ts`, served as a tree from the API; medians of 11 to 15 interleaved runs; times from the API's answer. The
 sections below are in the order the work went: the first version rendered in two phases, as its own component.

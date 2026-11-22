@@ -72,60 +72,16 @@ test('tree.ts imports no parser', () => {
   expect(imports).toEqual(['./sinter.types.js']);
 });
 
-test('mail.progressive numbers the nodes in document order, each element with the last number of its subtree', async () => {
-  const { progressive } = await import('../sinter/tree.js');
-  const body = { type: 'body', style: {}, images: { origins: [] }, children: [
-    { type: 'element', tag: 'div', attrs: {}, style: {}, children: [{ type: 'text', value: 'a' }, { type: 'element', tag: 'b', attrs: {}, style: {}, children: [{ type: 'text', value: 'b' }] }] },
-    { type: 'text', value: 'c' },
-  ] } as const;
-  const b = progressive(structuredClone(body) as never, 3) as unknown as typeof body & { head: number };
-  const [div, c] = b.children as unknown as [{ n: number; z: number; children: Array<{ n: number; z?: number; children?: Array<{ n: number }> }> }, { n: number }];
-  expect([div.n, div.z, div.children[0]!.n, div.children[1]!.n, div.children[1]!.z, div.children[1]!.children![0]!.n, c.n]).toEqual([0, 3, 1, 2, 3, 3, 4]);
-  expect(b.head).toBe(3);
-  // the body up to node 3 (nodes 0 to 2): the elements node 3 is in are copies (the outer one, the inner one without
-  // its text), the text before it is the same object
-  const first = (b as unknown as { first: typeof body }).first;
-  expect(first.children).toHaveLength(1);
-  const outer = first.children[0] as unknown as { n: number; children: Array<{ n: number; children?: unknown[] }> };
-  expect(outer).not.toBe(div);
-  expect(outer.n).toBe(0);
-  expect(outer.children[0]).toBe(div.children[0]);
-  expect(outer.children[1]).not.toBe(div.children[1]);
-  expect([outer.children[1]!.n, outer.children[1]!.children]).toEqual([2, []]);
-  // deep trees: no recursion
-  let deep: any = { type: 'text', value: 'x' };
-  for (let i = 0; i < 50_000; i++) deep = { type: 'element', tag: 'span', attrs: {}, style: {}, children: [deep] };
-  const d = progressive({ type: 'body', style: {}, images: { origins: [] }, children: [deep] } as never);
-  expect((d.children[0] as { z: number }).z).toBe(50_000);
-});
-
-test('mail.progressive takes a tree as mail.parse gives it: frozen, unchanged, the same copy for the same tree', async () => {
+test('mail.progressive, deprecated, gives the body back as it is', async () => {
   const { progressive } = await import('../sinter/tree.js');
   const { parse } = await import('../sinter/parse.js');
-  const tree = parse('<div style="color:red"><p>One <b>two</b></p></div><p>three</p>');
-  expect(Object.isFrozen(tree)).toBe(true);
-  const before = JSON.stringify(tree);
-  const b = progressive(tree, 2);
-  expect(b).not.toBe(tree);
-  expect(JSON.stringify(tree)).toBe(before);
-  expect([b.head, (b.children[0] as Element).n, (b.children[0] as Element).z]).toEqual([2, 0, 4]);
-  // its styles and attributes are the tree's own objects
-  expect((b.children[0] as Element).style).toBe((tree.children[0] as Element).style);
-  expect((b.children[0] as Element).attrs).toBe((tree.children[0] as Element).attrs);
-  // the same tree, the same copy: <mail-body> carries its steps across renders by identity; another head, another
-  expect(progressive(tree, 2)).toBe(b);
-  expect(progressive(b, 2)).toBe(b);
-  const c = progressive(tree, 3);
-  expect(c).not.toBe(b);
-  expect(c.head).toBe(3);
-  expect(b.head).toBe(2);
-  // a numbered body given again with another head is numbered again, from its own nodes
-  expect(progressive(b, 3).head).toBe(3);
-  expect(text(b)).toBe(text(tree));
+  const tree = parse('<p>One <b>two</b></p>');
+  expect(progressive(tree)).toBe(tree);
+  expect(progressive(tree, 3)).toBe(tree);
 });
 
 test('mail.unquoted: the reply without its history, a copy, the same for the same tree; whole when nothing would be left', async () => {
-  const { unquoted, progressive } = await import('../sinter/tree.js');
+  const { unquoted } = await import('../sinter/tree.js');
   const { parse } = await import('../sinter/parse.js');
   const reply = parse('<div>Yes, Friday.</div><div class="gmail_quote"><div class="gmail_attr">On Monday Sam wrote:</div><blockquote class="gmail_quote">Lunch? <img src="data:image/png;base64,iVBORw0KGgo=" alt="map" width="20" height="20"></blockquote></div>');
   expect(reply.quotes).toBe(true);
@@ -135,14 +91,6 @@ test('mail.unquoted: the reply without its history, a copy, the same for the sam
   expect(text(reply)).toContain('Lunch?');
   expect(unquoted(reply)).toBe(short);
   expect(unquoted(short)).toBe(short);
-  // numbered after: the numbers are the short body's
-  const numbered = progressive(short, 1);
-  expect(numbered.head).toBe(1);
-  expect(text(numbered)).toBe('Yes, Friday.');
-  // a numbered body's numbers are not kept
-  const n = progressive(reply, 2);
-  expect(unquoted(n).head).toBeUndefined();
-  expect(JSON.stringify(unquoted(n))).not.toMatch(/"[nz]":/);
   // nothing quoted, or nothing but the quote (a forward without a word): the body itself
   const plainOne = parse('<p>Hello</p>');
   expect(unquoted(plainOne)).toBe(plainOne);

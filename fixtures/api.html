@@ -5,11 +5,10 @@
   <title>@tiavision/sinter-mail: a tree from an API</title>
 </head>
 <body>
-  <!-- An API that runs mail.parse on the server sends the tree: the page ships no parser. A long one renders
-       progressively (mail.progressive numbers a copy). -->
+  <!-- An API that runs mail.parse on the server sends the tree: the page ships no parser. -->
   <sn-resource name="message" src="/api/message" type="Body"></sn-resource>
   <main>
-    <mail-body id="message" data-sn-with="{ body: message && mail.progressive(message) }"></mail-body>
+    <mail-body id="message" data-sn-with="{ body: message }"></mail-body>
   </main>
 </body>
 </html>

@@ -37,8 +37,8 @@ sinter/
     mail-body.html        public: one body, and the slots an app fills (`link`, `image`)
     mail-width.html       public: the `media` that fits the reader's width, as an event (mail-width.ts beside it)
   mail.css                optional, exported: the browser defaults emails count on, .mail-light, .mail-scroll
-    internal/             generated from tags.ts: one component per tag, the dispatch, the table, the
-                          steps of a progressive render (mail-steps.ts beside it)
+    internal/             generated from tags.ts: one component per tag, the dispatch, the table,
+                          <mail-tree> (templates) and <mail-view> (the script builder)
   sinter.types.ts         the tree's types: what apps and the components name
   tags.ts                 the tag table: tags, their attributes, the properties each binds, what is dropped
   parse.ts                mail.parse: options, the tree from the raw document and the resolved styles
@@ -47,7 +47,7 @@ sinter/
   css/                    the cascade: tokenizer, selectors, media, values, legacy hints
   raw.ts                  the raw tree between the parser and the cascade
   plain.ts, autolink.ts   mail.plain, with GFM's autolinks
-  tree.ts                 mail.text, mail.links, mail.progressive
+  tree.ts                 mail.text, mail.links, mail.unquoted (mail.progressive, deprecated)
   sinter.helpers.ts       the helpers, re-exported by the entry
   index.ts                the entry
 scripts/
