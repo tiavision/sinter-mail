@@ -21,9 +21,24 @@ import type { Attrs, Body, Element, Node, ParseOptions, Property, Style, Tag } f
  * frozen: change a copy.
  */
 export function parse(html: string | null | undefined, options?: ParseOptions): Body {
-  const o = optionsOf(options);
-  return parseTree(typeof html === 'string' ? html : '', o.images, o.proxy, o.cidTemplate, o.cidMap, o.media, o.dataImages);
+  return last(typeof html === 'string' ? html : '', optionsOf(options));
 }
+
+/**
+ * SPIKE: the tree of the call before, when this one has the same source and options. A let is its expression, read
+ * at every binding, and memo()'s key holds the whole source (a 250 KB string built and hashed per read); this compares
+ * the source by identity first (`===` on the same string is a pointer comparison). The state is in a closure, as memo's.
+ */
+const last = (() => {
+  let h: string | undefined, p: ReturnType<typeof optionsOf> | undefined, v: Body | undefined;
+  return (html: string, o: ReturnType<typeof optionsOf>): Body => {
+    if (v && html === h && p && o.images === p.images && o.proxy === p.proxy && o.cidTemplate === p.cidTemplate && o.media === p.media && o.dataImages === p.dataImages
+      && o.cidMap.length === p.cidMap.length && o.cidMap.every((x, i) => x === p!.cidMap[i])) return v;
+    const r = parseTree(html, o.images, o.proxy, o.cidTemplate, o.cidMap, o.media, o.dataImages);
+    h = html; p = o; v = r;
+    return r;
+  };
+})();
 
 /** the parse, kept by its arguments (all primitives, or an array of them: memo's keys) */
 const parseTree = memo(

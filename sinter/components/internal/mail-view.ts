@@ -1,0 +1,17 @@
+// SPIKE: the script of <mail-view>: the body's tree as elements, created directly (../build.ts). A new body replaces
+// the one before, whole.
+import { build } from '../../build.js';
+import type { Body } from '../../sinter.types.js';
+import { MailViewComponent } from './mail-view.html';
+
+export class MailView extends MailViewComponent {
+  #of: Body | null | undefined = undefined;
+  connected() { this.#render(); }
+  propsChanged() { this.#render(); }
+  #render() {
+    const b = this.props.body ?? null;
+    if (b === this.#of) return;
+    this.#of = b;
+    if (b) this.root.replaceChildren(build(b)); else this.root.replaceChildren();
+  }
+}
