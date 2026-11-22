@@ -10,7 +10,6 @@
 // `URL`, so sinter runs it at build time over a `file:` resource. The tree is kept with sinter's memo():
 // one parse per source and options, the tree frozen and shared.
 import { parseHTML, resolve } from '@tiavision/sinter-mail/parser';
-import { memo } from '@tiaforge-ui/sinter/memo';
 import type { RawElement, RawNode } from './raw.js';
 import { attr } from './raw.js';
 import { attrsOf, DROP, RENAME, TAGS, TEXT } from './tags.js';
@@ -40,12 +39,45 @@ const last = (() => {
   };
 })();
 
-/** the parse, kept by its arguments (all primitives, or an array of them: memo's keys) */
-const parseTree = memo(
-  (html: string, images: Images, proxy: string, cidTemplate: string, cidMap: string[], media: 'wide' | 'narrow', dataImages: number): Body =>
-    build(html, { images, proxy, cidTemplate, cidMap: pairs(cidMap), media, dataImages }),
-  { maxSize: 8 * 1024 * 1024 },
-);
+/**
+ * SPIKE: the parse, kept by its source and options: the source by identity (a Map hashes a string once), in order of
+ * use, bounded by the sources' length; the tree frozen as memo() freezes one, by its known shape (no key list and no
+ * descriptor per object).
+ */
+const parseTree = (() => {
+  const MAX = 4 * 1024 * 1024;
+  const cache = new Map<string, Map<string, Body>>();
+  let total = 0;
+  return (html: string, images: Images, proxy: string, cidTemplate: string, cidMap: string[], media: 'wide' | 'narrow', dataImages: number): Body => {
+    const key = `${images}|${media}|${dataImages}|${proxy.length}:${proxy}|${cidTemplate.length}:${cidTemplate}|${cidMap.map((s) => `${s.length}:${s}`).join('')}`;
+    let of = cache.get(html);
+    if (of) { cache.delete(html); cache.set(html, of); } else { cache.set(html, (of = new Map())); total += html.length; }
+    let v = of.get(key);
+    if (!v) {
+      of.set(key, (v = frozen(build(html, { images, proxy, cidTemplate, cidMap: pairs(cidMap), media, dataImages }))));
+      for (const [k] of cache) { if (total <= MAX || k === html) break; cache.delete(k); total -= k.length; }
+    }
+    return v;
+  };
+})();
+
+/** `body` frozen at every depth */
+function frozen(body: Body): Body {
+  const F = Object.freeze;
+  F(body.style); F(body.images.origins); F(body.images);
+  if (body.schemes) F(body.schemes);
+  const stack: Node[][] = [body.children];
+  while (stack.length) {
+    const list = stack.pop()!;
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (n.type === 'element') { F(n.attrs); F(n.style); stack.push(n.children); }
+      F(n);
+    }
+    F(list);
+  }
+  return F(body);
+}
 
 type Images = 'block' | 'allow' | 'proxy';
 interface Options {
@@ -179,6 +211,7 @@ function build(html: string, o: Options): Body {
   if (cx.quoted) out.quotes = true;
   // written for a white page: colours of its own, and no word that they work on a dark one
   if (!schemes.includes('dark') && colored(out)) out.light = true;
+ 
   return out;
 }
 

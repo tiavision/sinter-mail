@@ -20,4 +20,4 @@
   An email written for a white page (`body.light`: colours of its own, nothing saying they work on a dark one) puts
   `mail-light` on the root, for the app's dark mode: mail.css gives it a light canvas.
 -->
-<template data-sn-props="{ body?: Body | null; link: Slot<{ node: Element }>; image: Slot<{ node: Element }> }"><template data-sn-if="($build && (!!body || !body)) || $slots.link || $slots.image"><mail-tree data-sn-with="{ body }"></mail-tree></template><template data-sn-else><mail-view data-sn-with="{ body }"></mail-view></template></template>
+<template data-sn-props="{ body?: Body | null; templates?: boolean; link: Slot<{ node: Element }>; image: Slot<{ node: Element }> }"><template data-sn-if="($build && (!!body || !body)) || $slots.link || $slots.image || !!templates"><mail-tree data-sn-with="{ body }"></mail-tree></template><template data-sn-else><mail-view data-sn-with="{ body }"></mail-view></template></template>

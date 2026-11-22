@@ -14,7 +14,7 @@ import { progressive } from '../sinter/tree.js';
 import { app, el, newsletter, page, PKG } from './app.js';
 
 const CSP = "script-src 'self'; style-src 'self'; require-trusted-types-for 'script'";
-const a = app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="a" data-sn-with="{ body: message }"></mail-body><mail-view id="b" data-sn-with="{ body: message }"></mail-view><button id="again" data-sn-on-click="refresh(message)">again</button></main>', `<meta http-equiv="Content-Security-Policy" content="${CSP}">`) });
+const a = app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="a" data-sn-with="{ body: message, templates: true }"></mail-body><mail-body id="b" data-sn-with="{ body: message }"></mail-body><button id="again" data-sn-on-click="refresh(message)">again</button></main>', `<meta http-equiv="Content-Security-Policy" content="${CSP}">`) });
 let server: Server, url = '', browser: Browser, message = 'null';
 
 beforeAll(async () => {
@@ -81,7 +81,9 @@ test('the same tree gives the same DOM as <mail-body>, its anchors apart, under 
   const read = () => p.evaluate(() => {
     const html = (id: string) => document.getElementById(id)!.outerHTML.replace(/<!--.*?-->/gs, '').replace(/<i hidden=""><\/i>/g, '').replace(/ id="[ab]"/, '').replace(/ data-sn(?:-\w+)?="[^"]*"/g, '');
     // adjacent text nodes are one run in the markup either way
-    return { a: html('a'), b: html('b'), n: document.querySelectorAll('#b *').length };
+    // which path each took: the templates leave their anchors' comments, the fast path none
+    const comments = (id: string) => { let c = 0; const w = document.createTreeWalker(document.getElementById(id)!, NodeFilter.SHOW_COMMENT); while (w.nextNode()) c++; return c; };
+    return { a: html('a'), b: html('b'), n: document.querySelectorAll('#b *').length, ca: comments('a'), cb: comments('b') };
   });
   let elements = 0;
   for (const [name, tree] of trees) {
@@ -90,6 +92,8 @@ test('the same tree gives the same DOM as <mail-body>, its anchors apart, under 
     // a progressive body's steps end with the whole body
     await expect.poll(async () => { const r = await read(); return r.a === r.b && r.b.length; }, { message: name, timeout: 20_000 }).toBeTruthy().catch(() => {});
     const r = await read();
+    // #a renders through the templates (`templates`), #b through the fast path
+    if (r.n > 0) { expect(r.ca, name).toBeGreaterThan(0); expect(r.cb, name).toBe(0); }
     if (r.a !== r.b) { let i = 0; while (r.a[i] === r.b[i]) i++; expect(r.b.slice(Math.max(0, i - 150), i + 150), name).toBe(r.a.slice(Math.max(0, i - 150), i + 150)); }
     elements += r.n;
   }
