@@ -20,10 +20,49 @@ for (const t of Object.keys(TAGS) as Tag[]) {
   ORDER[t] = o;
 }
 
-/** the element of `n` as `tag` (a key of TAGS): its attributes, its style, its parts */
-function open(n: El, tag: Tag): HTMLElement {
+/**
+ * Emails repeat their styles: per style and tag, once it is seen a second time, an element with that style and no
+ * attributes, which the next ones are copies of (cloneNode skips the property parsing that setProperty does), so a
+ * style seen once costs nothing more. By style object (mail.parse shares one among elements with the same style),
+ * and by content within one build, for a tree from JSON, which has an object per element.
+ */
+const protos = new WeakMap<object, Map<Tag, HTMLElement | null>>();
+/** in the current build: the first style object with each content */
+let byText = new Map<string, object>();
+function styled(n: El, tag: Tag): HTMLElement {
+  let m = protos.get(n.style);
+  if (!m) {
+    let k = '';
+    const s = n.style as Record<string, unknown>;
+    for (const p in s) k += p + ':' + s[p] + ';';
+    const first = byText.get(k);
+    if (first) m = protos.get(first)!;
+    else { byText.set(k, n.style); m = new Map(); }
+    protos.set(n.style, m);
+  }
+  const p = m.get(tag);
+  if (p) return p.cloneNode(false) as HTMLElement;
+  if (p === null) { const q = fresh(n, tag); m.set(tag, q); return q.cloneNode(false) as HTMLElement; }
+  m.set(tag, null);
+  return fresh(n, tag);
+}
+/** a new element of `tag` with `n`'s style */
+function fresh(n: El, tag: Tag): HTMLElement {
   const e = document.createElement(tag);
   if (tag === 'a') { e.setAttribute('target', '_blank'); e.setAttribute('rel', 'noopener noreferrer'); }
+  // the properties the tag binds, in its component's order: the tree's own order when that is the same (parse.ts
+  // writes them so), else the table's
+  const s = n.style as Record<string, unknown>, st = e.style, order = ORDER[tag];
+  let at = 0, sorted = true;
+  for (const p in s) { const i = order[p]; if (i !== undefined) { if (i < at) { sorted = false; break; } at = i; } }
+  if (sorted) { for (const p in s) if (order[p] !== undefined) put(st, p, s[p]); }
+  else for (const p of TAGS[tag].props) put(st, p, s[p]);
+  return e;
+}
+
+/** the element of `n` as `tag` (a key of TAGS): its attributes, its style, its parts */
+function open(n: El, tag: Tag): HTMLElement {
+  const e = styled(n, tag);
   const a = n.attrs as Record<string, unknown>;
   for (const k of ATTRS[tag]) {
     let v = a[k];
@@ -32,13 +71,6 @@ function open(n: El, tag: Tag): HTMLElement {
     // as data-sn-attr writes it: a URL attribute only with an allowed scheme (the app's `urlSchemes` included)
     if (attrAllowed(e, k, v as string)) e.setAttribute(k, v as string);
   }
-  // the properties the tag binds, in its component's order: the tree's own order when that is the same (parse.ts
-  // writes them so), else the table's
-  const s = n.style as Record<string, unknown>, st = e.style, order = ORDER[tag];
-  let at = 0, sorted = true;
-  for (const p in s) { const i = order[p]; if (i !== undefined) { if (i < at) { sorted = false; break; } at = i; } }
-  if (sorted) { for (const p in s) if (order[p] !== undefined) put(st, p, s[p]); }
-  else for (const p of TAGS[tag].props) put(st, p, s[p]);
   if (tag === 'blockquote' || tag === 'div') { if (n.part === 'quote') e.className = 'mail-quote'; else if (n.part === 'signature') e.className = 'mail-signature'; }
   return e;
 }
@@ -88,6 +120,6 @@ function table(n: El, e: HTMLElement): void {
 /** the children of `b` as a fragment */
 export function build(b: Body): DocumentFragment {
   const f = document.createDocumentFragment();
-  flow(b, f);
+  try { flow(b, f); } finally { byText = new Map(); }
   return f;
 }

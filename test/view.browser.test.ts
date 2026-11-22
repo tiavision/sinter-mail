@@ -78,8 +78,12 @@ test('the same tree gives the same DOM as <mail-body>, its anchors apart, under 
     document.addEventListener('securitypolicyviolation', (e) => (window as never as { __v: string[] }).__v.push(`${e.violatedDirective} ${e.sample}`));
   });
   const read = () => p.evaluate(() => {
-    const html = (id: string) => document.getElementById(id)!.outerHTML.replace(/<!--.*?-->/gs, '').replace(/<i hidden=""><\/i>/g, '').replace(/ id="[ab]"/, '').replace(/ data-sn(?:-\w+)?="[^"]*"/g, '');
-    // adjacent text nodes are one run in the markup either way
+    // the markup with each element's attributes sorted: the fast path copies an element with a style (style first),
+    // the templates set the style last, and their order means nothing; adjacent text nodes are one run either way
+    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const sorted = (n: Node): string => n.nodeType === 3 ? esc((n as Text).data) : n.nodeType === 8 ? `<!--${(n as Comment).data}-->` : n.nodeType !== 1 ? '' :
+      `<${(n as Element).localName}${[...(n as Element).attributes].map((a) => ` ${a.name}="${esc(a.value).replace(/"/g, '&quot;')}"`).sort().join('')}>${[...n.childNodes].map(sorted).join('')}</${(n as Element).localName}>`;
+    const html = (id: string) => sorted(document.getElementById(id)!).replace(/<!--.*?-->/gs, '').replace(/<i hidden=""><\/i>/g, '').replace(/ id="[ab]"/, '').replace(/ data-sn(?:-\w+)?="[^"]*"/g, '');
     // which path each took: the templates leave their anchors' comments, the fast path none
     const comments = (id: string) => { let c = 0; const w = document.createTreeWalker(document.getElementById(id)!, NodeFilter.SHOW_COMMENT); while (w.nextNode()) c++; return c; };
     return { a: html('a'), b: html('b'), n: document.querySelectorAll('#b *').length, ca: comments('a'), cb: comments('b') };
