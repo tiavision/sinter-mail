@@ -99,7 +99,6 @@ files['mail-node.html'] = component(
   `One element, by its tag: the only place elements are dispatched. A table's parts render inside mail-table; one outside a table (which parse.ts never writes) renders its content, through ${ORPHAN}.`,
   `<sn-component use="{ ${tags.map((t) => `${key(t)}: '${TAGS[t].inTable ? ORPHAN : `mail-${t}`}'`).join(', ')} }[node.tag]" data-sn-with="{ node }"></sn-component>`,
 );
-files['mail-steps.html'] = `${HEAD('The steps of a progressive render (mail.progressive): after the browser has painted the body\'s first part, a `step` event per task with the body up to the next part, then the body itself (mail-steps.ts). <mail-body> renders it only for a numbered body, so a static page does not ship its script. Its root is a hidden element at the end of the email.')}<template data-sn-props="{ body: Body }" data-sn-emits="{ step: Body }"><i hidden></i></template>\n`;
 files[`${ORPHAN}.html`] = component(
   'A table\'s part outside a table, which parse.ts never writes: its content in a <span>, as the browser drops the tag and keeps what it holds.',
   `<span>${children('node', 'c')}</span>`,
@@ -125,10 +124,6 @@ for (const tag of own) {
     files[name] = component(`<${tag}>.`, element('node', tag, children('node', 'c')));
   }
 }
-
-// every loop is keyed by the node's number (mail.progressive), else by its position: a copy of a node, which a step of
-// a progressive render makes of the elements it cuts, keeps its row
-for (const f of Object.keys(files)) files[f] = files[f].replace(/<template data-sn-for="(\w+) in ([^"]+)">/g, (_, v, e) => `<template data-sn-for="(${v}, ${v}i) in ${e}" data-sn-key="${v}.n ?? ${v}i">`);
 
 // ── write or check ────────────────────────────────────────────────────────────────────────────────────
 const check = process.argv.includes('--check');

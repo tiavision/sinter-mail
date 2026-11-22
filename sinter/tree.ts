@@ -2,7 +2,7 @@
 // or checks a message's links). This module does not import the parser, so these stay ordinary helpers when an
 // app makes the package lazy: they render early and fold at build time. Pure functions of their arguments, with
 // no globals beyond the language's and no recursion: a deep tree does not overflow the stack. No cache (a walk is
-// cheap next to a parse), but in mail.progressive, whose copy must be the same object for the same tree.
+// cheap next to a parse), but in mail.unquoted, whose copy must be the same object for the same tree.
 import type { Body, Element, LinkInfo, Node, Tag } from './sinter.types.js';
 
 /** how an element lays out its text: on the line, as a block, a table row or cell, or not at all */
@@ -121,63 +121,13 @@ export function links(body: Body | null | undefined): LinkInfo[] {
   return out;
 }
 
-/** the numbered copy of each tree mail.progressive was given (one per tree: <mail-body> carries its steps by identity) */
-const numbered = new WeakMap<Body, Body>();
-
 /**
- * `body` numbered for a progressive render: a copy of its nodes, each with its number in document order (`n`; `z`
- * on an element: the last number in its subtree), `head` and `first` (the body up to `head`). <mail-body> renders
- * the first `head` nodes in the task that receives it and the rest in steps, a task each, after the browser has
- * painted them. `body` is not changed, so a tree from mail.parse, frozen and shared, can be given as it is; the
- * copy shares its styles and attributes, and the same tree (and `head`) gives the same copy. A copy given back is
- * returned as it is. Without recursion. A body that is not numbered renders whole in one task (a `file:` email,
- * folded at build time, stays whole and ships no JavaScript).
+ * @deprecated `body` as it is. <mail-body> renders an email from an API whole, in about the time a progressive
+ * render took to show its first part, so it no longer renders in steps. Kept for one release so that pages that call
+ * it keep working; remove the call.
  */
-export function progressive(body: Body, head = 200): Body {
-  if (body.head === head && body.first) return body;
-  const kept = numbered.get(body);
-  if (kept?.head === head) return kept;
-  const { first: _, head: __, ...rest } = body;
-  const out: Body = { ...rest, children: [] };
-  // each list being copied: its nodes, where their copies go, the next one, and the element it is the children of
-  const stack: Array<{ from: readonly Node[]; to: Node[]; k: number; el: Element | null }> = [{ from: body.children, to: out.children, k: 0, el: null }];
-  let i = 0;
-  while (stack.length) {
-    const top = stack[stack.length - 1]!;
-    if (top.k === top.from.length) {
-      if (top.el) top.el.z = i - 1;
-      stack.pop();
-      continue;
-    }
-    const n = top.from[top.k++]!;
-    if (n.type === 'text') { top.to.push({ ...n, n: i++ }); continue; }
-    const el: Element = { ...n, n: i++, children: [] };
-    top.to.push(el);
-    stack.push({ from: n.children, to: el.children, k: 0, el });
-  }
-  out.head = head;
-  out.first = upTo(out, head);
-  numbered.set(body, out);
-  return out;
-}
-
-/**
- * A numbered `body` up to node `upto`, for a step of a progressive render: the nodes below it, an element whose
- * subtree is all below it as it is (the same object), one that `upto` cuts copied with its children up to it. Rows
- * are keyed by the nodes' numbers, so a copy keeps its row and only the copied elements render again.
- */
-export function upTo(body: Body, upto: number): Body {
-  const cut = (list: Node[]): Node[] => {
-    const out: Node[] = [];
-    for (const c of list) {
-      if (c.n! >= upto) break;
-      if (c.type !== 'element' || c.z! < upto) out.push(c);
-      else out.push({ ...c, children: cut(c.children) });
-    }
-    return out;
-  };
-  const { first: _, ...rest } = body;
-  return { ...rest, children: cut(body.children) };
+export function progressive(body: Body, _head?: number): Body {
+  return body;
 }
 
 /** the copy of each tree mail.unquoted was given, the tree itself when nothing is left out */
@@ -188,13 +138,12 @@ const unquotedOf = new WeakMap<Body, Body>();
  * reader that shows the history only when asked, and a long thread renders that much less. A copy, `body` unchanged
  * (a frozen tree from mail.parse goes in as it is), the same one for the same tree. `body` itself when it quotes
  * nothing, or when leaving the quotes out would leave nothing to read (a message forwarded without a word of its
- * own: its content is the quote). A numbered body's numbers are not kept: number the result, mail.progressive(
- * mail.unquoted(tree)). Without recursion.
+ * own: its content is the quote). Without recursion.
  */
 export function unquoted(body: Body): Body {
   const kept = unquotedOf.get(body);
   if (kept) return kept;
-  const { first: _, head: __, quotes: ___, ...rest } = body;
+  const { quotes: _, ...rest } = body;
   const out: Body = { ...rest, children: [] };
   let left = false, images = false;
   const stack: Array<{ from: readonly Node[]; to: Node[]; k: number }> = [{ from: body.children, to: out.children, k: 0 }];
@@ -202,11 +151,10 @@ export function unquoted(body: Body): Body {
     const top = stack[stack.length - 1]!;
     if (top.k === top.from.length) { stack.pop(); continue; }
     const n = top.from[top.k++]!;
-    if (n.type === 'text') { const { n: _n, ...t } = n; top.to.push(t); continue; }
+    if (n.type === 'text') { top.to.push(n); continue; }
     if (n.part === 'quote') { left = true; continue; }
     if (n.tag === 'img') images = true;
-    const { n: _n, z: _z, ...e } = n;
-    const el: Element = { ...e, children: [] };
+    const el: Element = { ...n, children: [] };
     top.to.push(el);
     stack.push({ from: n.children, to: el.children, k: 0 });
   }

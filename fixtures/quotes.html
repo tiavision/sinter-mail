@@ -6,10 +6,10 @@
 </head>
 <body>
   <!-- A reply shown as mail clients show it: what it says, and its quoted history behind a button
-       (mail.unquoted; body.quotes says there is any), numbered for a progressive render after. -->
+       (mail.unquoted; body.quotes says there is any). -->
   <sn-resource name="msg" src="/api/msg" type="{ html: string }"></sn-resource>
   <article data-sn-state="{ history: false }" data-sn-let="{ tree: mail.parse(msg.html) }">
-    <mail-body data-sn-with="{ body: mail.progressive(history ? tree : mail.unquoted(tree)) }"></mail-body>
+    <mail-body data-sn-with="{ body: history ? tree : mail.unquoted(tree) }"></mail-body>
     <template data-sn-if="tree.quotes && !history"><button data-sn-on-click="history = true">…</button></template>
   </article>
 </body>

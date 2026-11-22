@@ -26,7 +26,7 @@ test('the Tag union of sinter.types.ts is the table\'s tags', () => {
 
 test('one component per tag that renders on its own, the dispatch and the orphan, and <mail-body>\'s two renderings: no other file', () => {
   // mail-tree and mail-view are written by hand (build-components.mjs leaves them): <mail-body>'s templates and its script renderer
-  expect(internal).toEqual([...own.map((t) => `mail-${t}.html`), 'mail-node.html', 'mail-orphan.html', 'mail-steps.html', 'mail-tree.html', 'mail-view.html'].sort());
+  expect(internal).toEqual([...own.map((t) => `mail-${t}.html`), 'mail-node.html', 'mail-orphan.html', 'mail-tree.html', 'mail-view.html'].sort());
   // a table's parts have no component: mail-table renders them
   for (const t of inTable) expect(internal).not.toContain(`mail-${t}.html`);
 });
@@ -56,10 +56,9 @@ test('each component renders its own tag as its root (a link and an image inside
 });
 
 test('every loop over children renders text runs itself and passes every shown element to mail-node', () => {
-  // the children, keyed by the node's number (mail.progressive) or else their position: an element's, or <mail-body>'s
-  // (the body's, or in a progressive render the step's tree)
-  const KIDS = String.raw`body \? body\.children : \[\]|shown \? shown\.children : \[\]|\w+\.children`;
-  const RUN = new RegExp(String.raw`<template data-sn-for="\((\w+), \1i\) in (?:${KIDS})" data-sn-key="\1\.n \?\? \1i"><template data-sn-if="\1\.type === 'text'"><template data-sn-text="\1\.value"><\/template><\/template><template data-sn-else><template data-sn-if="\1\.style\.display !== 'none'"><mail-node data-sn-with="\{ node: \1 \}"><\/mail-node><\/template><\/template><\/template>`, 'g');
+  // the children: an element's, or the body's in <mail-body>
+  const KIDS = String.raw`body \? body\.children : \[\]|\w+\.children`;
+  const RUN = new RegExp(String.raw`<template data-sn-for="(\w+) in (?:${KIDS})"><template data-sn-if="\1\.type === 'text'"><template data-sn-text="\1\.value"><\/template><\/template><template data-sn-else><template data-sn-if="\1\.style\.display !== 'none'"><mail-node data-sn-with="\{ node: \1 \}"><\/mail-node><\/template><\/template><\/template>`, 'g');
   let loops = 0;
   for (const f of files) {
     const src = read(f);

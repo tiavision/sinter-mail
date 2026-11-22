@@ -68,8 +68,6 @@ export type Property =
 export interface Text {
   type: 'text';
   value: string;
-  /** the node's index in document order, set by mail.progressive: its row's key, and where a step of a progressive render ends */
-  n?: number;
 }
 
 export interface Element {
@@ -84,9 +82,6 @@ export interface Element {
    */
   part?: 'quote' | 'signature';
   children: Node[];
-  /** the node's index in document order, and the last index in its subtree (mail.progressive) */
-  n?: number;
-  z?: number;
 }
 
 export type Node = Element | Text;
@@ -115,10 +110,6 @@ export interface Body {
   light?: true;
   /** set when an element is quoted history (`part: 'quote'`): an app can offer to show it, and mail.unquoted leaves it out */
   quotes?: true;
-  /** set by mail.progressive: <mail-body> renders the nodes with an index below this first, the rest after the browser has painted them */
-  head?: number;
-  /** set by mail.progressive: the body up to `head`, the subtrees it holds whole shared with the body */
-  first?: Body;
 }
 
 export interface ImageInfo {

@@ -27,7 +27,7 @@ tree, and generated components render each element, with every attribute and sty
   (`<style>` rules, inline styles, legacy attributes like `bgcolor` and `<font>`) are resolved the way a
   browser's cascade would.
 - **Fast where it counts.** An email in a file is folded into plain HTML at build time, with no JavaScript.
-  Long messages render progressively. Parse in the browser, lazily, or on your server.
+  An email from an API is rendered by a script builder. Parse in the browser, lazily, or on your server.
 - **Plain text too.** `mail.plain` handles `text/plain` bodies: links, quotes, signatures and
   `format=flowed`.
 
@@ -107,8 +107,7 @@ what they count on, and a light canvas in dark mode to an email written for a wh
 
 ## Documentation
 
-- **[The guide](docs/mail.md)**: all options, what is kept and dropped, styling, proxies, progressive
-  rendering, slots, CSP, and the security guarantees.
+- **[The guide](docs/mail.md)**: all options, what is kept and dropped, styling, proxies, slots, CSP, and the security guarantees.
 - **[Design notes](docs/proposals/sinter-mail.md)**: why it is built the way it is.
 - **[Contributing](CONTRIBUTING.md)**: layout, tests and the release process.
 

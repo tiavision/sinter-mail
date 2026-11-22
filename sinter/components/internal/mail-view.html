@@ -3,7 +3,7 @@
   the body's elements with createElement, setAttribute and style.setProperty, from the same table as the generated
   components (tags.ts), held to sinter's checks (attrAllowed, styleAllowed): no markup is parsed, so the page's CSP
   and Trusted Types need nothing. It has no slots (a use with a fill renders through <mail-tree>), a new body is
-  built again whole, and a numbered body renders whole, not in steps. Its root is the same <div class="mail">, whose
+  built again whole. Its root is the same <div class="mail">, whose
   class and style sinter binds; the root's children are the script's.
 -->
 <template data-sn-props="{ body?: Body | null }"><div class="mail" data-sn-class="{ 'mail-light': !!body?.light }" data-sn-style="{ display: body ? 'flow-root' : null, color: body?.style.color, 'font-family': body?.style['font-family'], 'font-size': body?.style['font-size'], 'font-style': body?.style['font-style'], 'font-weight': body?.style['font-weight'], 'font-variant': body?.style['font-variant'], 'line-height': body?.style['line-height'], 'letter-spacing': body?.style['letter-spacing'], 'word-spacing': body?.style['word-spacing'], 'text-align': body?.style['text-align'], 'text-decoration': body?.style['text-decoration'], 'text-transform': body?.style['text-transform'], 'text-indent': body?.style['text-indent'], 'white-space': body?.style['white-space'], 'word-break': body?.style['word-break'], 'overflow-wrap': body?.style['overflow-wrap'], 'background-color': body?.style['background-color'] }"></div></template>
