@@ -35,6 +35,8 @@ const BIG_COUNT = [...BIG.children.flatMap((c) => [...elements(c)])].length;
 // the API page, the same page without the components (for the bundle's size), the static page
 const apps = {
   api: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message }"></mail-body></main>', HEAD) }),
+  // the same, always through the templates (`templates`): a numbered body renders in steps there
+  steps: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message, templates: true }"></mail-body></main>', HEAD) }),
   plain: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><p id="message" data-sn-text="message.type"></p></main>', HEAD) }),
   static: app({ 'tree.json': STATIC, 'index.html': page('<sn-resource name="mail" src="file:./tree.json" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: mail }"></mail-body></main>') }),
   // an email's HTML parsed in the page for the width <mail-width> reports
@@ -93,7 +95,7 @@ async function tab(): Promise<{ page: Page; violations: () => Promise<string[]>;
 
 const dist = (a: keyof typeof apps) => join(apps[a].root, 'dist');
 beforeAll(async () => {
-  for (const name of ['api', 'plain', 'width', 'narrow', 'reset', 'mailcss'] as const) {
+  for (const name of ['api', 'steps', 'plain', 'width', 'narrow', 'reset', 'mailcss'] as const) {
     // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
     await build({ root: apps[name].root, logLevel: 'silent', plugins: [sinter({ libraries: ['@tiavision/sinter-mail'] }) as never], build: { outDir: dist(name), emptyOutDir: true } });
   }
@@ -209,12 +211,12 @@ test(`measured: a newsletter of ${BIG_COUNT} elements from the API, and the page
   expect(median).toBeLessThan(5000);
 }, 180_000);
 
-test('a long tree that mail.progressive numbered: the first part paints first, then the rest in steps, and the page is what a whole render gives', async () => {
+test('a long tree that mail.progressive numbered: through the templates its first part paints first, then the rest in steps; the fast path renders it whole; the page is what a whole render gives', async () => {
   const { progressive } = await import('../sinter/tree.js');
   const big = newsletter(2000);
   /** the email's elements, without the hidden one a progressive render ends with (its steps' component) */
   const SEL = '#message *:not(#message > i[hidden])';
-  const html = async (tree: Body) => {
+  const html = async (tree: Body, at: 'api' | 'steps' = 'steps') => {
     message = JSON.stringify(tree);
     const { page: p, violations, errors } = await tab();
     // the first frame with the email in it: how many of its elements it holds
@@ -223,7 +225,7 @@ test('a long tree that mail.progressive numbered: the first part paints first, t
       const look = () => { const n = document.querySelectorAll(sel).length; if (n) w.__first = n; else requestAnimationFrame(look); };
       requestAnimationFrame(look);
     }, SEL);
-    await p.goto(await serve(dist('api')));
+    await p.goto(await serve(dist(at)));
     await p.waitForFunction(([sel, n]) => document.querySelectorAll(sel as string).length === n, [SEL, BIG_COUNT] as const, { polling: 50 });
     const out = await p.$eval('#message', (m) => m.innerHTML.replace(/<!--[^>]*-->/g, '').replace('<i hidden=""></i>', ''));
     const first = await p.evaluate(() => (window as unknown as { __first: number }).__first);
@@ -236,6 +238,10 @@ test('a long tree that mail.progressive numbered: the first part paints first, t
   expect(whole.first).toBe(BIG_COUNT);
   expect(parts.first).toBeLessThan(200);
   expect(parts.out).toBe(whole.out);
+  // the fast path (no fill, a body from an API): a numbered body whole in its first frame, the same page
+  const fast = await html(progressive(big, 200), 'api');
+  expect(fast.first).toBe(BIG_COUNT);
+  expect(fast.out).toBe(whole.out);
 }, 120_000);
 
 test('<mail-width>: a reader that narrows gets the email\'s phone layout, parsed again, and only then its mobile image', async () => {

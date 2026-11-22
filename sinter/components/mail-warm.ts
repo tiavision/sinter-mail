@@ -1,4 +1,4 @@
-// SPIKE: the script of <mail-warm>: mail.parse and the builder run on a sample email, a slice per idle period, so
+// The script of <mail-warm>: mail.parse and the builder run on a sample email, a slice per idle period, so
 // their code is compiled (and its hot paths optimised) before the first real email. Nothing of it reaches the page.
 import { build } from '../build.js';
 import { parse } from '../parse.js';

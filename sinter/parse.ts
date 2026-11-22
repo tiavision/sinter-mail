@@ -24,7 +24,7 @@ export function parse(html: string | null | undefined, options?: ParseOptions): 
 }
 
 /**
- * SPIKE: the tree of the call before, when this one has the same source and options. A let is its expression, read
+ * The tree of the call before, when this one has the same source and options. A let is its expression, read
  * at every binding, and memo()'s key holds the whole source (a 250 KB string built and hashed per read); this compares
  * the source by identity first (`===` on the same string is a pointer comparison). The state is in a closure, as memo's.
  */
@@ -40,7 +40,7 @@ const last = (() => {
 })();
 
 /**
- * SPIKE: the parse, kept by its source and options: the source by identity (a Map hashes a string once), in order of
+ * The parse, kept by its source and options: the source by identity (a Map hashes a string once), in order of
  * use, bounded by the sources' length; the tree frozen as memo() freezes one, by its known shape (no key list and no
  * descriptor per object).
  */

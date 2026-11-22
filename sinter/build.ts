@@ -1,25 +1,14 @@
-// SPIKE: the tree of mail.parse as elements, created directly (<mail-view>'s script, mail-view.ts).
+// The tree of mail.parse as elements, created directly (<mail-view>'s script, components/internal/mail-view.ts).
 //
 // What it may write is what the generated components may write, from the same table (tags.ts): an element whose tag
 // is a key of TAGS (createElement with a name from the table, never from the tree), the attributes attrsOf(tag) names
-// (a URL attribute only with an allowed scheme), the properties TAGS[tag].props names (style.setProperty, never a
+// (a URL attribute only with an allowed scheme: sinter's attrAllowed), the properties TAGS[tag].props names (style.setProperty, never a
 // style attribute; no value that could load a URL), text as text nodes. No markup is parsed.
+import { attrAllowed, styleAllowed } from '@tiaforge-ui/sinter';
 import { attrsOf, TAGS } from './tags.js';
 import type { Body, Element as El, Node as TreeNode, Tag } from './sinter.types.js';
 
 const has = Object.prototype.hasOwnProperty;
-const URL_ATTR = /^(href|src|cite)$/;
-const STYLE_BAD = /url\(|image(-set)?\(|\\/i;
-const schemeOf = (value: string): string | null => {
-  const m = /^[\0- ]*([a-z][a-z\d+.-]*):/i.exec(value.replace(/[\t\n\r]/g, ''));
-  return m ? m[1]!.toLowerCase() + ':' : null;
-};
-const SCHEMES = new Set(['http:', 'https:', 'mailto:', 'tel:']);
-let base: string | null = null;
-function urlOk(tag: string, name: string, v: string): boolean {
-  const p = schemeOf(v) ?? (base ??= schemeOf(document.baseURI));
-  return !!p && (SCHEMES.has(p) || ((p === 'data:' || p === 'blob:') && name === 'src' && tag === 'img'));
-}
 const shown = (n: TreeNode): n is El => n.type === 'element' && n.style.display !== 'none';
 
 /** per tag: its attributes, and each of its properties' place in its component's order */
@@ -40,7 +29,8 @@ function open(n: El, tag: Tag): HTMLElement {
     let v = a[k];
     if (v == null || v === false || (k === 'id' && !v)) continue;
     v = v === true ? '' : k === 'id' ? 'mail-' + v : '' + v;
-    if (!URL_ATTR.test(k) || urlOk(tag, k, v as string)) e.setAttribute(k, v as string);
+    // as data-sn-attr writes it: a URL attribute only with an allowed scheme (the app's `urlSchemes` included)
+    if (attrAllowed(e, k, v as string)) e.setAttribute(k, v as string);
   }
   // the properties the tag binds, in its component's order: the tree's own order when that is the same (parse.ts
   // writes them so), else the table's
@@ -53,7 +43,7 @@ function open(n: El, tag: Tag): HTMLElement {
   return e;
 }
 const put = (st: CSSStyleDeclaration, p: string, v: unknown) => {
-  if (v != null && v !== false && !STYLE_BAD.test(v as string)) st.setProperty(p, v as string);
+  if (v != null && v !== false && styleAllowed(v as string)) st.setProperty(p, v as string);
 };
 /** the children of `n` into `e`: text runs, every shown element by its tag */
 function flow(n: { children: TreeNode[] }, e: Node): void {

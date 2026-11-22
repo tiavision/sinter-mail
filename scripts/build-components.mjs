@@ -132,7 +132,9 @@ for (const f of Object.keys(files)) files[f] = files[f].replace(/<template data-
 
 // ── write or check ────────────────────────────────────────────────────────────────────────────────────
 const check = process.argv.includes('--check');
-const present = existsSync(OUT) ? readdirSync(OUT).filter((f) => f.endsWith('.html')) : [];
+// written by hand, not from the table: <mail-body>'s template rendering and its script renderer (mail-view.ts)
+const HAND = new Set(['mail-tree.html', 'mail-view.html']);
+const present = existsSync(OUT) ? readdirSync(OUT).filter((f) => f.endsWith('.html') && !HAND.has(f)) : [];
 const stale = present.filter((f) => !(f in files));
 const differ = Object.entries(files).filter(([f, s]) => !existsSync(join(OUT, f)) || readFileSync(join(OUT, f), 'utf8') !== s).map(([f]) => f);
 if (check) {

@@ -24,8 +24,9 @@ test('the Tag union of sinter.types.ts is the table\'s tags', () => {
   expect([...union.matchAll(/'([a-z0-9]+)'/g)].map((m) => m[1]).sort()).toEqual(tags);
 });
 
-test('one component per tag that renders on its own, the dispatch and the orphan: no other file', () => {
-  expect(internal).toEqual([...own.map((t) => `mail-${t}.html`), 'mail-node.html', 'mail-orphan.html', 'mail-steps.html'].sort());
+test('one component per tag that renders on its own, the dispatch and the orphan, and <mail-body>\'s two renderings: no other file', () => {
+  // mail-tree and mail-view are written by hand (build-components.mjs leaves them): <mail-body>'s templates and its script renderer
+  expect(internal).toEqual([...own.map((t) => `mail-${t}.html`), 'mail-node.html', 'mail-orphan.html', 'mail-steps.html', 'mail-tree.html', 'mail-view.html'].sort());
   // a table's parts have no component: mail-table renders them
   for (const t of inTable) expect(internal).not.toContain(`mail-${t}.html`);
 });

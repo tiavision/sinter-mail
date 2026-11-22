@@ -1,5 +1,5 @@
 import type { Tag } from '../sinter/sinter.types.js';
-// SPIKE: <mail-view> (the tree built directly by its script) against <mail-body> (the generated components), in
+// <mail-body>'s two renderings, the tree built directly by <mail-view>'s script and the generated components, in
 // Chromium under `script-src 'self'; style-src 'self'; require-trusted-types-for 'script'`: the same tree gives the
 // same elements, attributes and styles (the anchors of <mail-body>'s loops apart), with nothing reported.
 import { createServer, type Server } from 'node:http';
