@@ -9,7 +9,7 @@ runs, loads from the network without your say-so, or reaches outside its box.
 ```html
 <sn-resource name="msg" src="/api/messages/{$url.id}"></sn-resource>
 <article data-sn-let="{ body: msg.html ? mail.parse(msg.html, { images: 'proxy', proxy: '/img?url={url}' }) : mail.plain(msg.text) }">
-  <mail-body data-sn-prop="{ body }"></mail-body>
+  <mail-body data-sn-with="{ body }"></mail-body>
 </article>
 ```
 
@@ -37,7 +37,7 @@ tree, and generated components render each element, with every attribute and sty
 npm install @tiavision/sinter-mail
 ```
 
-Needs sinter 0.20.0 or later.
+Needs sinter 0.21.0 or later.
 
 ```js
 // vite.config.js
@@ -45,7 +45,7 @@ import { defineConfig } from 'vite';
 import sinter from '@tiaforge-ui/sinter/vite';
 
 export default defineConfig({
-  plugins: [sinter({ components: ['@tiavision/sinter-mail'] })],
+  plugins: [sinter({ libraries: ['@tiavision/sinter-mail'] })],
 });
 ```
 
@@ -63,7 +63,7 @@ export type { Body, Element } from '@tiavision/sinter-mail';
 
 ```html
 <article data-sn-let="{ body: mail.parse(msg.html) }">
-  <mail-body data-sn-prop="{ body }"></mail-body>
+  <mail-body data-sn-with="{ body }"></mail-body>
 </article>
 ```
 

@@ -8,7 +8,7 @@ page's fonts where the email sets none.
 ```html
 <sn-resource name="msg" src="/api/messages/{$url.id}"></sn-resource>
 <article data-sn-let="{ body: msg.html ? mail.parse(msg.html, { images: 'proxy', proxy: '/img?url={url}' }) : mail.plain(msg.text) }">
-  <mail-body data-sn-prop="{ body }"></mail-body>
+  <mail-body data-sn-with="{ body }"></mail-body>
 </article>
 ```
 
@@ -27,7 +27,7 @@ import { defineConfig } from 'vite';
 import sinter from '@tiaforge-ui/sinter/vite';
 
 export default defineConfig({
-  plugins: [sinter({ components: ['@tiavision/sinter-mail'] })],
+  plugins: [sinter({ libraries: ['@tiavision/sinter-mail'] })],
 });
 ```
 
@@ -57,7 +57,7 @@ To make the parser lazy, list the package in `lazy`; a let that calls `mail.pars
 parser has arrived, and `<mail-body>` with no body renders an empty `<div class="mail">`:
 
 ```js
-sinter({ components: ['@tiavision/sinter-mail'], lazy: ['@tiavision/sinter-mail'] })
+sinter({ libraries: ['@tiavision/sinter-mail'], lazy: ['@tiavision/sinter-mail'] })
 ```
 
 `mail.plain`, `mail.text`, `mail.links`, `mail.progressive` and `mail.unquoted` live in modules that do not
@@ -221,7 +221,7 @@ the body without the elements of `part: 'quote'`, so a long thread renders only 
 
 ```html
 <article data-sn-state="{ history: false }" data-sn-let="{ tree: mail.parse(msg.html) }">
-  <mail-body data-sn-prop="{ body: mail.progressive(history ? tree : mail.unquoted(tree)) }"></mail-body>
+  <mail-body data-sn-with="{ body: mail.progressive(history ? tree : mail.unquoted(tree)) }"></mail-body>
   <template data-sn-if="tree.quotes && !history"><button data-sn-on-click="history = true">…</button></template>
 </article>
 ```
@@ -246,7 +246,7 @@ address, browser, or when the email was opened:
 <article data-sn-let="{ body: mail.parse(msg.html, {
            images: 'proxy', proxy: '/api/email/proxy-image?url={url}',
            cid: `/api/email/proxy-image?uid=${msg.uid}&cid={cid}` }) }">
-  <mail-body data-sn-prop="{ body }"></mail-body>
+  <mail-body data-sn-with="{ body }"></mail-body>
 </article>
 ```
 
@@ -285,7 +285,7 @@ again when the reader is resized across the breakpoint:
 ```html
 <main data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }">
   <mail-width data-sn-on-media="media = $event.detail"></mail-width>
-  <mail-body data-sn-prop="{ body: media ? mail.parse(message.html, { media }) : null }"></mail-body>
+  <mail-body data-sn-with="{ body: media ? mail.parse(message.html, { media }) : null }"></mail-body>
 </main>
 ```
 
@@ -298,7 +298,7 @@ before the second replaces it. Waiting costs under a frame: `<mail-width>` repor
   no height, as wide as the box.
 - Its `media` event is `'narrow'` below `breakpoint` (640 px by default; mobile layouts are written for 480 to
   640 px) and `'wide'` above, once when it is first laid out and again at each crossing, never while the
-  width stays on one side. Another breakpoint: `<mail-width data-sn-prop="{ breakpoint: 560 }">`.
+  width stays on one side. Another breakpoint: `<mail-width data-sn-with="{ breakpoint: 560 }">`.
 - The new parse is another tree (cached as every parse is: switching back costs nothing): what the new width
   hides is left out and what it shows renders, its images loading then.
 - It needs the browser (a `ResizeObserver`); a static page chooses its `media` at build time. In a reader that
@@ -314,7 +314,7 @@ after the browser has painted that, a task each.
 
 ```html
 <sn-resource name="message" src="/api/messages/{$url.id}"></sn-resource>
-<mail-body data-sn-prop="{ body: mail.progressive(message.tree) }"></mail-body>
+<mail-body data-sn-with="{ body: mail.progressive(message.tree) }"></mail-body>
 ```
 
 `mail.progressive(body, head = 200)` returns the body numbered: a copy whose nodes carry their number in
@@ -345,7 +345,7 @@ task, and no frame is dropped.
 `<mail-body>` has two slots. A fill reads the element as `$slot.node`:
 
 ```html
-<mail-body data-sn-prop="{ body }">
+<mail-body data-sn-with="{ body }">
   <a slot="link" target="_blank" rel="noopener noreferrer nofollow" data-sn-attr="{ href: $slot.node.attrs.href, title: $slot.node.attrs.href }"><slot></slot></a>
   <template slot="image" data-sn-if="$slot.node.attrs.src"><img loading="lazy" data-sn-attr="{ src: $slot.node.attrs.src, alt: $slot.node.attrs.alt, width: $slot.node.attrs.width, height: $slot.node.attrs.height, srcset: null }"></template>
   <template data-sn-else><span class="blocked" data-sn-text="$slot.node.attrs.alt ?? 'image'"></span></template>

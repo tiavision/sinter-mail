@@ -9,9 +9,9 @@ const { chromium } = await import(join(PKG, 'node_modules/playwright/index.mjs')
 const A = await import(join(PKG, 'test/app.ts'));
 export const { app, page, newsletter, elements } = A;
 
-export async function buildApi(body = '<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>') {
+export async function buildApi(body = '<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message }"></mail-body></main>') {
   const a = app({ 'index.html': page(body) });
-  await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiavision/sinter-mail'] })], build: { outDir: join(a.root, 'dist'), emptyOutDir: true, minify: !process.env.NOMIN } });
+  await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ libraries: ['@tiavision/sinter-mail'] })], build: { outDir: join(a.root, 'dist'), emptyOutDir: true, minify: !process.env.NOMIN } });
   return a;
 }
 export function serve(dir, getMessage) {
@@ -34,6 +34,6 @@ export const INIT = () => {
 /** an app from a files map (index.html and any src/ files), built with sinter-mail's components */
 export async function buildFiles(files) {
   const a = app(files);
-  await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiavision/sinter-mail'] })], build: { outDir: join(a.root, 'dist'), emptyOutDir: true, minify: !process.env.NOMIN } });
+  await build({ root: a.root, logLevel: 'silent', plugins: [sinter({ libraries: ['@tiavision/sinter-mail'] })], build: { outDir: join(a.root, 'dist'), emptyOutDir: true, minify: !process.env.NOMIN } });
   return a;
 }

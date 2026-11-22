@@ -195,7 +195,7 @@ export * as mail from '@tiavision/sinter-mail';
 ```html
 <sn-resource name="msg" src="/api/messages/{$url.id}"></sn-resource>
 <article data-sn-let="{ body: msg.html ? mail.parse(msg.html, { images: 'block' }) : mail.plain(msg.text) }">
-  <mail-body data-sn-prop="{ body }"></mail-body>
+  <mail-body data-sn-with="{ body }"></mail-body>
 </article>
 ```
 
@@ -314,7 +314,7 @@ library's. sinter-mail only writes the URLs and reports the origins:
 <article data-sn-let="{ body: mail.parse(msg.html, {
            images: 'proxy', proxy: '/api/email/proxy-image?url={url}',
            cid: `/api/email/proxy-image?account_id=${encodeURIComponent(msg.account)}&uid=${msg.uid}&cid={cid}` }) }">
-  <mail-body data-sn-prop="{ body }"></mail-body>
+  <mail-body data-sn-with="{ body }"></mail-body>
 </article>
 ```
 
@@ -370,7 +370,7 @@ Then only the allowed properties are kept, and the result is the element's `styl
 **Rendering.** Each generated component binds the element's resolved style with a literal list:
 
 ```html
-<template data-sn-component="{ node: Element }"><td data-sn-attr="{ colspan: node.attrs.colspan, rowspan: node.attrs.rowspan, … }" data-sn-style="{ color: node.style.color, 'background-color': node.style['background-color'], … }"><template data-sn-for="c in node.children"><template data-sn-if="c.type === 'text'" data-sn-text="c.value"></template><template data-sn-else><mail-node data-sn-prop="{ node: c }"></mail-node></template></template></td></template>
+<template data-sn-props="{ node: Element }"><td data-sn-attr="{ colspan: node.attrs.colspan, rowspan: node.attrs.rowspan, … }" data-sn-style="{ color: node.style.color, 'background-color': node.style['background-color'], … }"><template data-sn-for="c in node.children"><template data-sn-if="c.type === 'text'" data-sn-text="c.value"></template><template data-sn-else><mail-node data-sn-with="{ node: c }"></mail-node></template></template></td></template>
 ```
 
 - Each tag lists the properties that do something on it (no `border-spacing` on a `<span>`), so a

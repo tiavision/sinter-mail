@@ -34,18 +34,18 @@ const BIG_COUNT = [...BIG.children.flatMap((c) => [...elements(c)])].length;
 
 // the API page, the same page without the components (for the bundle's size), the static page
 const apps = {
-  api: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>', HEAD) }),
+  api: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message }"></mail-body></main>', HEAD) }),
   plain: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><p id="message" data-sn-text="message.type"></p></main>', HEAD) }),
-  static: app({ 'tree.json': STATIC, 'index.html': page('<sn-resource name="mail" src="file:./tree.json" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: mail }"></mail-body></main>') }),
+  static: app({ 'tree.json': STATIC, 'index.html': page('<sn-resource name="mail" src="file:./tree.json" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: mail }"></mail-body></main>') }),
   // an email's HTML parsed in the page for the width <mail-width> reports
   width: app({ 'index.html': page(`<sn-resource name="html" src="/api/html" type="string"></sn-resource>
-<main data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }"><mail-width data-sn-on-media="media = $event.detail"></mail-width><mail-body id="message" data-sn-prop="{ body: html && media ? mail.parse(html, { images: 'allow', media }) : null }"></mail-body></main>`, HEAD) }),
+<main data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }"><mail-width data-sn-on-media="media = $event.detail"></mail-width><mail-body id="message" data-sn-with="{ body: html && media ? mail.parse(html, { images: 'allow', media }) : null }"></mail-body></main>`, HEAD) }),
   // an app with a reset on a dark page, without mail.css and with it (imported through the package's export)
-  reset: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>', `${HEAD}<link rel="stylesheet" href="/src/app.css">`), 'src/app.css': RESET }),
-  mailcss: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-prop="{ body: message }"></mail-body></main>', `${HEAD}<link rel="stylesheet" href="/src/app.css">`), 'src/app.css': `@import '@tiavision/sinter-mail/mail.css';\n${RESET}` }),
+  reset: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message }"></mail-body></main>', `${HEAD}<link rel="stylesheet" href="/src/app.css">`), 'src/app.css': RESET }),
+  mailcss: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message }"></mail-body></main>', `${HEAD}<link rel="stylesheet" href="/src/app.css">`), 'src/app.css': `@import '@tiavision/sinter-mail/mail.css';\n${RESET}` }),
   // the same email parsed for a phone from the start, without <mail-width>: what waiting for it is compared with
   narrow: app({ 'index.html': page(`<sn-resource name="html" src="/api/html" type="string"></sn-resource>
-<main><mail-body id="message" data-sn-prop="{ body: html ? mail.parse(html, { images: 'allow', media: 'narrow' }) : null }"></mail-body></main>`, HEAD) }),
+<main><mail-body id="message" data-sn-with="{ body: html ? mail.parse(html, { images: 'allow', media: 'narrow' }) : null }"></mail-body></main>`, HEAD) }),
 };
 const servers: Server[] = [];
 let browser: Browser;
@@ -95,9 +95,9 @@ const dist = (a: keyof typeof apps) => join(apps[a].root, 'dist');
 beforeAll(async () => {
   for (const name of ['api', 'plain', 'width', 'narrow', 'reset', 'mailcss'] as const) {
     // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
-    await build({ root: apps[name].root, logLevel: 'silent', plugins: [sinter({ components: ['@tiavision/sinter-mail'] }) as never], build: { outDir: dist(name), emptyOutDir: true } });
+    await build({ root: apps[name].root, logLevel: 'silent', plugins: [sinter({ libraries: ['@tiavision/sinter-mail'] }) as never], build: { outDir: dist(name), emptyOutDir: true } });
   }
-  await build({ root: apps.static.root, logLevel: 'silent', plugins: [sinter({ components: ['@tiavision/sinter-mail'], static: ['index.html'] }) as never], build: { outDir: dist('static'), emptyOutDir: true } });
+  await build({ root: apps.static.root, logLevel: 'silent', plugins: [sinter({ libraries: ['@tiavision/sinter-mail'], static: ['index.html'] }) as never], build: { outDir: dist('static'), emptyOutDir: true } });
   browser = await chromium.launch();
 });
 afterAll(async () => {

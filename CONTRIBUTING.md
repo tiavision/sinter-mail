@@ -4,8 +4,9 @@ Notes for working on `@tiavision/sinter-mail`. For using it, see the [README](RE
 
 ## Requirements
 
-The package needs sinter 0.20.0 or later, the first release with the changes made for this library
-(tiaforge/sinter#76, #77 and #78); `sinter check` says so (SN537) when an app has an older one.
+The package needs sinter 0.21.0 or later: its components use 0.21's attribute names (`data-sn-props`,
+`data-sn-with`). The changes made for this library came in 0.20.0 (tiaforge/sinter#76, #77 and #78);
+`sinter check` says so (SN537) when an app has an older one.
 
 ## Releasing
 
