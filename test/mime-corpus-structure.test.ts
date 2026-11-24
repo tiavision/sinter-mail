@@ -144,8 +144,8 @@ describe('the hostile manifest', () => {
     // (headers.readHeaders), so no word of it is decoded and nothing falls back to windows-1252
     'postal-mime-encoded-word-join-invalid': ['charset-fallback'],
   };
-  /** problems that only the steps make (wave 3): not asserted here */
-  const WAVE_3 = new Set(['canonicalized', 'crypto-shape', 'integrity', 'armor-headers']);
+  /** problems that only a step's result makes: not asserted here (test/mime-crypto.test.ts feeds results) */
+  const WAVE_3 = new Set(['integrity']);
 
   const tree = (e: Entity): Node => ({ type: e.type, ...(e.children.length ? { parts: e.children.map(tree) } : {}) });
   /** the expected tree's shape, with only the keys it names */
@@ -175,7 +175,8 @@ describe('the hostile manifest', () => {
       if (x.blocking) expect(m.problems.some((p) => p.code === c && p.blocking), `${name}: ${c} blocking`).toBe(true);
     }
     if (x.noProblems) expect(m.problems).toEqual([]);
-    if (x.noSteps || x.steps) expect(m.steps).toEqual([]);   // wave 2 offers no step; wave 3 asserts `steps`
+    if (x.noSteps) expect(m.steps).toEqual([]);
+    if (x.steps) expect(m.steps.map((s) => s.kind)).toEqual(x.steps);
     if (x.tree) expect(tree(scan(src).root)).toEqual(shape(x.tree));
     if (x.texts) expect(m.parts.map((p) => (p.type === 'text' ? p.text : p.type))).toEqual(x.texts);
     if ('subject' in x) expect(m.headers.subject).toBe(x.subject);
@@ -203,10 +204,13 @@ describe('the hostile manifest', () => {
     expect(near.problems[0]).toEqual({ code: 'boundary-invalid', part: Array(11).fill('1').join('.'), blocking: true });
     const single = mime(generators.singlePart());
     expect((single.parts[0] as Part & { type: 'text' }).text.length).toBe(2 * 1024 * 1024);
-    // the PGP shapes: what wave 2 shows for them
-    expect(mime(generators.pgpMimeEncrypted()).attachments).toMatchObject([{ id: '1', kind: 'encrypted' }]);
-    expect(mime(generators.exchangePgpMime()).attachments).toMatchObject([{ id: '1', kind: 'encrypted' }]);
-    expect(mime(generators.pgpMimeSigned()).parts).toMatchObject([{ type: 'text', text: 'The signed text.' }]);
+    // the PGP shapes, pending their steps
+    expect(mime(generators.pgpMimeEncrypted()).parts).toMatchObject([{ id: '1', type: 'encrypted', reason: 'pending' }]);
+    expect(mime(generators.exchangePgpMime()).parts).toMatchObject([{ id: '1', type: 'encrypted', reason: 'pending' }]);
+    expect(mime(generators.pgpMimeSigned()).parts).toMatchObject([{ type: 'text', text: 'The signed text.', protection: { signed: 'pending' } }]);
+    const lf = mime(generators.pgpMimeSignedLf());
+    expect(lf.steps).toMatchObject([{ kind: 'verify', signed: { canonical: true } }]);
+    expect(mime(generators.pgpMimeSigned()).steps[0]).not.toHaveProperty('signed.canonical');
     const words = mime(generators.manyEncodedWords()).headers.subject;
     expect(words === null || /^(ABC){0,4096}$/.test(words)).toBe(true);
   });

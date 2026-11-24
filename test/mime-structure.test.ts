@@ -136,6 +136,9 @@ describe('boundaries and line ends', () => {
     const ok = eml(...HEAD, ...multipart('multipart/mixed', 'abcd', ['Content-Type: multipart/mixed; boundary="abc"', '', '--abc', '', 'in', '--abc--'], ['', 'after']));
     expect(texts(mime(ok))).toEqual(['in', 'after']);
     expect(mime(ok).problems).toEqual([]);
+    // except when the ancestor's is the child's with `--` appended: the child's close line is the ancestor's delimiter
+    const close = eml(...HEAD, ...multipart('multipart/mixed', 'abc--', ['Content-Type: multipart/mixed; boundary="abc"', '', '--abc', '', 'in', '--abc--'], ['', 'after']));
+    expect(mime(close).problems).toContainEqual({ code: 'boundary-invalid', part: '1.1', blocking: true });
   });
 
   test('two boundary forms with different values: parameter-conflict, blocking; a filename conflict is not', () => {
@@ -312,9 +315,10 @@ describe('choosing what to show', () => {
 
   test('a text candidate wholly one armored message or one cleartext-signed block wins whatever prefer says', () => {
     const armor = ['Content-Type: text/plain', '', '', '-----BEGIN PGP MESSAGE-----', '', 'hQEMA', '-----END PGP MESSAGE-----', ''];
-    expect(texts(mime(alt(armor, html)))[0]).toMatch(/^\r\n-----BEGIN PGP MESSAGE-----/);
+    // chosen, and as the root's only part shown, a decrypt step (wave 3)
+    expect(mime(alt(armor, html)).parts).toMatchObject([{ id: '1.1', type: 'encrypted', reason: 'pending' }]);
     const signed = ['Content-Type: text/plain', '', '-----BEGIN PGP SIGNED MESSAGE-----', 'Hash: SHA256', '', 'hi', '-----BEGIN PGP SIGNATURE-----', '', 'iQ', '-----END PGP SIGNATURE-----'];
-    expect(texts(mime(alt(signed, html)))[0]).toMatch(/^-----BEGIN PGP SIGNED MESSAGE-----/);
+    expect(mime(alt(signed, html)).parts).toMatchObject([{ id: '1.1:1', type: 'text', text: 'hi', protection: { signed: 'pending' } }]);
     // with text around it, or two blocks, it is an ordinary candidate
     const around = ['Content-Type: text/plain', '', 'see:', '-----BEGIN PGP MESSAGE-----', 'x', '-----END PGP MESSAGE-----'];
     expect(texts(mime(alt(around, html)))).toEqual(['<p>html</p>']);
@@ -431,25 +435,25 @@ describe('choosing what to show', () => {
     expect(m.calendar).toEqual([{ part: '1.2', method: 'CANCEL', text: 'BEGIN:VCALENDAR\r\nDESCRIPTION:<b>x</b>', attachment: '1.2' }]);
   });
 
-  test('multipart/encrypted and Exchange\'s rewrite: one attachment of kind encrypted (the seam wave 3 replaces)', () => {
+  test('multipart/encrypted and Exchange\'s rewrite at the root: one encrypted part, pending its decrypt step (wave 3)', () => {
     const enc = eml(...HEAD, ...multipart('multipart/encrypted; protocol="application/pgp-encrypted"', 'e',
       ['Content-Type: application/pgp-encrypted', '', 'Version: 1'], ['Content-Type: application/octet-stream', '', '-----BEGIN PGP MESSAGE-----']));
     const m = mime(enc);
-    expect(m.parts).toEqual([]);
-    expect(m.attachments).toMatchObject([{ id: '1', kind: 'encrypted', contentType: 'multipart/encrypted', ref: { start: 0, end: enc.length, encoding: 'identity' } }]);
-    expect(m.steps).toEqual([]);
+    expect(m.attachments).toEqual([]);
+    expect(m.parts).toMatchObject([{ id: '1', type: 'encrypted', reason: 'pending', contentType: 'multipart/encrypted', ref: { start: 0, end: enc.length, encoding: 'identity' } }]);
+    expect(m.steps).toMatchObject([{ kind: 'decrypt', part: '1', state: 'pending', armored: true }]);
     const ex = eml(...HEAD, ...multipart('multipart/mixed', 'x', ['Content-Type: text/plain', '', ' '],
       ['Content-Type: application/pgp-encrypted', 'Content-Transfer-Encoding: base64', '', 'VmVyc2lvbjogMQ0K'], ['Content-Type: application/octet-stream', '', 'armor']));
     const n = mime(ex);
-    expect(n.attachments).toMatchObject([{ id: '1', kind: 'encrypted' }]);
+    expect(n.parts).toMatchObject([{ id: '1', type: 'encrypted', reason: 'pending' }]);
     expect(n.problems).toEqual([{ code: 'exchange-shape', part: '1', blocking: false }]);
   });
 
-  test('multipart/signed (PGP/MIME) shows its first part, unlabelled; the signature is not an attachment', () => {
+  test('multipart/signed (PGP/MIME) shows its first part, pending its verify step; the signature is not an attachment', () => {
     const m = mime(eml(...HEAD, ...multipart('multipart/signed; protocol="application/pgp-signature"; micalg=pgp-sha256', 's',
       plain, ['Content-Type: application/pgp-signature', '', '-----BEGIN PGP SIGNATURE-----'])));
     expect(texts(m)).toEqual(['plain']);
-    expect(m.parts[0]!.protection).toEqual({ encrypted: false, signed: null });
+    expect(m.parts[0]!.protection).toEqual({ encrypted: false, signed: 'pending', step: m.steps[0]!.id });
     expect(m.attachments).toEqual([]);
   });
 

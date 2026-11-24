@@ -11,8 +11,9 @@ import { base64Result, quotedPrintable, transferDecode, type Sink } from './deco
 import { parseDate } from './date.js';
 import { filename } from './filename.js';
 import { clean, messageIds, unstructured, type RawField } from './headers.js';
-import { cryptoShape, encryptedFile, showEncrypted, showSigned } from './crypto.js';
-import { isNestedMessage, paramOf, type Entity, type Found } from './scan.js';
+import { checkSigned, cryptoShape, encryptedFile, showEncrypted, showSigned, showText } from './crypto.js';
+import { all, isNestedMessage, paramOf, type Entity, type Found } from './scan.js';
+import type { CryptoState } from './steps.js';
 
 /** what a walk reads from and reports to: one call's sources and problems */
 export interface Reader {
@@ -22,16 +23,26 @@ export interface Reader {
   prefer: 'html' | 'text';
   /** decoded texts, by entity, with the problems their decoding found (reported when the text is used) */
   texts: Map<Entity, { text: string; codes: ProblemCode[] }>;
+  /** the steps' state (steps.ts): the options' results, the steps offered, the budget; made on first use */
+  crypto?: CryptoState;
 }
 
 export function reader(sources: Map<string, Uint8Array>, problems: Found[], prefer: 'html' | 'text'): Reader {
   return { sources, problems, prefer, texts: new Map() };
 }
 
-/** records a problem found while showing (informational unless said) */
+/**
+ * Records a problem found while showing (informational unless said). A blocking one is near crypto as a scanned one
+ * is: in the entity's `blocking`, `above` for it and everything below it, `below` for it and every ancestor (through
+ * `parent`, so from a decrypted payload to the encrypted entity it came from and on up).
+ */
 export function problem(r: Reader, e: Entity | null, code: ProblemCode, blocking = false): void {
   r.problems.push({ entity: e, code, blocking });
   if (e && !e.problems.includes(code)) e.problems.push(code);
+  if (!e || !blocking) return;
+  if (!e.blocking.includes(code)) e.blocking.push(code);
+  for (const x of all(e)) x.above = true;
+  for (let a: Entity | null = e; a && !a.below; a = a.parent) a.below = true;
 }
 
 /**
@@ -48,8 +59,12 @@ export interface Ctx {
   related: Attachment[] | null;
   /** inside a multipart/report: its message parts are shown inline, whatever their disposition */
   report: boolean;
-  /** the protection of what this walk finds (wave 2: none; wave 3 sets it under a decryption or a signature) */
+  /** the protection of what this walk finds: set under a decryption or a signature (crypto.ts) */
   protection: Protection;
+  /** in the payload of the root's done decrypt step, whose root has `hp`: `hp-legacy-display="1"` parts are legacy display */
+  legacy?: boolean;
+  /** the older convention's legacy display part (section 6), hidden */
+  hide?: Entity | null;
 }
 
 /** one message being assembled: what its walk found, its own scope for Content-IDs */
@@ -95,6 +110,7 @@ export function message(r: Reader, root: Entity, protection: Protection = unprot
 
 /** the entity and what is below it, into `scope` */
 export function walk(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: Ctx): void {
+  if (ctx.hide === e) return;
   if (e.opaque) {
     attach(r, e, scope, mode === 'related' ? 'related' : e.type.startsWith('message/') ? 'message' : 'file', ctx);
     return;
@@ -103,6 +119,7 @@ export function walk(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: Ctx): 
     const shape = cryptoShape(r, e);
     if (shape === 'encrypted' || shape === 'exchange') return showEncrypted(r, e, shape, scope, mode, ctx);
     if (shape === 'signed') return showSigned(r, e, scope, mode, ctx);
+    if (e.type === 'multipart/signed') checkSigned(r, e);
     if (e.type === 'multipart/alternative') return alternative(r, e, scope, mode, ctx);
     if (e.type === 'multipart/related') return related(r, e, scope, mode, ctx);
     const sub = { ...ctx, report: e.type === 'multipart/report' };
@@ -139,6 +156,7 @@ function leaf(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: Ctx): void {
   if (t === 'text/plain' || t === 'text/html') {
     if (!named(e) && e.disposition !== 'attachment') {
       if (mode === 'unchosen') return;
+      if (showText(r, e, scope, ctx)) return;
       scope.parts.push(textPart(r, e, ctx));
       if (t === 'text/html') scope.html.push({ part: scope.parts[scope.parts.length - 1] as Part & { type: 'html' }, related: ctx.related });
       return;
@@ -287,7 +305,7 @@ export function contentIdOf(e: Entity): string | null {
  * elsewhere in the message whose Content-ID is unique in it and not among the first; only those with the part's
  * protection. A Content-ID twice in a scope resolves to nothing there (`content-id-duplicate`).
  */
-function inline(r: Reader, scope: Scope): void {
+export function inline(r: Reader, scope: Scope): void {
   const counts = new Map<string, number>();
   for (const a of scope.attachments) if (a.contentId !== null) counts.set(a.contentId, (counts.get(a.contentId) ?? 0) + 1);
   const reported = new Set<string>();

@@ -251,7 +251,12 @@ export function scan(src: Uint8Array, start: ScanStart = {}, budget: Budget = ne
     if (isMultipart(e.type)) {
       const b = paramOf(e.params, 'boundary');
       let ok = b !== null && boundaryValid(b) && !e.boundaryEncoded;
-      for (let a: Entity | null = e.parent; ok && a; a = a.parent) if (a.boundary !== null && b!.startsWith(a.boundary)) ok = false;
+      // only this source's ancestors: a decrypted payload may reuse the boundary of the message it came in. A child
+      // boundary that starts with an ancestor's, or that an ancestor's is with `--` appended (outer `a--`, inner `a`: the
+      // inner close line `--a--` is the outer delimiter to other parsers), is boundary-invalid
+      for (let a: Entity | null = e.parent; ok && a && a.source === source; a = a.parent) {
+        if (a.boundary !== null && (b!.startsWith(a.boundary) || a.boundary === b + '--')) ok = false;
+      }
       if (!ok) { e.opaque = 'boundary-invalid'; report(e, 'boundary-invalid'); return; }
       e.boundary = b;
       e.b = new Uint8Array(b!.length);
