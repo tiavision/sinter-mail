@@ -3,8 +3,8 @@
 // the headers of each message. Bodies are decoded here, once each, with their charset.
 //
 // The walk follows the tree's structure, whose depth scan.ts bounds (32 levels): a call per level, never more.
-// Encrypted and signed structures go to crypto.ts, the seam wave 3 replaces.
-import type { Address, Attachment, AttachmentKind, Calendar, Headers, Inline, Message, Part, ProblemCode, Protection, Ref, Sources } from './types.js';
+// Encrypted and signed structures go to crypto.ts.
+import type { Address, Attachment, AttachmentKind, Calendar, Headers, Inline, Message, Part, ProblemCode, Protection, Ref } from './types.js';
 import { addresses } from './address.js';
 import { asciiLower, decodeText } from './charset.js';
 import { base64Result, quotedPrintable, transferDecode, type Sink } from './decode.js';
@@ -15,6 +15,8 @@ import { checkSigned, cryptoShape, encryptedFile, showEncrypted, showSigned, sho
 import { all, isMultipart, isNestedMessage, paramOf, type Entity, type Found } from './scan.js';
 import type { CryptoState } from './steps.js';
 import type { Shape } from './crypto.js';
+import { NO_ROOT, protections, summarize } from './summary.js';
+import { OUTER } from './hp.js';
 
 /** what a walk reads from and reports to: one call's sources and problems */
 export interface Reader {
@@ -39,12 +41,14 @@ export function reader(sources: Map<string, Uint8Array>, problems: Found[], pref
 /**
  * Records a problem found while showing (informational unless said). A blocking one is near crypto as a scanned one
  * is: in the entity's `blocking`, `above` for it and everything below it, `below` for it and every ancestor (through
- * `parent`, so from a decrypted payload to the encrypted entity it came from and on up).
+ * `parent`, so from a decrypted payload to the encrypted entity it came from and on up). With `structural` false (a
+ * problem with an app's result, not with the message's structure: `integrity`, or a step `limit` reached by
+ * opening a part) it is listed as blocking and stops that step, but nothing around it.
  */
-export function problem(r: Reader, e: Entity | null, code: ProblemCode, blocking = false): void {
+export function problem(r: Reader, e: Entity | null, code: ProblemCode, blocking = false, structural = true): void {
   r.problems.push({ entity: e, code, blocking });
   if (e && !e.problems.includes(code)) e.problems.push(code);
-  if (!e || !blocking) return;
+  if (!e || !blocking || !structural) return;
   if (!e.blocking.includes(code)) e.blocking.push(code);
   for (const x of all(e)) x.above = true;
   for (let a: Entity | null = e; a && !a.below; a = a.parent) a.below = true;
@@ -85,15 +89,18 @@ export interface Scope {
   of: Map<Attachment, Entity>;
 }
 
+/**
+ * The id of the Part or Attachment an entity is shown as. A nested message's multipart root has no number of its own
+ * (it shares its message/rfc822 entity's id, as IMAP numbers them, and Problems name both by it); when it is shown
+ * whole (an encrypted structure, or a multipart read as one attachment of its bytes) it would collide with the message
+ * part that holds it, so it is `<id>.1`, as a nested message's non-multipart root is.
+ */
+export const shownId = (e: Entity): string => (e.root && e.parent !== null && e.parent.message === e && e.parent.id === e.id ? `${e.id}.1` : e.id);
+
 export const unprotected = (): Protection => ({ encrypted: false, signed: null });
 
 export const sameProtection = (a: Protection, b: Protection) =>
   a.encrypted === b.encrypted && !!a.opened === !!b.opened && a.signed === b.signed && (a.step ?? null) === (b.step ?? null);
-
-const OUTER = (): Sources => ({
-  subject: 'outer', from: 'outer', sender: 'outer', replyTo: 'outer', to: 'outer', cc: 'outer', date: 'outer',
-  messageId: 'outer', inReplyTo: 'outer', references: 'outer',
-});
 
 /** message/delivery-status and the like, shown as text */
 const REPORT_TYPES = new Set(['message/delivery-status', 'message/disposition-notification', 'text/rfc822-headers',
@@ -101,17 +108,20 @@ const REPORT_TYPES = new Set(['message/delivery-status', 'message/disposition-no
 
 /**
  * The message whose root is `root`: its headers, and what its walk shows. A nested message (`nested`) has no
- * steps, no protected headers and no problems of its own: the call's problems are all in the outermost message.
+ * steps, no protected headers and no problems of its own: the call's problems are all in the outermost message. Its
+ * summary is its own scope's, by section 7's rules without steps (an opened part in it: encrypted 'some').
  */
 export function message(r: Reader, root: Entity, protection: Protection = unprotected()): Message {
   const scope: Scope = { parts: [], attachments: [], calendar: [], html: [], of: new Map() };
   walk(r, root, scope, 'show', { related: null, report: false, protection });
   inline(r, scope);
   const headers = headersOf(root.fields, (c) => problem(r, root, c));
+  // its own summary, by the same rules over its own parts (nested ones' included) and headers, with no steps
+  const { summary } = summarize(protections(scope.parts, scope.attachments), NO_ROOT(), headers, null);
   return {
     type: 'message', headers, outer: headers, sources: OUTER(), reply: headers.replyTo.length ? headers.replyTo : headers.from,
-    confidential: [], parts: scope.parts, attachments: scope.attachments, calendar: scope.calendar, steps: [],
-    summary: { encrypted: 'none', signed: 'none', from: null }, problems: [],
+    confidential: [], hpOuter: [], parts: scope.parts, attachments: scope.attachments, calendar: scope.calendar, steps: [],
+    summary, problems: [],
   };
 }
 
@@ -265,7 +275,7 @@ export function attach(r: Reader, e: Entity, scope: Scope, kind: AttachmentKind,
   const ref: Ref = whole ? { source: e.source, start: e.start, end: e.end, encoding: 'identity' }
     : { source: e.source, start: e.bodyStart, end: e.end, encoding: e.encoding };
   const a: Attachment = {
-    id: e.id, filename: names.filename, originalFilename: names.originalFilename, contentType: e.type, disposition: e.disposition,
+    id: shownId(e), filename: names.filename, originalFilename: names.originalFilename, contentType: e.type, disposition: e.disposition,
     kind, contentId: contentIdOf(e), size: ref.encoding === 'identity' ? ref.end - ref.start : body(r, e).length, ref,
     protection: { ...ctx.protection },
   };

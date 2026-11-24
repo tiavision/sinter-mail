@@ -1,5 +1,5 @@
-// The fourth review of the OpenPGP structure layer (docs/proposals/sinter-mail-mime.md, sections 5 to 7 and "Settled
-// for implementation"): each reproduction, with the outcome the amended proposal asks for. Cleartext blocks the reader
+// Hardening of the OpenPGP structure layer (docs/proposals/sinter-mail-mime.md, sections 5 to 7 and "Settled for
+// implementation"): edge cases, each with the outcome the proposal asks for. Cleartext blocks the reader
 // and an OpenPGP implementation could read differently; a sole cleartext block never unlocking protected headers;
 // one-pass signatures under the blocking rule; withdrawn and blocked steps labelling nothing; the charset in the
 // cleartext digest; digests per call; `reply` empty for a payload with neither Reply-To nor From; bounded CPU.

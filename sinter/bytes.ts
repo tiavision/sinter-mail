@@ -25,10 +25,11 @@ const utf8 = (() => {
 /**
  * The bytes `ref` names: its source (the input, a string read as UTF-8, or the plaintext of the decrypt step it
  * names, from `options.decrypted`), the range `[start, end)`, its transfer encoding undone, then `slice` applied to
- * the decoded bytes, then with `canonical` every bare LF made CRLF. A new array each call. A TypeError for a Ref
+ * the decoded bytes, then with `canonical` every bare LF made CRLF. A new array over its own ArrayBuffer each call
+ * (`new Blob([mail.bytes(…)])` type-checks as it is). A TypeError for a Ref
  * outside its source, or whose source step has no `ok` plaintext.
  */
-export function bytes(input: Uint8Array | string, ref: Ref, options?: BytesOptions): Uint8Array {
+export function bytes(input: Uint8Array | string, ref: Ref, options?: BytesOptions): Uint8Array<ArrayBuffer> {
   if (!(input instanceof Uint8Array) && typeof input !== 'string') fail('bytes', 'the message is a Uint8Array or a string');
   if (typeof ref !== 'object' || ref === null) fail('bytes', 'the ref is a Ref from the message');
   const { source, start, end, encoding, canonical, slice } = ref;

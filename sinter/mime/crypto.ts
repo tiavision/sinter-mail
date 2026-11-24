@@ -5,7 +5,10 @@
 //   the root of the root's payload (encrypted twice, once): a decrypt step; with an accepted result its plaintext is
 //   read as a second source and walked in place, labelled encrypted. Anywhere else: one `encrypted` part,
 //   `not-root`, with the id its step would have; listed in `open`, it gets the step and is shown in place, opened.
-// - PGP/MIME signed anywhere shown but in a nested message: a verify step labelling its first part's subtree.
+// - PGP/MIME signed anywhere shown but in a nested message: a verify step labelling its first part's subtree. When
+//   that part is an encrypted structure (sign over encrypt), the signature covers the ciphertext only: its step is
+//   offered, but it labels nothing and is no signature over the payload's root. No signature outside a ciphertext
+//   labels what it decrypts to: that is labelled by the signatures inside it, or unsigned.
 // - Inline PGP in a text/plain body: anchored cleartext-signed blocks split the part around them, each a
 //   verify-cleartext step (unless an OpenPGP implementation could read the block differently: its charset, a bare
 //   CR, a control byte, a line that is almost an armor line; then text, `armor-headers`); an armored message is a root decrypt step only as the whole body of the root's only
@@ -15,14 +18,13 @@
 import type { Entity } from './scan.js';
 import type { Part, Protection, Ref, Verdict } from './types.js';
 import { all, paramOf, scan } from './scan.js';
-import { attach, body, problem, textPart, textQuiet, walk, type Ctx, type Mode, type Reader, type Scope } from './show.js';
+import { attach, body, problem, shownId, textPart, textQuiet, walk, type Ctx, type Mode, type Reader, type Scope } from './show.js';
 import { asciiLower, asciiSuperset, decodeAsApp, decodeText, normalizeLabel } from './charset.js';
-import { base64Result, ignore } from './decode.js';
+import { base64Result, hasBareLF, ignore } from './decode.js';
 import {
   accept, armored, canOffer, cleartextDigestOf, cleartextSafe, combine, digestOf, findBlocks, offer, refBytes, shownSigned,
   signedBy, stateOf, verifyDigestOf, whitespace, withdraw, type CryptoState, type Sig,
 } from './steps.js';
-import { hasBareLF } from './decode.js';
 import { legacyText, protectionForm, v1Display } from './hp.js';
 
 export type Shape = 'encrypted' | 'exchange' | 'signed';
@@ -111,15 +113,12 @@ export function checkSigned(r: Reader, e: Entity): void {
 }
 
 /** the protection of what a decrypt step's plaintext shows: encrypted; signed by the signatures inside the
- * ciphertext, else by the signature the encrypted entity is under */
+ * ciphertext, else unsigned (labelled by the decrypt step). A signature the encrypted entity is under covers the
+ * ciphertext, not what it decrypts to (anyone can sign someone else's ciphertext): it labels nothing in the payload */
 function payloadProtection(base: Protection, id: string, sigs: readonly Verdict[] | undefined, opened: boolean): Protection {
   let p: Protection;
   if (sigs?.length) { const c = combine(sigs); p = signedBy({ ...base, encrypted: true }, id, c.status, c.signer); }
-  else if (base.signed !== null) {
-    p = { encrypted: true, signed: base.signed };
-    if (base.step !== undefined) p.step = base.step;
-    if (base.signer) p.signer = [...base.signer];
-  } else p = { encrypted: true, signed: null, step: id };
+  else p = { encrypted: true, signed: null, step: id };
   if (opened || base.opened) p.opened = true;
   return p;
 }
@@ -129,18 +128,20 @@ const encryptedPart = (id: string, contentType: string, ref: Ref, step: string, 
 
 /**
  * Offers the decrypt step `id` (the caller checked canOffer) and reads its result: the accepted plaintext, or the
- * reason the encrypted part shows instead. `at` is the entity problems are recorded on.
+ * reason the encrypted part shows instead. `at` is the entity problems are recorded on. A result refused (`integrity`,
+ * a plaintext over the limit) is about the result, not the structure: blocking, but it stops nothing around `at` (a
+ * signature the encrypted part is under keeps its step and its label); the part shows nothing.
  */
 function decrypt(r: Reader, st: CryptoState, at: Entity, part: string, id: string, ciphertext: Ref, bytes: Uint8Array) {
   const a = accept(st, id);
   offer(st, { id, state: a.state, part, kind: 'decrypt', ciphertext, armored: armored(bytes) });
   if (a.state === 'failed') {
-    if (a.why === 'integrity') problem(r, at, 'integrity', true);
+    if (a.why === 'integrity') problem(r, at, 'integrity', true, false);
     if (a.why === 'over-limit') {
       if (st.decrypted.get(id)!.plaintext!.length > st.budget.bytes) {
         st.budget.overrun = true;
         problem(r, null, 'limit', true);
-      } else problem(r, at, 'limit', true);
+      } else problem(r, at, 'limit', true, false);
     }
   }
   return a;
@@ -159,16 +160,17 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
   const ref: Ref = { source: e.source, start: e.start, end: e.end, encoding: 'identity' };
   const root = st.rootDecrypt.has(e) && e.nested === 0 && st.root.decrypts < 2;
   st.known.add(id);
-  if (!root && !st.open.has(id)) { scope.parts.push(encryptedPart(e.id, e.type, ref, id, 'not-root', ctx)); return; }
+  if (!root && !st.open.has(id)) { scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, 'not-root', ctx)); return; }
   if (!canOffer(st)) {
-    if (!st.budget.overrun) problem(r, e, 'limit', true);
-    scope.parts.push(encryptedPart(e.id, e.type, ref, id, 'over-limit', ctx));
+    // opening a part past the step limit: the app's choice, not the structure, stops nothing around it
+    if (!st.budget.overrun) problem(r, e, 'limit', true, root);
+    scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, 'over-limit', ctx));
     return;
   }
   if (root) st.root.decrypts++;
   const a = decrypt(r, st, e, e.id, id, ciphertext, bytes);
   if (a.state !== 'done') {
-    scope.parts.push(encryptedPart(e.id, e.type, ref, id, a.state === 'pending' ? 'pending' : a.why === 'over-limit' ? 'over-limit' : 'failed', ctx));
+    scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, a.state === 'pending' ? 'pending' : a.why === 'over-limit' ? 'over-limit' : 'failed', ctx));
     return;
   }
   r.sources.set(id, a.plaintext);
@@ -266,8 +268,11 @@ export function showSigned(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: 
   const c = vs ? combine(vs) : { status: 'pending' as const, signer: [] };
   const micalg = paramOf(e.params, 'micalg');
   offer(st, { id, state: vs ? 'done' : 'pending', part: e.id, kind: 'verify', signed: signedRef, signature, micalg: micalg === null ? null : asciiLower(micalg) });
+  // sign over encrypt: the signature covers the ciphertext, not the payload. Its step is offered (an app may say who
+  // sent it), but its verdict labels nothing and is no signature over the payload's root (summary, From)
+  const sealed = signed.boundary !== null && (cryptoShape(r, signed) === 'encrypted' || cryptoShape(r, signed) === 'exchange');
   const parts = scope.parts.length, attachments = scope.attachments.length;
-  walk(r, signed, scope, 'show', { ...ctx, protection: signedBy(ctx.protection, id, c.status, c.signer) });
+  walk(r, signed, scope, 'show', sealed ? ctx : { ...ctx, protection: signedBy(ctx.protection, id, c.status, c.signer) });
   if (e.above || e.below) {
     // a blocking problem found while walking the signed subtree: no step, no label (the candidates and cleartext
     // blocks inside it read their part's protection once the walk is done)
@@ -276,7 +281,7 @@ export function showSigned(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: 
     return;
   }
   if (signedRef.canonical) problem(r, e, 'canonicalized');
-  if (isRoot) st.root.sigs.push({ step: id, ...c });
+  if (isRoot && !sealed) st.root.sigs.push({ step: id, ...c });
 }
 
 /** a text/plain body as its own source: an inline PGP payload ("a body as it is"), read as UTF-8 */
@@ -300,7 +305,7 @@ function inlineEncrypted(r: Reader, e: Entity, pid: string, id: string, ref: Ref
   st.known.add(id);
   if (!root && !st.open.has(id)) { scope.parts.push(encryptedPart(pid, e.type, ref, id, 'not-root', ctx)); return; }
   if (!canOffer(st)) {
-    if (!st.budget.overrun) problem(r, e, 'limit', true);
+    if (!st.budget.overrun) problem(r, e, 'limit', true, root);
     scope.parts.push(encryptedPart(pid, e.type, ref, id, 'over-limit', ctx));
     return;
   }
@@ -439,8 +444,12 @@ export function resolveCandidates(r: Reader, scope: Scope): void {
     const root = c.scope === scope && scope.parts.length === 1 && st.root.decrypts === 0 && !st.root.encrypted;
     if (!root && !st.open.has(c.part.step)) continue;
     const sub: Scope = { parts: [], attachments: [], calendar: [], html: [], of: new Map() };
+    const cleartexts = st.cleartexts.length;
     inlineEncrypted(r, c.entity, c.part.id, c.part.step, c.part.ref, sub, ctx, root);
     c.scope.parts.splice(at, 1, ...sub.parts);
+    // what it decrypted to is shown in its place: a cleartext-signed block found in it belongs to that scope, where
+    // protect.cleartextRoot decides whether it covers the payload's root
+    for (let i = cleartexts; i < st.cleartexts.length; i++) if (st.cleartexts[i]!.scope === sub) st.cleartexts[i]!.scope = c.scope;
   }
   st.candidates.length = 0;
 }

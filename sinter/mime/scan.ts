@@ -1,5 +1,5 @@
 // The entity scan (docs/proposals/sinter-mail-mime.md, sections 2, 3 and 4): one source's bytes (the input, or in
-// wave 3 a decrypted payload) to its tree of entities, with every repair and refusal recorded on the entity it
+// a decrypted payload) to its tree of entities, with every repair and refusal recorded on the entity it
 // concerns. Nothing is decoded here but headers: bodies stay byte ranges until show.ts knows what each one is.
 //
 // One pass over the lines, with an explicit stack of the entities open at the current line (no recursion):
@@ -21,9 +21,9 @@ export const MAX_PARTS = 1_000;
 export const MAX_NESTED = 8;
 /** bytes read in one call, every source together */
 export const MAX_BYTES = 256 * 1024 * 1024;
-/** one decrypted payload (wave 3) */
+/** one decrypted payload */
 export const MAX_PAYLOAD = 64 * 1024 * 1024;
-/** steps offered by one call (wave 3) */
+/** steps offered by one call */
 export const MAX_STEPS = 16;
 /** RFC 2046's longest boundary */
 export const MAX_BOUNDARY = 70;
@@ -37,7 +37,7 @@ export interface Budget {
   bytes: number;
   /** entities still to be made */
   parts: number;
-  /** steps still to be offered (wave 3) */
+  /** steps still to be offered */
   steps: number;
   /** the byte budget ran out: a `limit` problem with `part: null` was recorded, which stops every step not yet offered */
   overrun: boolean;
@@ -117,7 +117,7 @@ export interface Scanned {
   end: number;
 }
 
-/** where a source's tree begins: the input's root, or (wave 3) a decrypted payload's */
+/** where a source's tree begins: the input's root, or a decrypted payload's */
 export interface ScanStart {
   /** 'input' (default), or the decrypt step's id */
   source?: string;

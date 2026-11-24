@@ -1,12 +1,14 @@
-// The structure layer's review findings (docs/proposals/sinter-mail-mime.md, sections 2 to 4 and 8): a bare CR in a
+// The structure layer's edge cases (docs/proposals/sinter-mail-mime.md, sections 2 to 4 and 8): a bare CR in a
 // header block, mail.mime's cache bounds and options, mail.bytes on a Node Buffer, Content-Disposition without its
 // `;`, opaque entities' Refs, near-boundary lines, shared inline sets, ranges of empty nested messages, a repeated
 // Content-ID, a truncated close, multipart/report's own parts, problems of a nested root, the mbox line, and a
 // structural fuzz of the scan.
 import { describe, expect, test } from 'vitest';
-import { cacheSize, mime } from '../sinter/mime.js';
+import { mime } from '../sinter/mime.js';
+import { cacheSize } from '../sinter/mime/cache.js';
 import { bytes as refBytes } from '../sinter/bytes.js';
-import { all, armorKind, scan } from '../sinter/mime/index.js';
+import { all, scan } from '../sinter/mime/scan.js';
+import { armorKind } from '../sinter/mime/show.js';
 import type { Message, Part, Ref } from '../sinter/mime/types.js';
 
 const eml = (...lines: string[]) => lines.join('\r\n');
@@ -121,6 +123,58 @@ describe('mail.mime\'s options and cache', () => {
     expect(mime(big, { decrypted: d })).toEqual(m);
     expect(cacheSize().cost).toBeLessThanOrEqual(21 * 1024 * 1024);
   });
+
+  test('the cache counts the message read, not only its input: a large text costs about its length again', () => {
+    mime.clear();
+    const text = 'x'.repeat(1024 * 1024);
+    const raw = enc(`Subject: s\r\n\r\n${text}`);
+    mime(raw);
+    expect(cacheSize().cost).toBeGreaterThan(raw.length + 2 * text.length);
+  });
+
+  test('mail.mime.clear() drops every message kept and the plaintexts they hold; the next call reads again', () => {
+    const raw = enc('Subject: s\r\n\r\nhi');
+    const d = { x: { status: 'ok' as const, integrity: true, plaintext: new Uint8Array(1024) } };
+    const m = mime(raw, { decrypted: d });
+    expect(mime(raw, { decrypted: d })).toBe(m);
+    expect(cacheSize().inputs).toBeGreaterThan(0);
+    mime.clear();
+    expect(cacheSize()).toEqual({ inputs: 0, entries: 0, cost: 0 });
+    const again = mime(raw, { decrypted: d });
+    expect(again).not.toBe(m);
+    expect(again).toEqual(m);
+    // the call before is forgotten too: the same input and options read again after clear()
+    mime.clear();
+    expect(mime(raw, { decrypted: d })).not.toBe(again);
+  });
+});
+
+describe('ids', () => {
+  const ids = (m: Message, out: string[] = []): string[] => {
+    for (const p of m.parts) { out.push(p.id); if (p.type === 'message') ids(p.message, out); }
+    for (const a of m.attachments) out.push(a.id);
+    return out;
+  };
+  test('no two parts or attachments share an id: a nested message\'s multipart root shown whole is `<id>.1`', () => {
+    const outer = (inner: string) => `From: a@b.test\r\nContent-Type: multipart/mixed; boundary=o\r\n\r\n--o\r\nContent-Type: text/plain\r\n\r\nx\r\n--o\r\nContent-Type: message/rfc822\r\n\r\nSubject: n\r\n${inner}\r\n--o--\r\n`;
+    const cases: [string, string[]][] = [
+      // an encrypted structure as a nested message's root: one encrypted part
+      ['Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary=e\r\n\r\n--e\r\nContent-Type: application/pgp-encrypted\r\n\r\nVersion: 1\r\n--e\r\nContent-Type: application/octet-stream\r\n\r\nx\r\n--e--\r\n', ['1.1', '1.2', '1.2.1']],
+      // a multipart read as one attachment of its bytes
+      ['Content-Type: multipart/mixed; boundary="a b "\r\n\r\n--a b \r\nx\r\n', ['1.1', '1.2', '1.2.1']],
+      // ordinary: its parts numbered under it
+      ['Content-Type: multipart/mixed; boundary=q\r\n\r\n--q\r\nContent-Type: text/plain\r\n\r\nhi\r\n--q--\r\n', ['1.1', '1.2', '1.2.1']],
+      ['Content-Type: text/plain\r\n\r\nhi', ['1.1', '1.2', '1.2.1']],
+    ];
+    for (const [inner, want] of cases) {
+      const m = mime(outer(inner));
+      const all = ids(m);
+      expect(all).toEqual(want);
+      expect(new Set(all).size).toBe(all.length);
+    }
+    // the problem of the shared entity still names it by its own id
+    expect(mime(outer(cases[1]![0])).problems).toEqual([{ code: 'boundary-invalid', part: '1.2', blocking: true }]);
+  });
 });
 
 describe('mail.bytes', () => {
@@ -139,6 +193,13 @@ describe('mail.bytes', () => {
     const body = refBytes(buf, { source: 'input', start: buf.length - 5, end: buf.length, encoding: 'identity' });
     expect(new TextDecoder().decode(body)).toBe('hello');
     expect(m.parts).toMatchObject([{ type: 'text', text: 'hello' }]);
+  });
+
+  test('its bytes are over their own ArrayBuffer: a Blob takes them as they are', () => {
+    const raw = eml('Content-Type: text/plain', '', 'hello');
+    const out: Uint8Array<ArrayBuffer> = refBytes(raw, { source: 'input', start: raw.length - 5, end: raw.length, encoding: 'identity' });
+    expect(out.buffer).toBeInstanceOf(ArrayBuffer);
+    expect(new Blob([out]).size).toBe(5);
   });
 });
 

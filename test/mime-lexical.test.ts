@@ -298,8 +298,10 @@ describe('encoded words', () => {
 
   test('100,000 encoded words, and hostile near-words, in linear time', () => {
     const words = Array.from({ length: 100_000 }, () => '=?utf-8?q?ab?=').join(' ');
+    // bounds of seconds, far above the time taken (a few hundred ms under load): a reading quadratic in these inputs
+    // (1.5 MB, 1 MB) takes minutes, so they still fail it, without failing a busy machine
     const [, ms] = timed(() => decodeWords(words, () => {}, { words: 1e9 }, 1e9));
-    expect(ms).toBeLessThan(800);
+    expect(ms).toBeLessThan(4000);
     const [, ms2] = timed(() => unstructured('=?'.repeat(500_000) + '=?a?q?' + 'x'.repeat(500_000), () => {}));
     expect(ms2).toBeLessThan(500);
     const [, ms3] = timed(() => unstructured('=?a?q?b?c?d'.repeat(100_000), () => {}));
@@ -375,10 +377,11 @@ describe('parameter fields', () => {
   });
 
   test('hostile parameter fields in linear time', () => {
+    // bounds of seconds (see the encoded words' test): quadratic readings of these take minutes
     const [, ms] = timed(() => parameterField('a; ' + Array.from({ length: 50_000 }, (_, i) => `n*${i % 9000}*=%41`).join('; '), () => {}));
-    expect(ms).toBeLessThan(500);
+    expect(ms).toBeLessThan(4000);
     const [, ms2] = timed(() => parameterField('a; b=' + '('.repeat(200_000) + '"'.repeat(200_000), () => {}));
-    expect(ms2).toBeLessThan(500);
+    expect(ms2).toBeLessThan(4000);
   });
 });
 
@@ -555,14 +558,15 @@ describe('addresses', () => {
     const [r, ms] = timed(() => addresses('a@b ' + '('.repeat(10_000) + ')'.repeat(10_000), () => {}));
     expect(r[0]!.address).toBe(null);
     expect(ms).toBeLessThan(300);
+    // bounds of seconds (see the encoded words' test): a quadratic reading of a megabyte takes minutes
     const [, ms2] = timed(() => addresses('<'.repeat(1_000_000), () => {}));
-    expect(ms2).toBeLessThan(800);
+    expect(ms2).toBeLessThan(4000);
     const [, ms3] = timed(() => addresses('a'.repeat(1_000_000) + '@' + 'b.'.repeat(100_000) + 'c', () => {}));
-    expect(ms3).toBeLessThan(800);
+    expect(ms3).toBeLessThan(4000);
     const [, ms4] = timed(() => addresses(Array.from({ length: 100_000 }, () => '=?utf-8?q?a?=').join(' ') + ' <a@b>', () => {}));
-    expect(ms4).toBeLessThan(800);
+    expect(ms4).toBeLessThan(4000);
     const [, ms5] = timed(() => addresses('"\\'.repeat(300_000) + ',' + ':'.repeat(100_000), () => {}));
-    expect(ms5).toBeLessThan(800);
+    expect(ms5).toBeLessThan(4000);
   });
 
   test('the comparison: ASCII case-insensitive, domains as A-labels, null never matches', () => {

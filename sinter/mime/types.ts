@@ -29,6 +29,10 @@ export interface Message {
   reply: Address[];
   /** header names the sender sent only encrypted, lowercase */
   confidential: string[];
+  /** the payload root's HP-Outer fields (RFC 9788), name lowercased and value as given: what the outer header said
+   * (or that it was absent), for a confidential field in an unencrypted reply; only with hp="cipher" in a done root
+   * decrypt, else empty */
+  hpOuter: [name: string, value: string][];
   /** what to show, in reading order */
   parts: Part[];
   attachments: Attachment[];
@@ -41,7 +45,15 @@ export interface Message {
   problems: Problem[];
 }
 
-interface PartBase { id: string; contentType: string; protection: Protection }
+interface PartBase {
+  /** the entity's path (`1.2.1`; in a payload, `<step id>/1.2`; split around cleartext blocks, `<id>:n`). A nested
+   * message's entity and its multipart root share one id (IMAP's numbering): the message part has it, and that root,
+   * when shown whole (an encrypted part, or an attachment of its bytes), is `<id>.1`. No two parts or attachments of
+   * a message, nested ones included, have the same id */
+  id: string;
+  contentType: string;
+  protection: Protection;
+}
 
 export type Part =
   | (PartBase & { type: 'html'; html: string; legacyDisplay: boolean; inline: Inline[] })
@@ -81,7 +93,9 @@ export interface Address {
   address: string | null;
   /** the group's name; an empty group is one Address with name and address null */
   group?: string;
-  /** the display name holds `@` or `<` and is not the address itself */
+  /** read one way, but other software may read it another: a display name that looks like an address and is not
+   * this one; a source route; the percent hack or a UUCP path (`%`, `!`) in the local part; a quoted local part with
+   * `@`; an encoded word in the local part; a domain literal */
   suspicious?: true;
 }
 
@@ -135,7 +149,8 @@ export type ProblemCode =
 
 export interface Problem {
   code: ProblemCode;
-  /** the entity or part it concerns */
+  /** the entity or part it concerns, by its path; a nested message's entity and its multipart root share one id
+   * (their problems are listed together), or null for the whole call */
   part: string | null;
   /** whether it stops steps */
   blocking: boolean;
@@ -153,8 +168,8 @@ export interface Decrypted {
   /** with 'ok' */
   plaintext?: Uint8Array;
   /** the app checked an integrity-protected packet decrypted completely, and that it was an encrypted message;
-   * required with 'ok' */
-  integrity: boolean;
+   * required with 'ok' (anything but true refuses the plaintext) */
+  integrity?: boolean;
   /** signatures inside the ciphertext */
   signatures?: Verdict[];
 }

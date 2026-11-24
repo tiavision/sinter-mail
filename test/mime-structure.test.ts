@@ -1,4 +1,4 @@
-// The MIME reader's structure (docs/proposals/sinter-mail-mime.md, sections 1 to 4, wave 2): the entity scan,
+// The MIME reader's structure (docs/proposals/sinter-mail-mime.md, sections 1 to 4): the entity scan,
 // ids, boundaries, limits, the problems of the structure layer and their blocking flags, choosing what to show,
 // the message's headers and attachments, mail.mime's options and cache, mail.bytes and mail.imageType, purity.
 import { describe, expect, test } from 'vitest';
@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { mime } from '../sinter/mime.js';
 import { bytes as refBytes, imageType } from '../sinter/bytes.js';
 import * as helpers from '../sinter/sinter.helpers.js';
-import { all, newBudget, sameProtection, scan } from '../sinter/mime/index.js';
+import { all, newBudget, scan } from '../sinter/mime/scan.js';
+import { sameProtection } from '../sinter/mime/show.js';
 import type { Message, Part, Ref } from '../sinter/mime/types.js';
 import { latin1 } from './mime-corpus.js';
 
@@ -315,7 +316,7 @@ describe('choosing what to show', () => {
 
   test('a text candidate wholly one armored message or one cleartext-signed block wins whatever prefer says', () => {
     const armor = ['Content-Type: text/plain', '', '', '-----BEGIN PGP MESSAGE-----', '', 'hQEMA', '-----END PGP MESSAGE-----', ''];
-    // chosen, and as the root's only part shown, a decrypt step (wave 3)
+    // chosen, and as the root's only part shown, a decrypt step
     expect(mime(alt(armor, html)).parts).toMatchObject([{ id: '1.1', type: 'encrypted', reason: 'pending' }]);
     const signed = ['Content-Type: text/plain', '', '-----BEGIN PGP SIGNED MESSAGE-----', 'Hash: SHA256', '', 'hi', '-----BEGIN PGP SIGNATURE-----', '', 'iQ', '-----END PGP SIGNATURE-----'];
     expect(mime(alt(signed, html)).parts).toMatchObject([{ id: '1.1:1', type: 'text', text: 'hi', protection: { signed: 'pending' } }]);
@@ -435,7 +436,7 @@ describe('choosing what to show', () => {
     expect(m.calendar).toEqual([{ part: '1.2', method: 'CANCEL', text: 'BEGIN:VCALENDAR\r\nDESCRIPTION:<b>x</b>', attachment: '1.2' }]);
   });
 
-  test('multipart/encrypted and Exchange\'s rewrite at the root: one encrypted part, pending its decrypt step (wave 3)', () => {
+  test('multipart/encrypted and Exchange\'s rewrite at the root: one encrypted part, pending its decrypt step', () => {
     const enc = eml(...HEAD, ...multipart('multipart/encrypted; protocol="application/pgp-encrypted"', 'e',
       ['Content-Type: application/pgp-encrypted', '', 'Version: 1'], ['Content-Type: application/octet-stream', '', '-----BEGIN PGP MESSAGE-----']));
     const m = mime(enc);
@@ -658,11 +659,19 @@ describe('purity and laziness', () => {
   const imports = (f: string) => [...readFileSync(new URL(`../sinter/${f}`, import.meta.url), 'utf8')
     .matchAll(/^\s*(import|export)\b([^'"]*?)from\s+'([^']+)'/gm)].map((m) => ({ type: /^\s*type\b/.test(m[2]!) || m[1] === 'import' && /^\s+type\s/.test(m[2]!), from: m[3]! }));
 
-  test('mime.ts imports the reader only by its specifier', () => {
+  test('mime.ts imports the reader only by its specifier; its cache imports no reader', () => {
     const values = imports('mime.ts').filter((i) => !i.type).map((i) => i.from);
-    expect(values).toEqual(['@tiavision/sinter-mail/mime']);
+    expect(values).toEqual(['@tiavision/sinter-mail/mime', './mime/cache.js']);
+    expect(imports('mime/cache.ts').filter((i) => !i.type)).toEqual([]);
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
     expect(pkg.exports['./mime']).toBe('./sinter/mime/index.ts');
+  });
+
+  test('`./mime` exports `read` only (and types); the package exports neither the reader\'s internals nor the cache', async () => {
+    expect(Object.keys(await import('../sinter/mime/index.js'))).toEqual(['read']);
+    const pkg = await import('../sinter/index.js');
+    expect(Object.keys(pkg).sort()).toEqual(['bytes', 'imageType', 'links', 'mime', 'parse', 'plain', 'progressive', 'text', 'unquoted']);
+    expect(Object.keys(pkg.mime)).toEqual(['clear']);
   });
 
   test('bytes.ts imports no reader: the decoders and the magic numbers only', () => {

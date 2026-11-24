@@ -1,0 +1,38 @@
+From: Ada Lovelace <ada@example.test>
+To: Charles Babbage <charles@example.test>
+Subject: =?utf-8?q?Notes_on_the_engine=E2=80=94G?=
+Date: Tue, 24 Nov 2026 09:30:00 +0100
+Message-ID: <notes-g@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: multipart/alternative; boundary="alt"
+
+--alt
+Content-Type: text/plain; charset=utf-8; format=flowed
+Content-Transfer-Encoding: quoted-printable
+
+Dear Charles,
+
+Note G is attached: the Bernoulli numbers, step by step. 
+The table is in the PDF.
+
+-- 
+Ada
+--alt
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<p>Dear Charles,</p>
+<p>Note G is attached: <b>the Bernoulli numbers</b>, step by step. The table is in the PDF.</p>
+<div>-- <br>Ada</div>
+--alt--
+
+--outer
+Content-Type: application/pdf; name="note-g.pdf"
+Content-Disposition: attachment; filename="note-g.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJcfsj6IKMSAwIG9iago8PD4+CmVuZG9iagp0cmFpbGVyCjw8Pj4KJSVFT0YK
+--outer--

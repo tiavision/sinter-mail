@@ -28,15 +28,18 @@ for (let i = 0; i < 64; i++) B64['ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 const space = (c: number) => c === 0x20 || c === 0x09 || c === 0x0d || c === 0x0a;
 
 /** what base64 decoding found besides its bytes */
+/** a fresh array over its own ArrayBuffer, as every decoder here returns (never a view of the source) */
+export type Bytes = Uint8Array<ArrayBuffer>;
+
 export interface Base64Result {
-  bytes: Uint8Array;
+  bytes: Bytes;
   /** padding with more base64 characters after it (concatenated chunks; other junk after it is not): also `base64-junk`, told apart because the caller
    * makes it blocking under a signature */
   midPadding: boolean;
 }
 
 /** base64's bytes (`base64Result` without its flags) */
-export function base64(src: Uint8Array, start: number, end: number, sink: Sink = ignore): Uint8Array {
+export function base64(src: Uint8Array, start: number, end: number, sink: Sink = ignore): Bytes {
   return base64Result(src, start, end, sink).bytes;
 }
 
@@ -89,7 +92,7 @@ const hexValue = (c: number) =>
  * a byte; `=` not followed by two hex digits (a bare CR included) is kept as it is, and is `qp-invalid`; `=` as
  * the last byte (whitespace aside) is dropped, and is `qp-invalid`. A hard line end is kept as sent.
  */
-export function quotedPrintable(src: Uint8Array, start: number, end: number, sink: Sink = ignore): Uint8Array {
+export function quotedPrintable(src: Uint8Array, start: number, end: number, sink: Sink = ignore): Bytes {
   const report = once(sink);
   const out = new Uint8Array(Math.max(0, end - start));
   let n = 0;
@@ -126,7 +129,7 @@ export function quotedPrintable(src: Uint8Array, start: number, end: number, sin
  * `src[start, end)` with the transfer encoding undone: what mail.bytes returns before `canonical` and `slice`.
  * `identity` is a copy (a plain Uint8Array, whatever `src` is).
  */
-export function transferDecode(src: Uint8Array, start: number, end: number, encoding: Ref['encoding'], sink: Sink = ignore): Uint8Array {
+export function transferDecode(src: Uint8Array, start: number, end: number, encoding: Ref['encoding'], sink: Sink = ignore): Bytes {
   if (encoding === 'base64') return base64(src, start, end, sink);
   if (encoding === 'quoted-printable') return quotedPrintable(src, start, end, sink);
   return copy(src, start, end);
@@ -136,7 +139,7 @@ export function transferDecode(src: Uint8Array, start: number, end: number, enco
  * `src[start, end)` as a new, plain Uint8Array: a Node Buffer's own `slice` is a view sharing its memory, and even
  * `Uint8Array.prototype.slice.call` makes another Buffer (by its species); this is always a copy of the bytes only.
  */
-export function copy(src: Uint8Array, start = 0, end = src.length): Uint8Array {
+export function copy(src: Uint8Array, start = 0, end = src.length): Bytes {
   const out = new Uint8Array(Math.max(0, end - start));
   out.set(Uint8Array.prototype.subarray.call(src, start, end));
   return out;
@@ -152,7 +155,7 @@ export function hasBareLF(src: Uint8Array, start = 0, end = src.length): boolean
  * The bytes with every bare LF made CRLF and nothing else changed (a bare CR stays): the canonical form a
  * signature covers (RFC 3156). Always a new array, at most twice as long.
  */
-export function canonicalize(bytes: Uint8Array): Uint8Array {
+export function canonicalize(bytes: Uint8Array): Bytes {
   let extra = 0;
   for (let i = 0; i < bytes.length; i++) if (bytes[i] === 0x0a && (i === 0 || bytes[i - 1] !== 0x0d)) extra++;
   const out = new Uint8Array(bytes.length + extra);

@@ -1,13 +1,14 @@
 // `mail.mime(bytes, options)`: a whole message to its headers, parts, attachments and problems
-// (docs/proposals/sinter-mail-mime.md, sections 1 and 2). This module validates the options, keeps the results and
-// freezes them; the reader itself is `@tiavision/sinter-mail/mime`, imported by that specifier and never by a
+// (docs/proposals/sinter-mail-mime.md, sections 1 and 2). This module validates the options and keeps the results,
+// frozen (mime/cache.ts, `mail.mime.clear()` drops them); the reader itself is `@tiavision/sinter-mail/mime`, imported by that specifier and never by a
 // relative path, so that an app listing the package in `sinter({ lazy })` loads the reader on demand (mail.mime is
 // then a lazy helper: in a let, undefined until the reader has arrived).
 //
 // Pure: the same bytes and options give the same frozen, JSON-shaped message, with no globals beyond the language's
 // and TextEncoder.
-import { read, type ReadOptions } from '@tiavision/sinter-mail/mime';
+import { read } from '@tiavision/sinter-mail/mime';
 import type { Decrypted, Message, MimeOptions, Verdict } from './mime/types.js';
+import { cached, clearCache, sameOptions, type Options } from './mime/cache.js';
 
 /**
  * The message `bytes` holds (a string is read as UTF-8), under `options`. The same bytes and options give the same
@@ -16,8 +17,15 @@ import type { Decrypted, Message, MimeOptions, Verdict } from './mime/types.js';
  */
 export function mime(bytes: Uint8Array | string, options?: MimeOptions): Message {
   if (!(bytes instanceof Uint8Array) && typeof bytes !== 'string') fail(`the message is a Uint8Array or a string, not ${describe(bytes)}`);
-  return last(bytes, optionsOf(options));
+  return last.get(bytes, optionsOf(options));
 }
+
+/** drops every message kept, and the plaintexts of the results they were read with (on lock or logout), as a
+ * memo()'d helper's `.clear()` does; the next call reads again */
+mime.clear = (): void => {
+  last.clear();
+  clearCache();
+};
 
 const fail = (msg: string): never => {
   throw new TypeError(`mail.mime: ${msg}`);
@@ -39,14 +47,6 @@ const isPlain = (v: unknown): v is Record<string, unknown> => {
   const proto = Object.getPrototypeOf(v);
   return proto === Object.prototype || proto === null;
 };
-
-/** the options as compared and read: `prefer` by value, the results entry by entry (key, and value by identity) */
-interface Options {
-  prefer: 'html' | 'text';
-  decrypted: [string, Decrypted][];
-  verdicts: [string, Verdict[]][];
-  open: string[];
-}
 
 function verdict(v: unknown, where: string): Verdict {
   if (!isRecord(v)) fail(`${where} is a verdict object, not ${describe(v)}`);
@@ -103,11 +103,6 @@ function optionsOf(options: MimeOptions | undefined): Options {
   return { prefer: prefer as 'html' | 'text', decrypted, verdicts, open };
 }
 
-const sameEntries = <T>(a: [string, T][], b: [string, T][]) => a.length === b.length && a.every(([k, v], i) => k === b[i]![0] && v === b[i]![1]);
-
-const sameOptions = (a: Options, b: Options) => a.prefer === b.prefer && sameEntries(a.decrypted, b.decrypted)
-  && sameEntries(a.verdicts, b.verdicts) && a.open.length === b.open.length && a.open.every((s, i) => s === b.open[i]);
-
 /**
  * The message of the call before, when this one has the same input (by identity: a typed array is never compared
  * byte by byte) and options. A let is evaluated at every read, with a new options object each time; sinter's memo()
@@ -115,76 +110,12 @@ const sameOptions = (a: Options, b: Options) => a.prefer === b.prefer && sameEnt
  */
 const last = (() => {
   let input: Uint8Array | string | undefined, opts: Options | undefined, value: Message | undefined;
-  return (bytes: Uint8Array | string, o: Options): Message => {
+  const get = (bytes: Uint8Array | string, o: Options): Message => {
     if (value && bytes === input && sameOptions(o, opts!)) return value;
-    const v = cached(bytes, o);
+    const v = cached(bytes, o, read);
     input = bytes; opts = o; value = v;
     return v;
   };
+  const clear = () => { input = opts = value = undefined; };
+  return { get, clear };
 })();
-
-/** the cache's bounds: inputs kept, their total cost, option sets per input, and the cost of one entry beyond its
- * bytes (the message read from it, the options) */
-const MAX_INPUTS = 32, MAX_COST = 16 * 1024 * 1024, PER = 4, ENTRY = 4 * 1024;
-
-/** what one option set holds alive: the plaintexts of its results */
-const optionsCost = (o: Options) => {
-  let n = ENTRY;
-  for (const [, d] of o.decrypted) if (d.plaintext instanceof Uint8Array) n += d.plaintext.byteLength;
-  return n;
-};
-
-interface Kept { o: Options; v: Message; cost: number }
-
-/**
- * Messages kept by input (identity) and options, in order of use: at most 32 inputs, and at most 16 MiB of cost,
- * which counts each input's length (bytes, or a string's length), a constant per message kept, and the byte length
- * of every plaintext the kept options hold; at most 4 option sets per input. The input just read is kept whatever
- * its cost, so one large message still reads once per change of options.
- */
-const cache = (() => {
-  const map = new Map<Uint8Array | string, Kept[]>();
-  let total = 0;
-  const costOf = (k: Uint8Array | string, of: Kept[]) => { let n = k.length; for (const x of of) n += x.cost; return n; };
-  const get = (bytes: Uint8Array | string, o: Options): Message => {
-    let of = map.get(bytes);
-    if (of) { map.delete(bytes); map.set(bytes, of); } else { map.set(bytes, (of = [])); total += bytes.length; }
-    const hit = of.find((x) => sameOptions(x.o, o));
-    if (hit) return hit.v;
-    const src = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes;
-    const read: ReadOptions = { prefer: o.prefer, decrypted: new Map(o.decrypted), verdicts: new Map(o.verdicts), open: o.open.slice() };
-    const v = frozen(readMessage(src, read));
-    const kept: Kept = { o, v, cost: optionsCost(o) };
-    of.unshift(kept);
-    total += kept.cost;
-    if (of.length > PER) total -= of.pop()!.cost;
-    for (const [k, list] of map) {
-      if ((total <= MAX_COST && map.size <= MAX_INPUTS) || k === bytes) break;
-      map.delete(k);
-      total -= costOf(k, list);
-    }
-    return v;
-  };
-  /** for tests: how many inputs and option sets are kept, and their cost */
-  const size = () => { let entries = 0; for (const of of map.values()) entries += of.length; return { inputs: map.size, entries, cost: total }; };
-  return { get, size };
-})();
-
-const cached = cache.get;
-
-/** test-only: the cache's size, to check its bounds (not part of the package's API: sinter.helpers exports `mime` only) */
-export const cacheSize = cache.size;
-
-const readMessage = (src: Uint8Array, o: ReadOptions) => read(src, o);
-
-/** `v` frozen at every depth (plain objects and arrays only: the message is JSON-shaped) */
-function frozen<T>(v: T): T {
-  const stack: unknown[] = [v];
-  while (stack.length) {
-    const x = stack.pop();
-    if (typeof x !== 'object' || x === null || Object.isFrozen(x)) continue;
-    Object.freeze(x);
-    for (const k of Object.keys(x)) stack.push((x as Record<string, unknown>)[k]);
-  }
-  return v;
-}

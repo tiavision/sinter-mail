@@ -7,6 +7,7 @@ import type { RawField } from './headers.js';
 import type { RootInfo, Sig } from './steps.js';
 import { paramOf } from './scan.js';
 import { asciiLower } from './charset.js';
+import { clean } from './headers.js';
 import { sameAddress } from './address.js';
 
 export type Form = { form: 'hp'; hp: 'cipher' | 'clear' } | { form: 'v1' };
@@ -55,7 +56,7 @@ export function single(from: readonly Address[]): string | null {
 }
 
 /** whether a good signature over the payload's root has `address` among its signer */
-export const signedBy = (sigs: readonly Sig[], address: string | null) =>
+export const rootSignedBy = (sigs: readonly Sig[], address: string | null) =>
   address !== null && sigs.some((s) => s.status === 'good' && s.signer.some((x) => sameAddress(x, address)));
 
 export interface Applied {
@@ -63,11 +64,14 @@ export interface Applied {
   sources: Sources;
   reply: Address[];
   confidential: string[];
+  /** the payload root's HP-Outer fields (values `clean`ed, as `raw`'s are), with hp="cipher" in a done root decrypt */
+  hpOuter: [string, string][];
   /** the payload's From when protected headers apply and the payload has one, else null */
   protectedFrom: Address[] | null;
 }
 
-const OUTER = (): Sources => ({
+/** every field from the outer headers */
+export const OUTER = (): Sources => ({
   subject: 'outer', from: 'outer', sender: 'outer', replyTo: 'outer', to: 'outer', cc: 'outer', date: 'outer',
   messageId: 'outer', inReplyTo: 'outer', references: 'outer',
 });
@@ -86,7 +90,7 @@ export function applyProtected(root: RootInfo, outerRoot: Entity, outer: Headers
   const form = protectionForm(P);
   const counts = root.encrypted || root.sigs.some((s) => s.status === 'good');
   if (!P || !form || !counts) {
-    return { headers: outer, sources: OUTER(), reply: outer.replyTo.length ? outer.replyTo : outer.from, confidential: [], protectedFrom: null };
+    return { headers: outer, sources: OUTER(), reply: outer.replyTo.length ? outer.replyTo : outer.from, confidential: [], hpOuter: [], protectedFrom: null };
   }
   const ph = inner();
   const has = (name: string) => P.fields.some((f) => f.name === name);
@@ -95,13 +99,28 @@ export function applyProtected(root: RootInfo, outerRoot: Entity, outer: Headers
   const set = <F extends Field>(f: F) => { (headers as unknown as Record<string, unknown>)[f] = ph[f]; sources[f] = 'protected'; };
   for (const [f, name] of FIELDS) if (form.form === 'hp' || f === 'replyTo' || has(name)) set(f);
   const protectedFrom = has('from') ? ph.from : null;
-  if (protectedFrom && signedBy(root.sigs, single(protectedFrom))) set('from');
+  if (protectedFrom && rootSignedBy(root.sigs, single(protectedFrom))) set('from');
   // in an encrypted payload, the protected Reply-To, else the protected From; neither: empty, the app asks (the
   // outer sender may only have re-sent it)
   let reply: Address[];
   if (root.encrypted) reply = ph.replyTo.length ? ph.replyTo : protectedFrom?.length ? protectedFrom : [];
   else reply = headers.replyTo.length ? headers.replyTo : headers.from;
-  return { headers, sources, reply, confidential: root.encrypted ? confidential(P, outerRoot.fields, form) : [], protectedFrom };
+  const cipher = root.encrypted && form.form === 'hp' && form.hp === 'cipher';
+  return { headers, sources, reply, confidential: root.encrypted ? confidential(P, outerRoot.fields, form) : [], hpOuter: cipher ? hpOuter(P).map(([n, v]) => [n, clean(v)] as [string, string]) : [], protectedFrom };
+}
+
+/** a payload root's HP-Outer fields (RFC 9788 4.3.1): each `name: value`, the name lowercased and trimmed, the value
+ * unfolded as given, without the whitespace around it; one without a name is skipped */
+function hpOuter(P: Entity): [string, string][] {
+  const out: [string, string][] = [];
+  for (const f of P.fields) {
+    if (f.name !== 'hp-outer') continue;
+    const colon = f.value.indexOf(':');
+    if (colon <= 0) continue;
+    const name = asciiLower(f.value.slice(0, colon).trim());
+    if (name) out.push([name, f.value.slice(colon + 1).replace(/^[ \t]+/, '').trimEnd()]);
+  }
+  return out;
 }
 
 /**
@@ -112,16 +131,7 @@ export function applyProtected(root: RootInfo, outerRoot: Entity, outer: Headers
 function confidential(P: Entity, outerFields: readonly RawField[], form: Form): string[] {
   if (form.form === 'hp' && form.hp === 'clear') return [];
   const out: string[] = [];
-  let refouter: [string, string][] | null = null;
-  if (form.form === 'hp') {
-    refouter = [];
-    for (const f of P.fields) {
-      if (f.name !== 'hp-outer') continue;
-      const colon = f.value.indexOf(':');
-      if (colon <= 0) continue;
-      refouter.push([asciiLower(f.value.slice(0, colon).trim()), f.value.slice(colon + 1).replace(/^[ \t]+/, '').trimEnd()]);
-    }
-  }
+  const refouter = form.form === 'hp' ? hpOuter(P) : null;
   for (const f of P.fields) {
     if (structural(f.name) || out.includes(f.name)) continue;
     const kept = refouter

@@ -24,8 +24,8 @@ Without full ICU, Node lacks the CJK and some single-byte decoders and the chars
 `boundaryExtendsParent`, `missingCloseBoundary`, `transportPadding`, `lineEndMix`, `base64Junk`,
 `pgpMimeEncrypted`, `exchangePgpMime`, `pgpMimeSigned(lineEnds)`, `postalMimeBoundaryNearMiss`,
 `postalMimeManyAddresses`, `nodemailerDeepGroups`, `nodemailerGroupOpeners`; `generators` maps the manifest's
-names to them with their default arguments. The PGP shapes carry placeholder armor; real ciphertexts and
-signatures belong to Plan step 3.
+names to them with their default arguments. The PGP shapes carry placeholder armor; the tests with real ciphertexts and
+signatures make them with openpgp.js (`../mime-crypto-kit.ts`).
 
 ## Regenerating
 
@@ -42,8 +42,10 @@ node test/mime-corpus/hostile/build.mjs                 # hostile/*.eml and mani
 
 ## For the reader's author
 
-- `field-dropped` (section 4) is not in section 2's closed problem table; the manifest uses it.
-- `Headers\n\n--b` (an empty body whose empty line is the delimiter's line break) is legal by RFC 2046 but reads
-  as `no-header-end`, blocking, by the proposal's wording; `stalwart/thirdparty/011.eml` has one.
+- `field-dropped` (a header field past a field limit, section 4) is in section 2's problem table, informational;
+  the manifest uses it.
+- `Headers\n\n--b` (an empty body whose empty line is the delimiter's line break) is legal by RFC 2046 and reads
+  as an empty body with no problem; `stalwart/thirdparty/011.eml` has one (`../mime-corpus-structure.test.ts`
+  checks it). `no-header-end` is informational, for a part whose headers run to its end.
 - The `signed-text-as-headers-*` fixtures are reconstructed from the proposal's description of MFSA 2023-55;
   the advisory itself was not reachable from where this corpus was assembled.

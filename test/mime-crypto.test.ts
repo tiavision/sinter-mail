@@ -1,4 +1,4 @@
-// OpenPGP structure (docs/proposals/sinter-mail-mime.md, sections 5 to 7, wave 3): steps, the app's results,
+// OpenPGP structure (docs/proposals/sinter-mail-mime.md, sections 5 to 7): steps, the app's results,
 // protected headers, protection labels and the summary, with real keys and messages from openpgp.js. Each test runs
 // section 1's action recipe (test/mime-crypto-kit.ts) the way an app would.
 import { beforeAll, describe, expect, test } from 'vitest';
@@ -61,8 +61,22 @@ describe('PGP/MIME encrypted at the root', () => {
       cc: 'protected', date: 'protected', messageId: 'protected', inReplyTo: 'protected', references: 'protected' });
     expect(addrs(m.reply)).toEqual(['alice@example.test']);
     expect(m.confidential).toEqual(['subject']);
+    // the HP-Outer fields, for a confidential field in an unencrypted reply
+    expect(m.hpOuter).toEqual([['from', 'Alice <alice@example.test>'], ['to', 'bob@example.test'], ['subject', '...'],
+      ['date', 'Tue, 24 Nov 2026 09:30:00 +0100'], ['message-id', '<m1@example.test>']]);
     expect(m.summary).toEqual({ encrypted: 'all', signed: 'all', from: 'matches' });
     expect(m.problems).toEqual([]);
+  });
+
+  test('hpOuter: only with hp="cipher" in a done root decrypt', async () => {
+    const payload = (hp: string) => crlf(`Content-Type: text/plain; hp="${hp}"\nSubject: Inner\nHP-Outer: Subject:   ...  \nHP-Outer: X-Odd\n\nx`);
+    const cipher = await encrypt(payload('cipher'), bob);
+    expect((await read(pgpMime(OUTER, cipher), app)).hpOuter).toEqual([['subject', '...']]);
+    expect(mime(pgpMime(OUTER, cipher)).hpOuter).toEqual([]);
+    expect((await read(pgpMime(OUTER, await encrypt(payload('clear'), bob)), app)).hpOuter).toEqual([]);
+    const signedOnly = payload('cipher');
+    expect((await read(pgpSigned(OUTER, signedOnly, await detach(signedOnly, alice)), app)).hpOuter).toEqual([]);
+    expect(mime(eml(...OUTER, 'Content-Type: text/plain; hp="cipher"', 'HP-Outer: Subject: x', '', 'plain')).hpOuter).toEqual([]);
   });
 
   test('encrypt of multipart/signed (v1): a verify step in the payload, field by field, the v1 display part hidden', async () => {
@@ -143,13 +157,14 @@ describe('PGP/MIME encrypted at the root', () => {
     expect(t.parts).toMatchObject([{ type: 'encrypted', reason: 'not-root', protection: { encrypted: true } }]);
   });
 
-  test('sign over encrypt: a verify step for the root and a decrypt step for its first part; the signature covers the payload', async () => {
+  test('sign over encrypt: a verify step for the root and a decrypt step for its first part; the signature covers the ciphertext only', async () => {
     const enc = eml(...multipart('multipart/encrypted; protocol="application/pgp-encrypted"', 'e',
       ['Content-Type: application/pgp-encrypted', '', 'Version: 1'], ['Content-Type: application/octet-stream', '', await encrypt(crlf('Content-Type: text/plain\n\nsigned and sealed'), bob)])).replace(/\r\n$/, '');
     const m = await read(pgpSigned(OUTER, enc, await detach(enc, alice)), app);
     expect(m.steps.map((s) => [s.kind, s.part, s.state])).toEqual([['verify', '1', 'done'], ['decrypt', '1.1', 'done']]);
-    expect(m.parts[0]).toMatchObject({ type: 'text', text: 'signed and sealed', protection: { encrypted: true, signed: 'good', step: m.steps[0]!.id } });
-    expect(m.summary).toEqual({ encrypted: 'all', signed: 'all', from: 'matches' });
+    // the verdict labels nothing inside the payload, and is no signature over its root
+    expect(m.parts[0]).toMatchObject({ type: 'text', text: 'signed and sealed', protection: { encrypted: true, signed: null, step: m.steps[1]!.id } });
+    expect(m.summary).toEqual({ encrypted: 'all', signed: 'none', from: 'unknown' });
     // a blocking problem in the payload is below the signed part: no verify step, and the payload labelled by its decryption
     const bad = eml(...multipart('multipart/encrypted; protocol="application/pgp-encrypted"', 'e',
       ['Content-Type: application/pgp-encrypted', '', 'Version: 1'], ['Content-Type: application/octet-stream', '', await encrypt(crlf('Content-Type: text/plain\nContent-Type: text/html\n\nx'), bob)])).replace(/\r\n$/, '');
@@ -157,6 +172,51 @@ describe('PGP/MIME encrypted at the root', () => {
     expect(b.steps.map((s) => s.kind)).toEqual(['decrypt']);
     expect(b.parts[0]!.protection).toEqual({ encrypted: true, signed: null, step: b.steps[0]!.id });
     expect(b.problems).toContainEqual({ code: 'duplicate-field', part: `${b.steps[0]!.id}/1`, blocking: true });
+  });
+
+  // Mallory wraps Alice's ciphertext in her own multipart/signed: her good signature covers bytes she did not write
+  const MOUTER = ['From: Mallory <mallory@evil.test>', 'To: bob@example.test', 'Subject: hi'];
+  const sealed = (armor: string) => eml(...multipart('multipart/encrypted; protocol="application/pgp-encrypted"', 'enc',
+    ['Content-Type: application/pgp-encrypted', '', 'Version: 1', ''], ['Content-Type: application/octet-stream', '', armor])).replace(/\r\n$/, '');
+  const wrapped = async (outer: string[], armor: string, signer: Keys) => {
+    const enc = sealed(armor);
+    return pgpSigned(outer, enc, await detach(enc, signer), 'sg');
+  };
+
+  test('sign over encrypt by someone else: Mallory\'s signature labels nothing and binds no From', async () => {
+    for (const inner of [undefined, alice]) {
+      const armor = await encrypt(crlf('Content-Type: text/plain\n\nthe secret plan\n'), bob, inner);
+      const m = await read(await wrapped(MOUTER, armor, mallory), app);
+      const [verify, dec] = m.steps;
+      expect([verify!.kind, verify!.state, dec!.kind, dec!.state]).toEqual(['verify', 'done', 'decrypt', 'done']);
+      expect(texts(m)).toEqual(['the secret plan\r\n']);
+      expect(m.parts[0]!.protection).toEqual(inner
+        ? { encrypted: true, signed: 'good', step: dec!.id, signer: ['alice@example.test'] }
+        : { encrypted: true, signed: null, step: dec!.id });
+      expect(m.summary.from).not.toBe('matches');
+      expect(m.summary).toEqual({ encrypted: 'all', signed: inner ? 'some' : 'none', from: 'unknown' });
+      expect(addrs(m.headers.from)).toEqual(['mallory@evil.test']);
+    }
+    // protected headers signed by Alice inside: Alice's From is shown, never Mallory's matched
+    const hp = await encrypt(crlf('Content-Type: text/plain; hp="cipher"\nSubject: plan\nFrom: alice@example.test\nTo: bob@example.test\n\nthe secret plan\n'), bob, alice);
+    const h = await read(await wrapped(MOUTER, hp, mallory), app);
+    expect(addrs(h.headers.from)).toEqual(['alice@example.test']);
+    expect(h.summary).toEqual({ encrypted: 'all', signed: 'all', from: 'matches' });
+    // without protected headers, Mallory's From is not 'matches' even when she also signed inside
+    const own = await read(await wrapped(MOUTER, await encrypt(crlf('Content-Type: text/plain\n\nx'), bob), mallory), app);
+    expect(own.summary.from).toBe('unknown');
+  });
+
+  test('sign over encrypt with Alice\'s one-pass signature inside and Alice as outer From: the inner signature decides', async () => {
+    const armor = await encrypt(crlf('Content-Type: text/plain\n\nthe secret plan\n'), bob, alice);
+    for (const outerSigner of [alice, mallory]) {
+      const m = await read(await wrapped(OUTER, armor, outerSigner), app);
+      expect(m.parts[0]!.protection).toEqual({ encrypted: true, signed: 'good', step: m.steps[1]!.id, signer: ['alice@example.test'] });
+      expect(m.summary).toEqual({ encrypted: 'all', signed: 'all', from: 'matches' });
+    }
+    // without the inner signature, Alice's outer one does not make it hers
+    const bare = await read(await wrapped(OUTER, await encrypt(crlf('Content-Type: text/plain\n\nx'), bob), alice), app);
+    expect(bare.summary).toEqual({ encrypted: 'all', signed: 'none', from: 'unknown' });
   });
 });
 
@@ -173,6 +233,31 @@ describe('the app\'s results', () => {
     expect([noIntegrity.steps[0]!.state, noIntegrity.parts.map((p) => p.type)]).toEqual(['failed', ['encrypted']]);
     expect(noIntegrity.problems).toEqual([{ code: 'integrity', part: '1', blocking: true }]);
     expect(() => mime(raw, { decrypted: { [id]: { status: 'ok', integrity: true } } })).toThrow(/`plaintext` is required with status 'ok'/);
+  });
+
+  test('a refused result for a part opened under a signature: blocking, but the signature keeps its step and its label', async () => {
+    const armor = (await encrypt('opened', bob)).replace(/\r\n$/, '');
+    const enc = eml(...multipart('multipart/encrypted; protocol="application/pgp-encrypted"', 'e',
+      ['Content-Type: application/pgp-encrypted', '', 'Version: 1'], ['Content-Type: application/octet-stream', '', armor]));
+    const cases: [string, string, string][] = [
+      // a text part wholly one armored message, not the root's only part shown
+      ['inline', crlf(['Content-Type: multipart/mixed; boundary=mx', '', '--mx', 'Content-Type: text/plain', '', 'intro', '--mx', 'Content-Type: text/plain', '', armor, '--mx--', ''].join('\n')), '1.1.2'],
+      // a PGP/MIME part not at the root
+      ['pgp/mime', crlf(['Content-Type: multipart/mixed; boundary=mx', '', '--mx', 'Content-Type: text/plain', '', 'intro', '--mx', enc, '--mx--', ''].join('\n')), '1.1.2'],
+    ];
+    for (const [name, signed, at] of cases) {
+      const raw = pgpSigned(OUTER, signed, await detach(signed, alice));
+      const closed = await read(raw, app);
+      const verify = closed.steps[0]!;
+      const p = closed.parts[1] as Part & { type: 'encrypted' };
+      expect([name, p.reason, p.id]).toEqual([name, 'not-root', at]);
+      const m = mime(raw, { verdicts: { [verify.id]: [{ status: 'good', signer: ['alice@example.test'] }] }, open: [p.step],
+        decrypted: { [p.step]: { status: 'ok', integrity: false, plaintext: utf8('Content-Type: text/plain\r\n\nforged') } } });
+      expect(m.steps.map((s) => [s.kind, s.state])).toEqual([['verify', 'done'], ['decrypt', 'failed']]);
+      const label = { encrypted: false, signed: 'good', step: verify.id, signer: ['alice@example.test'] };
+      expect(m.parts).toMatchObject([{ type: 'text', text: 'intro', protection: label }, { type: 'encrypted', reason: 'failed', protection: label }]);
+      expect(m.problems).toEqual([{ code: 'integrity', part: at, blocking: true }]);
+    }
   });
 
   test('a plaintext over 64 MiB is over the limit', async () => {
@@ -327,6 +412,22 @@ describe('inline PGP', () => {
     expect(m.summary).toEqual({ encrypted: 'all', signed: 'all', from: 'matches' });
   });
 
+  test('an armored message that decrypts to one cleartext-signed block: the block\'s signature is over the payload\'s root', async () => {
+    const raw = eml(...OUTER, 'Content-Type: text/plain', '', await encrypt(await clearsign('hello', alice), bob));
+    const m = await read(raw, app);
+    expect(m.steps.map((s) => [s.kind, s.state])).toEqual([['decrypt', 'done'], ['verify-cleartext', 'done']]);
+    expect(texts(m)).toEqual(['hello']);
+    expect(m.parts[0]!.protection).toEqual({ encrypted: true, signed: 'good', step: m.steps[1]!.id, signer: ['alice@example.test'] });
+    expect(m.summary).toEqual({ encrypted: 'all', signed: 'all', from: 'matches' });
+    // the outer From another: signed by Alice, but not the From's
+    const other = await read(eml('From: mallory@evil.test', 'Content-Type: text/plain', '', await encrypt(await clearsign('hello', alice), bob)), app);
+    expect(other.summary).toEqual({ encrypted: 'all', signed: 'some', from: 'unknown' });
+    // text around the block in the plaintext: the block labels only its own part
+    const around = await read(eml(...OUTER, 'Content-Type: text/plain', '', await encrypt(`before\n${await clearsign('hello', alice)}\nafter\n`, bob)), app);
+    expect(texts(around)).toEqual(['before\n', 'hello', 'after\n']);
+    expect(around.summary).toEqual({ encrypted: 'all', signed: 'some', from: 'unknown' });
+  });
+
   test('the chosen text alternative wholly armored: a decrypt step; the HTML alternative never one', async () => {
     const armor = await encrypt('from the alternative', bob);
     const raw = eml(...OUTER, ...multipart('multipart/alternative', 'a', ['Content-Type: text/plain', '', armor], ['Content-Type: text/html', '', `<pre>${armor}</pre>`]));
@@ -393,6 +494,22 @@ describe('opened parts and nested messages', () => {
     expect(texts((o.parts[1] as Part & { type: 'message' }).message)).toEqual(['nested secret']);
   });
 
+  test('a forwarded encrypted message, opened: its own summary from its own scope, and the outer message\'s counts it', async () => {
+    const inner = pgpMime(['From: Alice <alice@example.test>', 'Subject: inner enc'], await encrypt(crlf('Content-Type: text/plain\n\nsecret\n'), bob, alice));
+    const raw = eml(...OUTER, 'MIME-Version: 1.0', ...multipart('multipart/mixed', 'mx', ['Content-Type: text/plain', '', 'see below'], ['Content-Type: message/rfc822', '', inner]));
+    const closed = mime(raw);
+    const nested0 = (closed.parts[1] as Part & { type: 'message' }).message;
+    expect([nested0.summary, closed.summary]).toEqual([{ encrypted: 'none', signed: 'none', from: null }, { encrypted: 'none', signed: 'none', from: null }]);
+    const step = (nested0.parts[0] as Part & { type: 'encrypted' }).step;
+    const o = await read(raw, app, [step]);
+    const nested = (o.parts[1] as Part & { type: 'message' }).message;
+    expect(nested.parts[0]!.protection).toEqual({ encrypted: true, opened: true, signed: 'good', step, signer: ['alice@example.test'] });
+    // the opened part is never the nested message's own: 'some', and its signature binds no From
+    expect(nested.summary).toEqual({ encrypted: 'some', signed: 'some', from: 'unknown' });
+    expect(nested.steps).toEqual([]);
+    expect(o.summary).toEqual({ encrypted: 'some', signed: 'some', from: 'unknown' });
+  });
+
   test('.pgp, .gpg and .asc attachments are kind encrypted, not steps; an encrypted unchosen alternative makes no step', () => {
     const m = mime(eml(...OUTER, ...multipart('multipart/mixed', 'm', ['Content-Type: text/plain', '', 'see attached'],
       ['Content-Type: application/octet-stream; name="doc.pdf.pgp"', 'Content-Disposition: attachment; filename="doc.pdf.pgp"', '', 'x'])));
@@ -411,7 +528,7 @@ describe('purity', () => {
     const at = (f: string) => fileURLToPath(new URL(`../sinter/${f}`, import.meta.url));
     for (const [f, n] of [['mime.ts', 'mime'], ['mime/index.ts', 'read'], ['mime/crypto.ts', 'showEncrypted'], ['mime/crypto.ts', 'showSigned'],
       ['mime/crypto.ts', 'showText'], ['mime/crypto.ts', 'resolveCandidates'], ['mime/steps.ts', 'findBlocks'], ['mime/steps.ts', 'combine'],
-      ['mime/hp.ts', 'applyProtected'], ['mime/protect.ts', 'rootMessage']]) {
+      ['mime/hp.ts', 'applyProtected'], ['mime/protect.ts', 'rootMessage'], ['mime/summary.ts', 'summarize'], ['mime/cache.ts', 'cached']]) {
       expect(foldVerdict(at(f), n, root), `${f} ${n}`).toEqual({ fold: true });
     }
   });

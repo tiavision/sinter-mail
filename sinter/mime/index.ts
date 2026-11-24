@@ -4,7 +4,8 @@
 //
 // `read` is one call's work: the input scanned (scan.ts), what to show chosen and the message assembled (show.ts),
 // the steps and their results (crypto.ts, steps.ts), protected headers and the summary (hp.ts, protect.ts), the
-// problems listed once each. The rest is the reader's internal API.
+// problems listed once each. This entry exports `read`, its options and the message's types, nothing else: the rest
+// is the reader's internals, imported by their own modules.
 import type { Decrypted, Message, Problem, Verdict } from './types.js';
 import { newBudget, scan, type Found } from './scan.js';
 import { reader } from './show.js';
@@ -41,7 +42,7 @@ function stale(st: CryptoState, o: ReadOptions): boolean {
 
 /** the problems as the message lists them: one per part and code, in the order found, blocking if any was (a nested
  * message's multipart root shares its message entity's id, scan.ts: their problems merge here, blocking kept) */
-export function problemsOf(found: readonly Found[]): Problem[] {
+function problemsOf(found: readonly Found[]): Problem[] {
   const out: Problem[] = [], at = new Map<string, Problem>();
   for (const f of found) {
     const part = f.entity ? f.entity.id : null;
@@ -55,13 +56,4 @@ export function problemsOf(found: readonly Found[]): Problem[] {
   return out;
 }
 
-export { all, boundaryValid, isBlocking, isMultipart, isNestedMessage, newBudget, paramOf, scan, MAX_BOUNDARY, MAX_BYTES, MAX_DEPTH, MAX_NESTED, MAX_PARTS, MAX_PAYLOAD, MAX_STEPS } from './scan.js';
-export type { Budget, Entity, Found, Opaque, ScanStart, Scanned } from './scan.js';
-export { armorKind, attach, body, contentIdOf, flavor, headersOf, inline, message, problem, reader, relatedRoot, sameProtection, text, textPart, textQuiet, unprotected, walk } from './show.js';
-export type { Ctx, Mode, Reader, Scope } from './show.js';
-export { checkSigned, cryptoShape, encryptedFile, resolveCandidates, showEncrypted, showSigned, showText } from './crypto.js';
-export { canOffer, combine, findBlocks, newState, refBytes, shownSigned, stateOf } from './steps.js';
-export type { Block, CryptoState, RootInfo, Sig } from './steps.js';
-export { applyProtected, legacyText, protectionForm, v1Display } from './hp.js';
-export { rootMessage } from './protect.js';
-export type { Shape } from './crypto.js';
+export type * from './types.js';

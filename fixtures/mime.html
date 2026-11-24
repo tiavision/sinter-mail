@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>@tiavision/sinter-mail: a whole message from a file</title>
+</head>
+<body>
+  <!-- A message as it is stored (an .eml in the repo, 7-bit): mail.mime reads it at build time into its headers,
+       the parts to show and the attachments. Each part goes to the helpers that render it: an HTML part through
+       mail.parse, a text part through mail.plain, both into <mail-body>. The attachments are listed by name and
+       size; their bytes (mail.bytes) are an action's, when the reader saves one. -->
+  <sn-resource name="raw" src="file:./mails/notes.eml" type="string"></sn-resource>
+  <article data-sn-let="{ msg: mail.mime(raw, { prefer: 'html' }) }">
+    <h1 id="subject" data-sn-text="msg.headers.subject ?? '(no subject)'"></h1>
+    <p id="from" data-sn-text="msg.headers.from.map((a) => a.name ?? a.address ?? '').join(', ')"></p>
+    <template data-sn-for="part in msg.parts" data-sn-key="part.id">
+      <mail-body data-sn-with="{ body: part.type === 'html' ? mail.parse(part.html) : part.type === 'text' ? mail.plain(part.text, { flowed: part.flowed, delsp: part.delsp }) : null }"></mail-body>
+    </template>
+    <ul id="attachments">
+      <template data-sn-for="a in msg.attachments" data-sn-key="a.id">
+        <li data-sn-text="`${a.filename} (${a.size} bytes)`"></li>
+      </template>
+    </ul>
+  </article>
+</body>
+</html>

@@ -1,10 +1,11 @@
-// The published attacks on encrypted and signed mail, against wave 3 (docs/proposals/sinter-mail-mime.md, sections
+// The published attacks on encrypted and signed mail, against the reader (docs/proposals/sinter-mail-mime.md, sections
 // 5 to 7 and Pitfalls): EFAIL, re-wrapped and re-sent ciphertexts, partial signing, stale results, armor that is not
 // a step, blocking problems under a signature, Content-IDs across protection boundaries; and time bounds for hostile
 // inputs with many steps.
 import { beforeAll, describe, expect, test } from 'vitest';
 import { mime } from '../sinter/mime.js';
-import { all, problem, reader, scan } from '../sinter/mime/index.js';
+import { all, scan } from '../sinter/mime/scan.js';
+import { problem, reader } from '../sinter/mime/show.js';
 import type { Part, Step } from '../sinter/mime/types.js';
 import {
   addrs, App, clearsign, codes, crlf, detach, eml, encrypt, key, multipart, pgpMime, pgpSigned, read, texts, unlock, utf8, type Keys,

@@ -4,7 +4,8 @@
 // expected outcome in test/mime-corpus/hostile/manifest.json, within its time bound.
 import { describe, expect, test } from 'vitest';
 import { mime } from '../sinter/mime.js';
-import { paramOf, reader, scan, textQuiet, type Entity } from '../sinter/mime/index.js';
+import { paramOf, scan, type Entity } from '../sinter/mime/scan.js';
+import { reader, textQuiet } from '../sinter/mime/show.js';
 import type { Address, Message, Part } from '../sinter/mime/types.js';
 import { corpus, corpusJson, generators, type GeneratorName } from './mime-corpus.js';
 
