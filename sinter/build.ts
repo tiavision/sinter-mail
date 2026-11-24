@@ -28,7 +28,10 @@ for (const t of Object.keys(TAGS) as Tag[]) {
  * style seen once costs nothing more. By style object (mail.parse shares one among elements with the same style),
  * and by content within one build, for a tree from JSON, which has an object per element.
  */
-const protos = new WeakMap<object, Map<Tag, HTMLElement | null>>();
+const protosOf = new WeakMap<Document, WeakMap<object, Map<Tag, HTMLElement | null>>>();
+/** in the current build: the document its elements are made in, and its prototypes (never another document's: a
+ * clone is of its prototype's document, and an image in the page's document loads) */
+let doc: Document, protos: WeakMap<object, Map<Tag, HTMLElement | null>>;
 /** in the current build: the first style object with each content */
 let byText = new Map<string, object>();
 function styled(n: El, tag: Tag): HTMLElement {
@@ -50,7 +53,7 @@ function styled(n: El, tag: Tag): HTMLElement {
 }
 /** a new element of `tag` with `n`'s style */
 function fresh(n: El, tag: Tag): HTMLElement {
-  const e = document.createElement(tag);
+  const e = doc.createElement(tag);
   if (tag === 'a') { e.setAttribute('target', '_blank'); e.setAttribute('rel', 'noopener noreferrer'); }
   // the properties the tag binds, in its component's order: the tree's own order when that is the same (parse.ts
   // writes them so), else the table's
@@ -87,7 +90,7 @@ function flow(n: { children: TreeNode[] }, e: Node): void {
   // text alone, as most cells, paragraphs and links hold: one call for its node
   if (list.length === 1 && list[0]!.type === 'text') { e.textContent = list[0]!.value; return; }
   for (const c of list) {
-    if (c.type === 'text') e.appendChild(document.createTextNode(c.value));
+    if (c.type === 'text') e.appendChild(doc.createTextNode(c.value));
     else if (c.style.display !== 'none') node(c, e);
   }
 }
@@ -96,7 +99,7 @@ function node(n: El, parent: Node): void {
   if (!has.call(TAGS, tag)) return;
   const info = TAGS[tag];
   // a table's part outside a table: its content
-  if (info.inTable) { const e = document.createElement('span'); flow(n, e); parent.appendChild(e); return; }
+  if (info.inTable) { const e = doc.createElement('span'); flow(n, e); parent.appendChild(e); return; }
   const e = open(n, tag);
   if (tag === 'table') table(n, e);
   else if (!info.void) flow(n, e);
@@ -124,9 +127,12 @@ function table(n: El, e: HTMLElement): void {
   }
 }
 
-/** the children of `b` as a fragment */
-export function build(b: Body): DocumentFragment {
-  const f = document.createDocumentFragment();
+/** the children of `b` as a fragment, of `into` (the page's document by default) */
+export function build(b: Body, into: Document = document): DocumentFragment {
+  doc = into;
+  protos = protosOf.get(into) ?? new WeakMap();
+  protosOf.set(into, protos);
+  const f = into.createDocumentFragment();
   try { flow(b, f); } finally { byText = new Map(); }
   return f;
 }
