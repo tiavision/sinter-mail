@@ -127,7 +127,7 @@ first email, and take allocations and passes out of all of it.
   an email that has one (they were searched for in every child list, three levels deep), in-email link targets
   collected only when a `#` link exists, nodes frozen as they are made.
 - **The builder** goes through the attributes an element has, not the dozen its tag may have, and sets a lone
-  text with one call.
+  text with one call: 3 to 13% of its script (0.1 to 0.5 ms; it was at its floor, see below).
 - **sinter**: `<mail-warm>` warned SN543 ("filled at mount") on every page that used it; a component whose root
   is `hidden` no longer does.
 
