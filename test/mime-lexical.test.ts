@@ -405,12 +405,13 @@ describe('addresses', () => {
     expect(ad('John Q. Public <jqp@x>')[0]).toEqual([{ name: 'John Q. Public', address: 'jqp@x' }]);
   });
 
-  test('obsolete forms: comments anywhere, CFWS around dots, routes, obs-list, ; separators', () => {
+  test('obsolete forms: comments anywhere, CFWS around dots, routes, obs-list', () => {
     expect(one('john (the man) . doe @ (c) example . com (John Doe)')).toEqual({ name: 'the man', address: 'john.doe@example.com' });
     expect(one('a@b (Alice)')).toEqual({ name: 'Alice', address: 'a@b' });
     expect(one('Joe <@a.example,@b.example:joe@c.example>')).toEqual({ name: 'Joe', address: 'joe@c.example', suspicious: true });
     expect(ad(', ,a@b,,c@d,')[0].map((a) => a.address)).toEqual(['a@b', 'c@d']);
-    expect(ad('a@b; c@d')[0].map((a) => a.address)).toEqual(['a@b', 'c@d']);
+    // a `;` with no group open: the mailboxes on both sides are null (CVE-2023-27043)
+    expect(ad('a@b; c@d')).toEqual([[{ name: null, address: null }, { name: null, address: null }], ['address-ambiguous']]);
     expect(one('"a"."b"@c')).toEqual({ name: null, address: 'a.b@c' });
     expect(one('a..b@docomo.ne.jp')).toEqual({ name: null, address: 'a..b@docomo.ne.jp' });
   });
@@ -437,8 +438,8 @@ describe('addresses', () => {
     const [r, p] = ad('=?utf-8?q?ceo=40bank=2Eexample_=3Cceo=40bank=2Eexample=3E=2C_x?= <attacker@evil.example>');
     expect(r).toEqual([{ name: 'ceo@bank.example <ceo@bank.example>, x', address: 'attacker@evil.example', suspicious: true }]);
     expect(p).toEqual([]);
-    // a `.` in an unquoted Q word splits the atom when tokenizing: not a whole word, so literal
-    expect(one('=?utf-8?q?a.b?= <x@y>').name).toBe('=?utf-8?q?a.b?=');
+    // a `.` in an unquoted Q word splits it when tokenizing; glued atoms and dots are one word again
+    expect(one('=?utf-8?q?a.b?= <x@y>').name).toBe('a.b');
     expect(one('"=?utf-8?q?ceo=40bank.example?=" <x@y>')).toEqual({ name: 'ceo@bank.example', address: 'x@y', suspicious: true });
     expect(one('"=?utf-8?q?=22a=40b=22_=3C?=" <x@y>')).toEqual({ name: '"a@b" <', address: 'x@y', suspicious: true });
   });
@@ -510,7 +511,7 @@ describe('addresses', () => {
     for (const s of nulls) {
       const [r, p] = ad(s);
       expect(r.length, s).toBeGreaterThan(0);
-      expect(r.every((a) => a.address === null) || r.some((a) => a.address === null), s).toBe(true);
+      expect(r.map((a) => a.address), s).toEqual([null]);
       expect(p, s).toContain('address-ambiguous');
     }
     // the domain is never truncated (postal-mime before 4.2.1)
@@ -781,8 +782,10 @@ describe('the second round of rules', () => {
     expect(withProblems((s) => contentType('Text/HTML (c); charset=x', s))).toEqual([{ value: 'text/html', params: [['charset', 'x']], encoded: [], conflicts: [] }, []]);
   });
 
-  test('Content-Transfer-Encoding: the token, case-insensitive, CFWS removed; quoted or trailing text is null', () => {
-    expect(transferEncoding(' (c) Base64 (d) ', () => {})).toBe('base64');
+  test('Content-Transfer-Encoding: the ASCII token, case-insensitive, whitespace removed; a comment, quotes or trailing text is null', () => {
+    expect(transferEncoding(' Base64\t', () => {})).toBe('base64');
+    for (const v of [' (c) Base64 (d) ', 'base64 (c)', '(c)base64', 'base64;', 'basé64', 'base64\u00a0'])
+      expect(transferEncoding(v, () => {}), v).toBe(null);
     expect(transferEncoding('Quoted-Printable', () => {})).toBe('quoted-printable');
     expect(transferEncoding('"base64"', () => {})).toBe(null);
     expect(transferEncoding('base64 x', () => {})).toBe(null);
@@ -892,6 +895,184 @@ describe('the second round of rules', () => {
     // U+0140 is not `@`, U+273C is not `<`, U+2740 is not `@`
     expect(addresses('aŀb', () => {})[0]!.address).toBe(null);
     expect(addresses('✼a@b✾', () => {})[0]).toEqual({ name: null, address: '✼a@b✾' });
+  });
+});
+
+describe('the security review', () => {
+  const ad = (s: string) => withProblems((sink) => addresses(s, sink));
+  const pf = (s: string) => withProblems((sink) => { const f = parameterField(s, sink); return { value: f.value, params: f.params }; });
+
+  test('never throws: 600 kB phrases of encoded words or blank quoted strings, in display and group names', () => {
+    const [r1] = ad('"' + '=?a?q??= '.repeat(62_798) + '" <a@b.com>');
+    expect(r1[0]!.address).toBe('a@b.com');
+    const [r2] = ad('=?utf-8?q?a?= ' + '"" '.repeat(150_000) + '<a@b.com>');
+    expect(r2).toEqual([{ name: 'a', address: 'a@b.com' }]);
+    const [r3] = ad('=?utf-8?q?a?= ' + '"" '.repeat(150_000) + ':;');
+    expect(r3).toEqual([{ name: null, address: null, group: 'a' }]);
+    const [r4] = ad('"' + '=?a?q??= '.repeat(62_798) + '": b@c.com;');
+    expect(r4[0]!.address).toBe('b@c.com');
+    expect(() => addresses('=?utf-8?q?a?=' + '""'.repeat(200_000) + '<a@b.com>', () => {})).not.toThrow();
+    expect(() => unstructured('=?utf-8?q?a?= ' + ' '.repeat(1_000_000) + 'x', () => {})).not.toThrow();
+  });
+
+  test('CVE-2023-27043: an invalid group phrase nulls its members; a stray ; nulls both sides', () => {
+    expect(ad('alice@example.org:<bob@example.org>')).toEqual([[
+      { name: 'alice@example.org', address: null, suspicious: true },
+      { name: null, address: null, group: 'alice@example.org', suspicious: true }], ['address-ambiguous']]);
+    expect(ad('alice@example.org;<bob@example.org>')).toEqual([[{ name: null, address: null }, { name: null, address: null }], ['address-ambiguous']]);
+    // the members up to the `;` only
+    expect(ad('a@b: c@d, e@f; g@h')[0].map((a) => a.address)).toEqual([null, null, null, 'g@h']);
+    // a group's own `;` is not stray; a second one is
+    expect(ad('T: a@b; c@d')[0].map((a) => a.address)).toEqual(['a@b', 'c@d']);
+    expect(ad('T: a@b;; c@d')[0].map((a) => a.address)).toEqual(['a@b', null]);
+    expect(ad('a@b, c@d; e@f, g@h')[0].map((a) => a.address)).toEqual(['a@b', null, null, 'g@h']);
+  });
+
+  test('group names are suspicious by the display-name rule', () => {
+    expect(ad('"ceo@corp.example": attacker@evil.example;')[0]).toEqual([
+      { name: null, address: 'attacker@evil.example', group: 'ceo@corp.example', suspicious: true }]);
+    expect(ad('=?utf-8?q?ceo=40corp.example?=: attacker@evil.example;')[0][0]!.suspicious).toBe(true);
+    expect(ad('"\uff1cceo": ;')[0]).toEqual([{ name: null, address: null, group: '\uff1cceo', suspicious: true }]);
+    expect(ad('"a@b.example": a@b.example;')[0]).toEqual([{ name: null, address: 'a@b.example', group: 'a@b.example' }]);
+    expect(ad('Team: a@b;')[0][0]!.suspicious).toBeUndefined();
+  });
+
+  test('structural parameters that are not a clean token or quoted string: parameter-malformed, read as before', () => {
+    const cases: [string, [string, string][]][] = [
+      ['multipart/mixed; boundary=foo bar', [['boundary', 'foo bar']]],
+      ['multipart/mixed; boundary=foo(c)bar', [['boundary', 'foobar']]],
+      ['multipart/mixed; boundary=(c)foo', [['boundary', 'foo']]],
+      ['multipart/mixed; boundary="a"b; x=1', [['boundary', 'a'], ['x', '1']]],
+      ['multipart/mixed; boundary="a" (c)', [['boundary', 'a']]],
+      ['multipart/mixed; boundary="abc; charset=x', [['boundary', 'abc; charset=x']]],
+      ['multipart/mixed; boundary=a"b;c"', [['boundary', 'a"b']]],
+      ['multipart/signed; micalg=pgp-sha256 x; protocol="application/pgp-signature"', [['micalg', 'pgp-sha256 x'], ['protocol', 'application/pgp-signature']]],
+      ['text/plain; charset=utf-8é', [['charset', 'utf-8é']]],
+      // `=` is a tspecial: no token unquoted
+      ['multipart/mixed; boundary=----=_Part_1', [['boundary', '----=_Part_1']]],
+      ['multipart/mixed; (a comment) boundary=x', [['boundary', 'x']]],
+      ['multipart/related; start=<a@b> x; type=text/html', [['start', '<a@b> x'], ['type', 'text/html']]],
+      // a comment hides a parameter from a parser that skips none
+      ['multipart/mixed; (boundary=a;) boundary=b', [['boundary', 'b']]],
+      ['multipart/mixed; x=(; boundary=a) y; boundary=b', [['x', 'y'], ['boundary', 'b']]],
+    ];
+    for (const [v, params] of cases) expect(pf(v), v).toEqual([{ value: v.slice(0, v.indexOf(';')), params }, ['parameter-malformed']]);
+    // clean ones, and the lenient names
+    for (const v of ['multipart/mixed; boundary="a b"', 'multipart/mixed; boundary=simple_boundary-1.x', 'multipart/mixed; boundary = x',
+      'attachment; filename=my file.txt', 'attachment; filename=a (c).txt',
+      // RFC 2045's own example: a comment beside a clean charset
+      'text/plain; charset = us-ascii (Plain text)'])
+      expect(pf(v)[1], v).toEqual([]);
+  });
+
+  test('type/subtype: a comment inside or a non-ASCII character is content-type-invalid', () => {
+    for (const v of ['text/(c)html', 'text(c)/html', 'text/ (c) html', 'téxt/html; charset=x', 'text/htéml'])
+      expect(withProblems((s) => contentType(v, s))[1], v).toEqual(['content-type-invalid']);
+    expect(withProblems((s) => contentType('(c) text / html (c); charset=x', s))).toEqual([{ value: 'text/html', params: [['charset', 'x']], encoded: [], conflicts: [] }, []]);
+  });
+
+  test('RFC 2231: forms of a structural name are parameter-malformed; repeated sections duplicate-parameter when watched', () => {
+    expect(pf("multipart/mixed; boundary*=utf-8''a%62")).toEqual([{ value: 'multipart/mixed', params: [['boundary*', 'ab']] }, ['parameter-malformed']]);
+    expect(pf('multipart/mixed; boundary*0=a; boundary*1=b')).toEqual([{ value: 'multipart/mixed', params: [['boundary*', 'ab']] }, ['parameter-malformed']]);
+    expect(pf('multipart/mixed; boundary*0=a; boundary*0=b')).toEqual([{ value: 'multipart/mixed', params: [['boundary*', 'a']] }, ['parameter-malformed', 'duplicate-parameter']]);
+    expect(pf('text/plain; charset*=utf-8')[1]).toEqual(['parameter-malformed']);
+    expect(pf('a; filename*0=a; filename*0=x; filename*1=b')).toEqual([{ value: 'a', params: [['filename*', 'ab']] }, ['duplicate-parameter']]);
+    expect(pf('a; name*1=b; name*0=a')).toEqual([{ value: 'a', params: [['name*', 'ab']] }, ['rfc2231-segments']]);
+    // a leading zero is no section 0: dropped, a malformed segment
+    expect(pf('a/b; filename*00=a; filename*1=b')).toEqual([{ value: 'a/b', params: [['filename*', 'b']] }, ['rfc2231-segments']]);
+    expect(pf('a/b; filename*0=a; filename*01=b')).toEqual([{ value: 'a/b', params: [['filename*', 'a']] }, ['rfc2231-segments']]);
+  });
+
+  test('a control, C1, bidi, Unicode space or format character, or a lone surrogate in the local part: null', () => {
+    for (const lp of ['a\u0000b', 'a\u0001b', 'a\u007fb', 'a\u0085b', 'a\u202egro.elpmaxe', 'ceo\u200b', 'a\u00a0b', 'a\u2000b', 'a\u2028b',
+      'a\u2029b', '\ufeffa', 'a\u00adb', 'a\ud800b', 'a\udc00b', '"a\u00a0b"', '"a\u202eb"'])
+      expect(ad(`${lp}@example.com`), lp).toEqual([[{ name: null, address: null }], ['address-ambiguous']]);
+    // the fixture: one From, each local part unreadable, the rest of the list kept
+    const [r] = ad('a\u0000b@example.com, x\u0001@example.com, y\u007f@example.com, Z <z\u202e@example.com>, ceo\u200b@example.com, ok@example.com');
+    expect(r.map((a) => a.address)).toEqual([null, null, null, null, null, 'ok@example.com']);
+    // what stays: non-ASCII letters, an astral character, an ASCII space inside quotes
+    expect(ad('jörg\u{1f600}@example.com')[0][0]!.address).toBe('jörg\u{1f600}@example.com');
+    expect(ad('"a b"@example.com')[0][0]!.address).toBe('"a b"@example.com');
+  });
+
+  test('A-labels: every xn-- label of URL\'s output is checked, and a U-label must round-trip', () => {
+    for (const a of ['a@\uff58n--example-.com', 'a@xn--example-.com', 'a@\uff58n--bcher-kva.de', 'a@bü\u00adcher.de', 'a@\uff42\u00fccher.example'])
+      expect(ad(a)[0][0]!.address, a).toBe(null);
+    expect(ad('a@BÜCHER.example')[0][0]!.address).toBe('a@BÜCHER.example');
+    // NFC first: U+212B (ANGSTROM SIGN) is U+00C5
+    expect(ad('a@\u212bngstr\u00f6m.example')[0][0]!.address).toBe('a@\u212bngstr\u00f6m.example');
+    expect(ad('a@bu\u0308cher.example')[0][0]!.address).toBe('a@bu\u0308cher.example');
+    expect(sameAddress('a@bu\u0308cher.example', 'a@xn--bcher-kva.example')).toBe(true);
+    expect(addressKey('a@\uff58n--example-.com')).toBe(null);
+  });
+
+  test('encoded words with a dot in unquoted names and group names; glued ones stay literal', () => {
+    expect(ad('=?utf-8?Q?J._M=C3=BCller?= <a@example.com>')).toEqual([[{ name: 'J. Müller', address: 'a@example.com' }], []]);
+    expect(ad('"=?utf-8?Q?J._M=C3=BCller?=" <a@example.com>')[0][0]!.name).toBe('J. Müller');
+    expect(ad('=?utf-8?Q?J._M=C3=BCller?=: a@example.com;')[0]).toEqual([{ name: null, address: 'a@example.com', group: 'J. Müller' }]);
+    expect(ad('John Q. Public <a@b>')[0][0]!.name).toBe('John Q. Public');
+    expect(ad('=?utf-8?q?a?=.=?utf-8?q?b?= <a@b>')[0][0]!.name).toBe('=?utf-8?q?a?=.=?utf-8?q?b?=');
+    expect(ad('x.=?utf-8?q?a?= <a@b>')[0][0]!.name).toBe('x.=?utf-8?q?a?=');
+  });
+
+  test('quoted strings: whole words inside are decoded, a word glued inside stays literal', () => {
+    expect(ad('"a =?utf-8?q?b?= c" <x@y>')[0][0]!.name).toBe('a b c');
+    expect(ad('"=?utf-8?q?a?=b" <x@y>')[0][0]!.name).toBe('=?utf-8?q?a?=b');
+    expect(ad('"x=?utf-8?q?a?=" <x@y>')[0][0]!.name).toBe('x=?utf-8?q?a?=');
+    expect(ad('"collab=?x?b?QA==?=psres.net" <x@y>')[0][0]!.name).toBe('collab=?x?b?QA==?=psres.net');
+  });
+
+  test('filenames: trailing dots and spaces trimmed after a cut; CONIN$, CONOUT$ reserved; <>|?*" made _', () => {
+    expect(safeName('a'.repeat(254) + '. ' + 'b'.repeat(40))).toBe('a'.repeat(254));
+    expect(safeName('a'.repeat(250) + ' '.repeat(10) + 'b'.repeat(40))).toBe('a'.repeat(250));
+    expect(safeName('con' + ' '.repeat(300) + 'x')).toBe('_con');
+    for (const n of ['CONIN$', 'conout$.txt', 'CONIN$ .log']) expect(safeName(n), n).toBe('_' + n);
+    expect(safeName('CONIN$x')).toBe('CONIN$x');
+    expect(safeName('a<b>c|d?e*f"g.txt')).toBe('a_b_c_d_e_f_g.txt');
+    const longReserved = safeName('con.' + 'x'.repeat(300));
+    expect(longReserved.length).toBeLessThanOrEqual(255);
+    expect(longReserved.startsWith('_con.')).toBe(true);
+  });
+
+  test('dates: after the zone only comments and whitespace', () => {
+    for (const d of ['1 Jan 2026 00:00:00 GMT+0100', '1 Jan 2026 00:00:00 +0100 garbage 99', '1 Jan 2026 00:00 +0100 +0200', '1 Jan 2026 00:00 EST5EDT',
+      '1 Jan 2026 00:00 CEST x', '1 Jan 2026 00:00 +0100.'])
+      expect(parseDate(d), d).toBe(null);
+    expect(parseDate('1 Jan 2026 00:00:00 +0100 (CET) ')).toBe('2026-01-01T00:00:00+01:00');
+    expect(parseDate('1 Jan 2026 00:00:00 CEST (x)')).toBe('2026-01-01T00:00:00-00:00');
+  });
+
+  test('AVIF: compatible brands looked for in the first 4 kB only', () => {
+    const box = (at: number) => { const b = new Uint8Array(at + 8); b.set([0, 0, (b.length >> 8) & 255, b.length & 255]); b.set(enc('ftypmif1'), 4); b.set(enc('avif'), at); return b; };
+    expect(imageType(box(4088))).toBe('avif');
+    expect(imageType(box(4096))).toBe(null);
+  });
+
+  test('header blocks: a leading BOM stays in the raw value; an mbox From line first in the root is skipped silently', () => {
+    const bytes = latin('A: \xef\xbb\xbfx\r\nB: \xef\xbb\xbf\r\n\r\n');
+    const [block, p] = withProblems((s) => readHeaders(bytes, 0, bytes.length, false, s));
+    expect(block.fields.map((f) => f.value)).toEqual(['\ufeffx', '\ufeff']);
+    expect(p).toEqual([]);
+    expect(clean('\ufeffx')).toBe('x');
+    const mbox = latin('From x@y Mon Nov 24 09:30:00 2026\nA: b\n\n');
+    const [root, q] = withProblems((s) => readHeaders(mbox, 0, mbox.length, true, s));
+    expect(root.fields.map((f) => [f.name, f.value])).toEqual([['a', 'b']]);
+    expect(q).toEqual([]);
+    // not the root, or not first, or `From :`: as before
+    expect(withProblems((s) => readHeaders(mbox, 0, mbox.length, false, s))[1]).toEqual(['header-malformed']);
+    const later = latin('A: b\nFrom x@y\n\n');
+    expect(withProblems((s) => readHeaders(later, 0, later.length, true, s))[1]).toEqual(['header-malformed']);
+    const field = latin('From : a@b\n\n');
+    expect(withProblems((s) => readHeaders(field, 0, field.length, true, s))[0].fields.map((f) => f.name)).toEqual(['from']);
+  });
+
+  test('base64: junk after padding is not mid-stream padding; base64 after it is', () => {
+    const r = (s: string) => { const [x, p] = withProblems((sink) => base64Result(latin(s), 0, s.length, sink)); return [str(x.bytes), x.midPadding, p]; };
+    expect(r('QQ==!')).toEqual(['A', false, ['base64-junk']]);
+    expect(r('QQ==\r\n-- \r\n')).toEqual(['A', false, ['base64-junk']]);
+    expect(r('QQ==QUJD')).toEqual(['AABC', true, ['base64-junk']]);
+    expect(r('QQ==!QUJD')).toEqual(['AABC', true, ['base64-junk']]);
+    expect(r('QQ==\r\n')).toEqual(['A', false, []]);
   });
 });
 

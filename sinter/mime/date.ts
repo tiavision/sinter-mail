@@ -58,7 +58,8 @@ const pad = (n: number, w = 2) => String(n).padStart(w, '0');
  * 20xx) and three-digit ones (+1900), missing seconds, one-digit hours, a `+hh:mm` zone, and the obsolete zone
  * names (UT, GMT, EST to PDT); military letters but Z, unknown names, a missing zone and `-0000` itself are -0000, an
  * unknown offset (RFC 5322 3.3 and 4.3), written `-00:00` as RFC 3339 writes it.
- * Refused: a day the month does not have (leap years counted), a year before 1900, a time or offset out of range.
+ * Refused: a day the month does not have (leap years counted), a year before 1900, a time or offset out of range,
+ * anything but comments and whitespace after the zone (`GMT+0100`, `+0100 garbage`).
  */
 export function parseDate(raw: string): string | null {
   const t = tokens(raw);
@@ -108,7 +109,13 @@ export function parseDate(raw: string): string | null {
     if (hh > 23 || mm > 59) return null;
     offset = (z.v === '-' ? -1 : 1) * (hh * 60 + mm);
     unknown = offset === 0 && z.v === '-';
-  } else if (z && z.k === 'word' && ZONES.has(z.v)) { offset = ZONES.get(z.v)!; unknown = false; }
+  } else if (z && z.k === 'word') {
+    // a known name, or a military letter or unknown name: -0000
+    i++;
+    if (ZONES.has(z.v)) { offset = ZONES.get(z.v)!; unknown = false; }
+  }
+  // after the zone, only comments and whitespace (dropped by `tokens`)
+  if (i < t.length) return null;
   const length = m === 1 && leap(year) ? 29 : LENGTHS[m]!;
   if (day < 1 || day > length || hour > 23 || minute > 59 || second > 60) return null;
   const a = Math.abs(offset);

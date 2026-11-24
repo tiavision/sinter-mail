@@ -25,7 +25,7 @@ export interface RawField {
   /** the field name, ASCII-lowercased */
   name: string;
   /** the value unfolded (line ends before whitespace removed), leading and trailing whitespace trimmed; bytes read
-   * as UTF-8 (RFC 6532), windows-1252 when invalid; not decoded otherwise, controls kept */
+   * as UTF-8 (RFC 6532), windows-1252 when invalid; not decoded otherwise, controls and a leading U+FEFF kept */
   value: string;
   /** offset of the field's first byte */
   start: number;
@@ -54,7 +54,7 @@ const isWsp = (c: number) => c === 0x20 || c === 0x09;
  * name that is not printable ASCII, is skipped; whitespace before the colon is accepted, the name trimmed; a
  * continuation with no field before it is dropped; a line of only whitespace continues the field (obs-FWS) and
  * does not end the block. A control character in a field name (the line skipped) or in MIME-Version's value is
- * `control-in-structure`.
+ * `control-in-structure`. With `root`, an mbox `From ` line first in the range is skipped, and reports nothing.
  */
 export function readHeaders(src: Uint8Array, start: number, end: number, root: boolean, sink: Sink): HeaderBlock {
   const limit = root ? ROOT_HEADER_BYTES : PART_HEADER_BYTES;
@@ -74,12 +74,20 @@ export function readHeaders(src: Uint8Array, start: number, end: number, root: b
     let s = 0, e = bytes.length;
     while (s < e && isWsp(bytes[s]!)) s++;
     while (e > s && isWsp(bytes[e - 1]!)) e--;
-    const value = decodeText(bytes.subarray(s, e), null, report);
+    let value = decodeText(bytes.subarray(s, e), null, report);
+    // TextDecoder drops a leading BOM; the raw value keeps it (unless the bytes fell back to windows-1252)
+    if (e - s >= 3 && bytes[s] === 0xef && bytes[s + 1] === 0xbb && bytes[s + 2] === 0xbf && !value.startsWith('\u00ef\u00bb\u00bf')) value = '\ufeff' + value;
     if (cur.name === 'mime-version' && hasControl(value)) report('control-in-structure');
     fields.push({ name: cur.name, value, start: cur.start, end: cur.end });
     cur = null;
   };
-  for (let pos = start; pos < end; first = false) {
+  let pos = start;
+  if (root && mboxLine(src, start, end)) {
+    // an mbox `From ` line first in the input: not a field, skipped silently
+    while (pos < end && src[pos] !== 0x0a) pos++;
+    if (pos < end) pos++;
+  }
+  for (; pos < end; first = false) {
     let lf = pos;
     while (lf < end && src[lf] !== 0x0a) lf++;
     const content = lf < end && lf > pos && src[lf - 1] === 0x0d ? lf - 1 : lf;
@@ -122,13 +130,21 @@ export function readHeaders(src: Uint8Array, start: number, end: number, root: b
   return { fields, ended: false, bodyStart: end };
 }
 
-/** NUL, C0 controls but tab, CR, LF, DEL and the bidirectional controls */
-const CONTROLS = /[\u0000-\u0008\u000a-\u001f\u007f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g;
+/** whether `src[start, end)` starts with an mbox separator line: `From ` and no colon right after the name */
+function mboxLine(src: Uint8Array, start: number, end: number): boolean {
+  if (end - start < 5 || src[start] !== 0x46 || src[start + 1] !== 0x72 || src[start + 2] !== 0x6f || src[start + 3] !== 0x6d || src[start + 4] !== 0x20) return false;
+  let i = start + 5;
+  while (i < end && isWsp(src[i]!)) i++;
+  return i >= end || src[i] !== 0x3a;
+}
+
+/** NUL, C0 controls but tab, CR, LF, DEL, the bidirectional controls and U+FEFF */
+const CONTROLS = /[\u0000-\u0008\u000a-\u001f\u007f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]+/g;
 
 /**
- * A decoded value made safe to show and to reuse in a header: NUL, C0 controls, CR, LF, DEL and every
- * bidirectional control (U+200E, U+200F, U+061C, U+202A to U+202E, U+2066 to U+2069) removed, and a tab made a
- * space (folding leaves tabs between words).
+ * A decoded value made safe to show and to reuse in a header: NUL, C0 controls, CR, LF, DEL, every
+ * bidirectional control (U+200E, U+200F, U+061C, U+202A to U+202E, U+2066 to U+2069) and U+FEFF removed, and a
+ * tab made a space (folding leaves tabs between words).
  */
 export function clean(s: string): string {
   return s.replace(CONTROLS, '').replace(/\t/g, ' ');
@@ -252,7 +268,8 @@ export function joinPieces(pieces: readonly Piece[], sink: Sink, budget: WordBud
     out.push(decodeText(all, charset, sink));
     charset = null; chunks = [];
   };
-  const literal = (s: string) => { flush(); out.push(...gap, s); gap = []; prevWord = false; };
+  const pushGap = () => { for (let k = 0; k < gap.length; k++) out.push(gap[k]!); gap = []; };
+  const literal = (s: string) => { flush(); pushGap(); out.push(s); prevWord = false; };
   // charsets looked up here: a hostile text repeats a label many times
   const known = new Map<string, boolean>();
   for (const p of pieces) {
@@ -273,7 +290,7 @@ export function joinPieces(pieces: readonly Piece[], sink: Sink, budget: WordBud
     prevWord = true;
   }
   flush();
-  if (!dropped) out.push(...gap);
+  if (!dropped) pushGap();
   return clean(out.join(''));
 }
 
@@ -306,10 +323,18 @@ export interface ParameterField {
 /** parameters whose repetition is a blocking problem (section 2, `duplicate-parameter`) */
 const WATCHED = new Set(['boundary', 'charset', 'protocol', 'filename', 'name', 'start', 'type', 'micalg']);
 
-/** RFC 2045's tspecials, controls and space end a token */
+/** parameters a strict parser reads differently when they are not a clean token or quoted string, or are sent
+ * in an RFC 2231 form (`parameter-malformed`) */
+const STRICT = new Set(['boundary', 'protocol', 'micalg', 'start', 'type', 'charset']);
+
+/** RFC 2045's token characters: printable ASCII but space and tspecials (never non-ASCII) */
 const tokenChar = (c: number) => c > 0x20 && c < 0x7f && !(c === 0x28 || c === 0x29 || c === 0x3c || c === 0x3e || c === 0x40
-  || c === 0x2c || c === 0x3b || c === 0x3a || c === 0x5c || c === 0x22 || c === 0x2f || c === 0x5b || c === 0x5d || c === 0x3f || c === 0x3d)
-  || c >= 0x80;
+  || c === 0x2c || c === 0x3b || c === 0x3a || c === 0x5c || c === 0x22 || c === 0x2f || c === 0x5b || c === 0x5d || c === 0x3f || c === 0x3d);
+
+const isToken = (s: string) => { if (!s) return false; for (let i = 0; i < s.length; i++) if (!tokenChar(s.charCodeAt(i))) return false; return true; };
+
+/** a comment's text that holds `name=` at its start or after a `;`: a parameter to a parser that skips no comments */
+const HIDDEN_PARAM = /(?:^|;)[ \t\r\n]*[^ \t\r\n;=()"]+[ \t\r\n]*=/;
 
 /** NUL and the C0 controls but tab, and DEL */
 const STRUCTURE_CONTROL = /[\u0000-\u0008\u000a-\u001f\u007f]/;
@@ -326,6 +351,12 @@ export function hasControl(raw: string): boolean {
 /** a scanner over one field's value: whitespace, comments (nesting counted, not recursed), quoted strings */
 class Scan {
   i = 0;
+  /** comments read so far */
+  comments = 0;
+  /** whether a comment read so far hides a parameter (`HIDDEN_PARAM`) */
+  hiding = false;
+  /** whether the last quoted string read was closed */
+  closed = true;
   constructor(readonly s: string) {}
   get done() { return this.i >= this.s.length; }
   at(): number { return this.s.charCodeAt(this.i); }
@@ -341,14 +372,17 @@ class Scan {
   }
   /** a comment, at `(`; an unterminated one runs to the end */
   comment(): void {
-    const s = this.s;
+    const s = this.s, from = this.i + 1;
     let depth = 0;
+    this.comments++;
     for (; this.i < s.length; this.i++) {
       const c = s.charCodeAt(this.i);
       if (c === 0x5c) this.i++;
       else if (c === 0x28) depth++;
-      else if (c === 0x29 && --depth === 0) { this.i++; return; }
+      else if (c === 0x29 && --depth === 0) break;
     }
+    if (!this.hiding && HIDDEN_PARAM.test(s.slice(from, Math.min(this.i, s.length)))) this.hiding = true;
+    if (this.i < s.length) this.i++;
   }
   /** a quoted string's content, unescaped, at `"`; an unterminated one runs to the end */
   quoted(): string {
@@ -357,9 +391,10 @@ class Scan {
     for (; this.i < s.length; this.i++) {
       const c = s.charCodeAt(this.i);
       if (c === 0x5c && this.i + 1 < s.length) { parts.push(s.slice(from, this.i)); from = ++this.i; }
-      else if (c === 0x22) { parts.push(s.slice(from, this.i)); this.i++; return parts.join(''); }
+      else if (c === 0x22) { parts.push(s.slice(from, this.i)); this.i++; this.closed = true; return parts.join(''); }
     }
     parts.push(s.slice(from));
+    this.closed = false;
     return parts.join('');
   }
   token(): string {
@@ -379,7 +414,13 @@ class Scan {
   }
 }
 
-interface RawParam { name: string; spelled: string; value: string; quoted: boolean }
+/** `clean`: the value is one token, or one closed quoted string with only whitespace after it, and no comment is
+ * between the `;` before the parameter and the one after it */
+interface RawParam {
+  name: string; spelled: string; value: string; quoted: boolean; clean: boolean;
+  /** an unquoted token, clean but for comments around it (RFC 2045's own example: `charset=us-ascii (Plain text)`) */
+  cleanButComments: boolean;
+}
 
 /** the field's parameters as sent: names lowercased, values unquoted or read leniently to the next `;` */
 function rawParams(sc: Scan): RawParam[] {
@@ -389,6 +430,7 @@ function rawParams(sc: Scan): RawParam[] {
     sc.skipToSemicolon();
     if (sc.done) break;
     sc.i++;
+    const comments = sc.comments;
     sc.cfws();
     const from = sc.i;
     while (sc.i < s.length) {
@@ -401,7 +443,13 @@ function rawParams(sc: Scan): RawParam[] {
     if (!name || sc.at() !== 0x3d) continue;
     sc.i++;
     sc.cfws();
-    if (sc.at() === 0x22) { out.push({ name, spelled, value: sc.quoted(), quoted: true }); continue; }
+    if (sc.at() === 0x22) {
+      const value = sc.quoted(), closed = sc.closed, after = sc.i;
+      sc.skipToSemicolon();
+      out.push({ name, spelled, value, quoted: true, clean: closed && blankText(s.slice(after, sc.i)) && sc.comments === comments,
+        cleanButComments: false });
+      continue;
+    }
     // unquoted: a token by the standard; leniently, words up to `;`, a comment between them dropped
     const parts: string[] = [];
     while (sc.i < s.length) {
@@ -418,7 +466,8 @@ function rawParams(sc: Scan): RawParam[] {
       if (sc.at() === 0x28) { sc.comment(); continue; }
       if (parts.length) parts.push(s.slice(ws, sc.i));
     }
-    out.push({ name, spelled, value: parts.join(''), quoted: false });
+    out.push({ name, spelled, value: parts.join(''), quoted: false, clean: parts.length === 1 && isToken(parts[0]!) && sc.comments === comments,
+      cleanButComments: parts.length === 1 && isToken(parts[0]!) });
   }
   return out;
 }
@@ -441,16 +490,20 @@ function percentBytes(s: string): Uint8Array {
 
 interface Segment { section: number; extended: boolean; value: string }
 
-/** RFC 2231's segments, ordered, joined and decoded; out of order, repeated or missing: `rfc2231-segments` */
-function joinSegments(segs: Segment[], sink: Sink): string {
-  let bad = false;
-  for (let k = 1; k < segs.length; k++) if (segs[k]!.section <= segs[k - 1]!.section) bad = true;
+/**
+ * RFC 2231's segments, ordered, joined and decoded; out of order or missing: `rfc2231-segments`; a section
+ * repeated (the first counts): `duplicate-parameter` when the name is `watched`, else `rfc2231-segments`
+ */
+function joinSegments(segs: Segment[], watched: boolean, sink: Sink): string {
+  let bad = false, repeated = false;
+  for (let k = 1; k < segs.length; k++) if (segs[k]!.section < segs[k - 1]!.section) bad = true;
   const sorted = segs.map((s, k) => [s, k] as const).sort((a, b) => a[0].section - b[0].section || a[1] - b[1]).map((x) => x[0]);
   const kept: Segment[] = [];
   for (const s of sorted) {
-    if (kept.length && kept[kept.length - 1]!.section === s.section) { bad = true; continue; }
+    if (kept.length && kept[kept.length - 1]!.section === s.section) { repeated = true; continue; }
     kept.push(s);
   }
+  if (repeated) { if (watched) sink('duplicate-parameter'); else bad = true; }
   if (kept[0]!.section !== 0 || kept[kept.length - 1]!.section !== kept.length - 1) bad = true;
   if (bad) sink('rfc2231-segments');
   // the charset is in the first segment, when it is section 0 and extended: charset'language'value
@@ -475,27 +528,34 @@ function joinSegments(segs: Segment[], sink: Sink): string {
 }
 
 /**
- * A Content-Type or Content-Disposition value: its type (`type/subtype`, CFWS allowed around the `/`) or token,
- * then its parameters, read before anything in them is decoded. RFC 2231's forms (`name*=charset'lang'%XX`,
- * `name*0*=`, `name*1=`) are joined in section order and come out as `name*`. An RFC 2047 word in a value is
- * `encoded-word-in-parameter` and named in `encoded`: decoded in `filename` and `name` (at most 64 each), literal
- * in any other. Decoded values are `clean`ed; others (a boundary) are as sent. A repeated parameter: the first
- * counts (`duplicate-parameter` for boundary, charset, protocol, filename, name, start, type, micalg); forms of
- * one parameter with different values are `parameter-conflict`, named in `conflicts`. A control character in the
- * raw value is `control-in-structure`. The value is '' when it is not a token or `type/subtype` (see
- * `contentType` for Content-Type's default).
+ * A Content-Type or Content-Disposition value: its type (`type/subtype` of ASCII tokens, whitespace allowed around
+ * the `/` but no comment inside) or token, then its parameters, read before anything in them is decoded. RFC
+ * 2231's forms (`name*=charset'lang'%XX`, `name*0*=`, `name*1=`) are joined in section order and come out as
+ * `name*`; a section with a leading zero (`name*00`) is no section and is dropped (`rfc2231-segments`). An RFC
+ * 2047 word in a value is `encoded-word-in-parameter` and named in `encoded`: decoded in `filename` and `name`
+ * (at most 64 each), literal in any other. Decoded values are `clean`ed; others (a boundary) are as sent. A
+ * repeated parameter or RFC 2231 section: the first counts (`duplicate-parameter` for boundary, charset,
+ * protocol, filename, name, start, type, micalg; a repeated section of another name is `rfc2231-segments`); forms
+ * of one parameter with different values are `parameter-conflict`, named in `conflicts`. `parameter-malformed`
+ * (once): a boundary, protocol, micalg, start, type or charset that is not one token or one closed quoted string
+ * (whitespace or a comment in or beside it, text after the closing quote, an unterminated quote), or is sent in an
+ * RFC 2231 form (`boundary*`, `boundary*0`), or a comment that hides a parameter (`; (boundary=a;) boundary=b`);
+ * the lenient reading is kept. A control character in the raw value is `control-in-structure`. The value is ''
+ * when it is not a token or `type/subtype` (see `contentType` for Content-Type's default).
  */
 export function parameterField(raw: string, sink: Sink): ParameterField {
   if (hasControl(raw)) sink('control-in-structure');
   const sc = new Scan(raw);
   sc.cfws();
+  const typeComments = sc.comments;
   let value = sc.token();
   sc.cfws();
   if (sc.at() === 0x2f) {
     sc.i++;
     sc.cfws();
     const sub = sc.token();
-    value = value && sub ? value + '/' + sub : '';
+    // a comment inside `type/subtype` is no type: parsers that skip no comments read another one
+    value = value && sub && sc.comments === typeComments ? value + '/' + sub : '';
   }
   sc.cfws();
   if (!sc.done && sc.at() !== 0x3b) value = '';
@@ -509,11 +569,22 @@ export function parameterField(raw: string, sink: Sink): ParameterField {
   const conflicts = new Set<string>();
   const conflict = (base: string) => { sink('parameter-conflict'); conflicts.add(base); };
   const dup = (base: string) => { if (WATCHED.has(base)) sink('duplicate-parameter'); };
-  for (const p of rawParams(sc)) {
+  let malformedSeen = false, segmentsSeen = false;
+  const segSink: Sink = (c) => { if (c === 'rfc2231-segments') { if (segmentsSeen) return; segmentsSeen = true; } sink(c); };
+  const malformed = () => { if (!malformedSeen) { malformedSeen = true; sink('parameter-malformed'); } };
+  const raws = rawParams(sc);
+  if (sc.hiding) malformed();
+  for (const p of raws) {
+    const first = p.name.indexOf('*');
+    // a structural parameter: a clean token or quoted string, never an RFC 2231 form
+    // (a comment beside a clean charset moves no boundary or signature: RFC 2045's own example has one)
+    if (first >= 0 ? STRICT.has(p.name.slice(0, first)) : STRICT.has(p.name) && !p.clean && !(p.name === 'charset' && p.cleanButComments)) malformed();
     let name = p.name, extended = false, section = -1;
     if (name.endsWith('*')) { extended = true; name = name.slice(0, -1); }
     const star = name.lastIndexOf('*');
     if (star > 0 && star < name.length - 1 && name.length - star <= 4 && /^[0-9]+$/.test(name.slice(star + 1))) {
+      // `name*00`: not section 0 (RFC 2231 has no leading zeros), a malformed segment, dropped
+      if (name.length - star > 2 && name.charCodeAt(star + 1) === 0x30) { segSink('rfc2231-segments'); continue; }
       section = Number(name.slice(star + 1));
       name = name.slice(0, star);
     } else if (extended) section = 0;
@@ -538,7 +609,7 @@ export function parameterField(raw: string, sink: Sink): ParameterField {
   const params: [string, string][] = [], encoded: string[] = [];
   for (const key of order) {
     const e = ext.get(key);
-    if (e) { params.push([key, joinSegments(e.segs, sink)]); continue; }
+    if (e) { params.push([key, joinSegments(e.segs, WATCHED.has(key.slice(0, -1)), segSink)]); continue; }
     const v = plain.get(key)!.value, pieces = wordsIn(v);
     if (pieces.some((x) => typeof x !== 'string')) { sink('encoded-word-in-parameter'); encoded.push(key); }
     params.push([key, key === 'filename' || key === 'name' ? joinPieces(pieces, sink, budget, PHRASE_WORDS) : v]);
@@ -568,17 +639,17 @@ export function contentType(raw: string, sink: Sink): ParameterField {
 }
 
 /**
- * A Content-Transfer-Encoding: its token ASCII-lowercased, comments and whitespace around it removed; null when
- * the value is empty, quoted, or has anything after the token (the caller reports `encoding-unknown`). A control
- * character is `control-in-structure`.
+ * A Content-Transfer-Encoding: its token ASCII-lowercased, whitespace around it removed; null when the value is
+ * empty, quoted, not ASCII, holds a comment, or has anything after the token (the caller reports
+ * `encoding-unknown`): parsers disagree on all of these. A control character is `control-in-structure`.
  */
 export function transferEncoding(raw: string, sink: Sink): string | null {
   if (hasControl(raw)) sink('control-in-structure');
-  const sc = new Scan(raw);
-  sc.cfws();
-  const token = sc.token();
-  sc.cfws();
-  return token && sc.done ? asciiLower(token) : null;
+  let s = 0, e = raw.length;
+  while (s < e && wsAt(raw, s)) s++;
+  while (e > s && wsAt(raw, e - 1)) e--;
+  const token = raw.slice(s, e);
+  return isToken(token) ? asciiLower(token) : null;
 }
 
 /** the value of parameter `name` in `params`, or null */

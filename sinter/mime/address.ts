@@ -90,23 +90,49 @@ function tokenize(s: string): Tok[] {
 const isSpecial = (t: Tok | undefined, v: string) => t !== undefined && t.k === 'special' && t.v === v;
 
 /**
- * A phrase's tokens as pieces to decode: words and dots, a space where the sender had whitespace or a comment. An
- * atom is an encoded word only as a whole (bounded by whitespace, a special or the field's ends:
- * `=?utf8?q?=61=62=63?=<a@b>` has one); in a quoted string, its whitespace-delimited words are (Outlook).
+ * A phrase's tokens as pieces to decode: words and dots, a space where the sender had whitespace or a comment.
+ * Atoms and dots with no whitespace between them are one word again (`=?utf-8?Q?J._M=C3=BCller?=`, which the
+ * tokenizer split at its dot), and that word is an encoded word only as a whole (bounded by whitespace, a special
+ * other than `.` or the field's ends: `=?utf8?q?=61=62=63?=<a@b>` has one); in a quoted string, its
+ * whitespace-delimited words are (Outlook), one glued to other text inside it stays literal. The pieces stop
+ * after the `PHRASE_WORDS + 1`th encoded word: `joinPieces` drops the rest (`field-dropped`) all the same.
  */
 function phrase(toks: readonly Tok[]): { pieces: Piece[]; valid: boolean } {
   const pieces: Piece[] = [];
-  let valid = true;
+  let valid = true, words = 0, started = false, run: string | null = null;
+  const add = (p: Piece) => {
+    if (words > PHRASE_WORDS) return;
+    if (typeof p !== 'string') words++;
+    pieces.push(p);
+  };
+  const flush = () => {
+    if (run === null) return;
+    const ps = atomPieces(run);
+    run = null;
+    for (let k = 0; k < ps.length; k++) add(ps[k]!);
+  };
   for (const t of toks) {
     if (t.k === 'comment') { if (t.bad) valid = false; continue; }
     if (t.bad || t.k === 'literal' || (t.k === 'special' && t.v !== '.')) valid = false;
-    if (pieces.length && t.sp) pieces.push(' ');
-    if (t.k === 'atom' && !t.bad) pieces.push(...atomPieces(t.v));
-    else if (t.k === 'quoted') pieces.push(...wordsIn(t.v));
-    else pieces.push(t.k === 'literal' ? '[' + t.v + ']' : t.v);
+    const joinable = (t.k === 'atom' && !t.bad) || isSpecial(t, '.');
+    if (joinable && run !== null && !t.sp) { run += t.v; continue; }
+    flush();
+    if (started && t.sp) add(' ');
+    started = true;
+    if (joinable) run = t.v;
+    else if (t.k === 'quoted') { const ps = wordsIn(t.v); for (let k = 0; k < ps.length && words <= PHRASE_WORDS; k++) add(ps[k]!); }
+    else add(t.k === 'literal' ? '[' + t.v + ']' : t.v);
   }
+  flush();
   return { pieces, valid };
 }
+
+/**
+ * What a local part cannot hold and be typed back: controls (C0, DEL, C1), format characters (the bidirectional
+ * controls, U+200B, U+FEFF, …), Unicode spaces and line separators (U+00A0, U+2000 to U+200A, U+2028, U+2029,
+ * …), and lone surrogates; an ASCII space only inside quotes.
+ */
+const UNSAFE_LOCAL = /(?! )[\p{Cc}\p{Cf}\p{Z}\ud800-\udfff]/u;
 
 /** atext, dots between: a local part that needs no quotes (non-ASCII allowed, RFC 6532) */
 function dotAtom(s: string): boolean {
@@ -121,9 +147,11 @@ function dotAtom(s: string): boolean {
 
 /**
  * Whether `domain` (dot-separated atoms) is a host name that WHATWG's URL host parser keeps as it is: the same
- * labels, ASCII ones only lowercased, each non-ASCII one an A-label. A `xn--` label that is not valid punycode or
- * does not round-trip, a label URL maps (full-width letters, U+3002 as a dot), a number it reads as IPv4 in
- * another form, or a character it treats as structure (`%`, `/`, `#`) fails.
+ * labels, ASCII ones only lowercased, each non-ASCII one an A-label that decodes back to it (NFC, lowercased).
+ * Every `xn--` label of URL's output must be a valid A-label (`aLabelOk`): URL itself does not check them, so a
+ * full-width `ｘn--example-` would otherwise pass as `xn--example-`. A label URL maps otherwise (full-width
+ * letters, U+3002 as a dot), a number it reads as IPv4 in another form, or a character it treats as structure
+ * (`%`, `/`, `#`) fails.
  */
 function hostOk(domain: string): boolean {
   let host: string;
@@ -134,9 +162,16 @@ function hostOk(domain: string): boolean {
   }
   const a = domain.split('.'), b = host.split('.');
   if (a.length !== b.length) return false;
+  const checked = new Map<string, boolean>();
   for (let k = 0; k < a.length; k++) {
     const l = a[k]!, h = b[k]!;
-    if (/^[\x00-\x7f]*$/.test(l) ? asciiLower(l) !== h : !h.startsWith('xn--')) return false;
+    if (h.startsWith('xn--')) {
+      let ok = checked.get(h);
+      if (ok === undefined) checked.set(h, ok = aLabelOk(h));
+      if (!ok) return false;
+    }
+    if (/^[\x00-\x7f]*$/.test(l)) { if (asciiLower(l) !== h) return false; }
+    else if (!h.startsWith('xn--') || punycode(h.slice(4)) !== l.normalize('NFC').toLowerCase()) return false;
   }
   return true;
 }
@@ -186,7 +221,9 @@ export function punycode(input: string): string | null {
     if (n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) return null;
     out.splice(i++, 0, n);
   }
-  return String.fromCodePoint(...out);
+  let r = '';
+  for (let k = 0; k < out.length; k++) r += String.fromCodePoint(out[k]!);
+  return r;
 }
 
 /**
@@ -223,8 +260,8 @@ function addrSpec(toks: readonly Tok[], flags: { suspicious: boolean }): string 
     if (t.k === 'special') { local.push('.'); word = false; continue; }
     if (word || t.k === 'literal') return null;
     word = true; words++;
+    if (UNSAFE_LOCAL.test(t.v)) return null;
     if (t.k === 'quoted') {
-      for (let i = 0; i < t.v.length; i++) if (control(t.v.charCodeAt(i))) return null;
       if (dotAtom(t.v)) local.push(t.v);
       else {
         if (t.v.includes('@')) flags.suspicious = true;
@@ -348,9 +385,13 @@ function mailbox(toks: readonly Tok[], sink: Sink, budget: WordBudget): Address 
 
 /**
  * The addresses of an address field's raw value (From, To, Cc, Reply-To, Sender, …), in order. A group's members
- * carry its name in `group`; an empty group is one Address with `name` and `address` null. `;` outside a group
- * separates as `,` does. At most `MAX_ADDRESSES`; past them `field-dropped`. Problems: `address-ambiguous` (once),
- * `field-dropped`, and the encoded words' (`charset-unknown`, …).
+ * carry its name in `group`; an empty group is one Address with `name` and `address` null. A group name is
+ * `suspicious` by the display name's rule, and so is each member. A group phrase the grammar cannot read
+ * (`alice@example.org:<bob@example.org>`) is one Address with that name and `address: null`, and every member up
+ * to its `;` (or the end) is `address: null` too. A `;` with no group open separates, and makes the mailboxes on
+ * both sides of it `address: null` (`alice@example.org;<bob@example.org>`, Python's CVE-2023-27043). At most
+ * `MAX_ADDRESSES`; past them `field-dropped`. Problems: `address-ambiguous` (once), `field-dropped`, and the
+ * encoded words' (`charset-unknown`, …).
  */
 export function addresses(raw: string, sink: Sink): Address[] {
   const report = once(sink);
@@ -358,30 +399,53 @@ export function addresses(raw: string, sink: Sink): Address[] {
   const toks = tokenize(raw);
   const out: Address[] = [];
   let seg: Tok[] = [], inAngle = false, group: string | null = null, members = 0, full = false;
+  // the open group's phrase could not be read; the segment after a stray `;` is nulled
+  let badGroup = false, groupSuspicious = false, strayRight = false;
   const push = (a: Address) => {
     if (out.length >= MAX_ADDRESSES) { if (!full) { full = true; report('field-dropped'); } return; }
     out.push(a);
   };
-  const end = () => {
+  const emptyGroup = (g: string) => {
+    const a: Address = { name: null, address: null, group: g };
+    if (looksLikeAddress(g)) a.suspicious = true;
+    push(a);
+  };
+  const end = (strayLeft: boolean) => {
+    const nulled = strayLeft || strayRight || (group !== null && badGroup);
+    strayRight = false;
     const a = mailbox(seg, report, budget);
     seg = [];
     if (!a) return;
-    if (group !== null) { a.group = group; members++; }
+    if (nulled && a.address !== null) { a.address = null; report('address-ambiguous'); }
+    if (group !== null) {
+      a.group = group;
+      members++;
+      if (groupSuspicious && !isItself(group, a.address)) a.suspicious = true;
+    }
     push(a);
   };
   for (let k = 0; k < toks.length && !full; k++) {
     const t = toks[k]!;
     if (t.k === 'special' && !inAngle) {
-      if (t.v === ',') { end(); continue; }
+      if (t.v === ',') { end(false); continue; }
       if (t.v === ';') {
-        end();
-        if (group !== null) { if (!members) push({ name: null, address: null, group }); group = null; }
+        const stray = group === null;
+        end(stray);
+        if (stray) strayRight = true;
+        else { if (!members) emptyGroup(group!); group = null; badGroup = false; }
         continue;
       }
       if (t.v === ':' && group === null) {
         const p = phrase(seg);
-        if (!p.valid) { report('address-ambiguous'); push({ name: decoded(p.pieces, report, budget), address: null }); }
         group = joinPieces(p.pieces, report, budget, PHRASE_WORDS).trim();
+        badGroup = !p.valid;
+        groupSuspicious = looksLikeAddress(group);
+        if (badGroup) {
+          report('address-ambiguous');
+          const a: Address = { name: group || null, address: null };
+          if (groupSuspicious) a.suspicious = true;
+          push(a);
+        }
         members = 0;
         seg = [];
         continue;
@@ -392,8 +456,8 @@ export function addresses(raw: string, sink: Sink): Address[] {
     seg.push(t);
   }
   if (!full) {
-    end();
-    if (group !== null && !members) push({ name: null, address: null, group });
+    end(false);
+    if (group !== null && !members) emptyGroup(group);
   }
   return out;
 }

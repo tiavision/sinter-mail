@@ -9,8 +9,12 @@ type Params = readonly (readonly [string, string])[];
 /** path separators, `:`, C0 and C1 controls, DEL, and the bidirectional controls (`evil\u202efdp.exe`) */
 const REMOVED = /[/\\:\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g;
 
-/** CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9 (and their superscript digits), as the part before any dot */
-const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])$/i;
+/** characters Windows refuses in a name: made `_` */
+const REPLACED = /[<>|?*"]/g;
+
+/** CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM0 to COM9, LPT0 to LPT9 (and their superscript digits), as the part
+ * before any dot */
+const RESERVED = /^(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])$/i;
 
 export const MAX_FILENAME = 255;
 
@@ -22,7 +26,8 @@ const DISPOSITION = ['filename*', 'filename'], TYPE = ['name*', 'name'];
  * headers.parameterField returns them): `filename*`, then `filename`, then `name*`, then `name`. When the ones
  * present do not all agree, `conflicts` names them and the sink gets `parameter-conflict` (the caller decides
  * whether that blocks). Removed: path separators, `:`, controls, bidirectional controls, leading dots and
- * whitespace, trailing dots and whitespace. A Windows reserved name (`CON`, `nul.txt`, `COM1.tar.gz`) gets a `_`
+ * whitespace, trailing dots and whitespace (again after a cut); `<>|?*"` become `_`. A Windows reserved name
+ * (`CON`, `CONIN$`, `nul.txt`, `COM1.tar.gz`) gets a `_`
  * prefix. Past 255 UTF-16 code units the stem is cut, keeping the extension (up to 32 units) and never splitting a
  * surrogate pair. Empty is `attachment`.
  */
@@ -36,22 +41,35 @@ export function filename(disposition: Params, type: Params, sink: Sink = ignore)
   return { filename: safeName(originalFilename ?? ''), originalFilename, conflicts: agree ? [] : present.map(([n]) => n) };
 }
 
-/** `name` made safe by the rules of `filename` */
+const trimmed = (c: string) => c === '.' || /\s/.test(c);
+
+/** `s` without trailing dots and whitespace */
+function trimEnd(s: string): string {
+  let b = s.length;
+  while (b > 0 && trimmed(s[b - 1]!)) b--;
+  return s.slice(0, b);
+}
+
+/** `s` cut to `max` UTF-16 code units, keeping the extension (up to 32 units), never splitting a surrogate pair */
+function cut(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const d = s.lastIndexOf('.');
+  const ext = d > 0 && s.length - d <= 32 ? s.slice(d) : '';
+  let keep = max - ext.length;
+  const hi = s.charCodeAt(keep - 1);
+  if (hi >= 0xd800 && hi <= 0xdbff) keep--;
+  return s.slice(0, keep) + ext;
+}
+
+const reserved = (s: string) => { const dot = s.indexOf('.'); return RESERVED.test((dot < 0 ? s : s.slice(0, dot)).trimEnd()); };
+
+/** `name` made safe by the rules of `filename`; trailing dots and whitespace are trimmed again after a cut */
 export function safeName(name: string): string {
-  let s = name.replace(REMOVED, '');
-  let a = 0, b = s.length;
-  while (a < b && (s.charCodeAt(a) === 0x2e || /\s/.test(s[a]!))) a++;
-  while (b > a && (s.charCodeAt(b - 1) === 0x2e || /\s/.test(s[b - 1]!))) b--;
-  s = s.slice(a, b);
-  const dot = s.indexOf('.');
-  if (RESERVED.test((dot < 0 ? s : s.slice(0, dot)).trimEnd())) s = '_' + s;
-  if (s.length > MAX_FILENAME) {
-    const d = s.lastIndexOf('.');
-    const ext = d > 0 && s.length - d <= 32 ? s.slice(d) : '';
-    let keep = MAX_FILENAME - ext.length;
-    const hi = s.charCodeAt(keep - 1);
-    if (hi >= 0xd800 && hi <= 0xdbff) keep--;
-    s = s.slice(0, keep) + ext;
-  }
+  let s = name.replace(REMOVED, '').replace(REPLACED, '_');
+  let a = 0;
+  while (a < s.length && trimmed(s[a]!)) a++;
+  s = trimEnd(s.slice(a));
+  s = trimEnd(cut(s, MAX_FILENAME));
+  if (reserved(s)) s = '_' + trimEnd(cut(s, MAX_FILENAME - 1));
   return s || 'attachment';
 }

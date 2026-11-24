@@ -30,7 +30,7 @@ const space = (c: number) => c === 0x20 || c === 0x09 || c === 0x0d || c === 0x0
 /** what base64 decoding found besides its bytes */
 export interface Base64Result {
   bytes: Uint8Array;
-  /** padding with more base64 after it (concatenated chunks): also `base64-junk`, told apart because the caller
+  /** padding with more base64 characters after it (concatenated chunks; other junk after it is not): also `base64-junk`, told apart because the caller
    * makes it blocking under a signature */
   midPadding: boolean;
 }
@@ -48,13 +48,15 @@ export function base64(src: Uint8Array, start: number, end: number, sink: Sink =
  */
 export function base64Result(src: Uint8Array, start: number, end: number, sink: Sink = ignore): Base64Result {
   const report = once(sink);
-  let midPadding = false;
+  // midPadding: set when an alphabet character follows padding (`afterPad`), not for other junk after it
+  let midPadding = false, afterPad = false;
   const out = new Uint8Array(Math.max(0, Math.ceil((end - start) * 3 / 4)));
   let n = 0, q = 0, bits = 0;
   for (let i = start; i < end; i++) {
     const c = src[i]!;
     const v = B64[c]!;
     if (v >= 0) {
+      if (afterPad) { afterPad = false; report('base64-junk'); midPadding = true; }
       bits = (bits << 6) | v;
       if (++q === 4) {
         out[n++] = bits >>> 16; out[n++] = (bits >>> 8) & 255; out[n++] = bits & 255;
@@ -69,7 +71,7 @@ export function base64Result(src: Uint8Array, start: number, end: number, sink: 
       // padding with no quantum, after one character, or not as long as the quantum needs
       if (q < 2 || pads !== 4 - q) report('base64-junk');
       // padding in the middle: the chunk after it is decoded too
-      if (i + 1 < end) { report('base64-junk'); midPadding = true; }
+      afterPad = true;
       q = 0; bits = 0;
     } else if (!space(c)) report('base64-junk');
   }
