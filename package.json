@@ -1,6 +1,6 @@
 {
   "name": "@tiavision/sinter-mail",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "Email bodies for sinter: HTML and plain-text mail parsed into a tree that folds at build time, rendered by mail-* components without an iframe.",
   "license": "MIT",
   "author": "Tia Heinrich",
