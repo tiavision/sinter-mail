@@ -1,6 +1,6 @@
 # Proposal: MIME and OpenPGP structure in sinter-mail
 
-Status: proposed, revision 3 (after a review, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
+Status: proposed, revision 4 (after two reviews, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
 proposal. Why the structure belongs in the library is in [The case](#the-case).
 
 ## Goals
@@ -49,13 +49,14 @@ The first two are the reason the structure belongs in the library rather than in
 ### 1. One pure call
 
 ```ts
-mail.mime(bytes: Uint8Array, options?: {
+mail.mime(bytes: Uint8Array | string, options?: {
   prefer?: 'html' | 'text';                    // in multipart/alternative; default 'html'
   decrypted?: Record<string, Decrypted>;       // results of decrypt steps, by step id
   verdicts?: Record<string, Verdict[]>;        // results of verify steps, by step id
+  open?: string[];                             // ids of encrypted parts the reader chose to open (section 5)
 }): Message
 
-mail.bytes(bytes: Uint8Array, ref: Ref, options?: { decrypted?: Record<string, Decrypted> }): Uint8Array
+mail.bytes(bytes: Uint8Array | string, ref: Ref, options?: { decrypted?: Record<string, Decrypted> }): Uint8Array
 mail.imageType(bytes: Uint8Array): 'png' | 'jpeg' | 'gif' | 'webp' | 'avif' | null   // by magic number
 ```
 
@@ -64,13 +65,43 @@ works in a `data-sn-let`, the action that decrypts only stores its result in sta
 plain value (no hidden reference to the input, nothing lost through `structuredClone` or JSON).
 
 ```html
-<article data-sn-let="{ msg: mail.mime(raw, { decrypted, verdicts }) }">
+<article data-sn-let="{ msg: raw ? mail.mime(raw, { decrypted, verdicts, open }) : null }">
 ```
 
-The message holds **no bytes**. Attachments, inline images and steps hold a `Ref`, and an action reads the
-bytes with `mail.bytes` when it needs them (to make a blob URL, to save a file, to decrypt). A typed array
-cannot be frozen (`Object.freeze(new Uint8Array(1))` throws) and does not survive JSON, which a tree sent
-from a server or folded at build time must.
+```ts
+// the action: run the steps the message asks for, until none is pending, then store the results
+export async function unlock(raw: Uint8Array, prior: Results): Promise<Results> {
+  const r = { decrypted: { ...prior.decrypted }, verdicts: { ...prior.verdicts } };
+  for (let msg = mail.mime(raw, r); msg.steps.some((s) => s.state === 'pending'); msg = mail.mime(raw, r)) {
+    for (const s of msg.steps.filter((s) => s.state === 'pending')) {
+      if (s.kind === 'decrypt') r.decrypted[s.id] = await decrypt(mail.bytes(raw, s.ciphertext, r));
+      else r.verdicts[s.id] = await verify(s, (ref) => mail.bytes(raw, ref, r));
+    }
+  }
+  return r;
+}
+```
+
+- **The message holds no bytes.** Attachments, inline images, encrypted parts and steps hold a `Ref`, and an
+  action reads the bytes with `mail.bytes` when it needs them (to make a blob URL, to save a file, to
+  decrypt). A typed array cannot be frozen (`Object.freeze(new Uint8Array(1))` throws) and does not survive
+  JSON, which a tree sent from a server or folded at build time must. The input itself may be a typed array
+  in state: sinter's state is plain, mutable JavaScript.
+- **Results are bound to the bytes they are for.** A step's id carries a digest of the bytes it covers
+  (section 5), so a result stored for one message, or for an earlier version of it, matches no step of
+  another: a verdict that arrives after the reader moved on cannot badge the next message. A result whose id
+  matches no step is ignored and is an informational problem.
+- **Invalid options throw**, as `mail.parse`'s do: `decrypted`, `verdicts` and `open` of the wrong type, or
+  an entry with an unknown `status`, throw a `TypeError` naming it. Unknown ids do not throw (above).
+- **Its own cache.** sinter's `memo()` calls through uncached for typed-array arguments, and a let is
+  evaluated at every read, so `mail.mime` keeps its last result, as `mail.parse`'s `last()` does: the input
+  compared by identity, `prefer` by value, and `decrypted`, `verdicts` and `open` entry by entry (by key, and
+  each value by identity), because the options object is new at every read and state may be changed in
+  place. Behind it, a small cache by input identity and options, bounded like `parse.ts`'s.
+- **A string input** is encoded as UTF-8. It is for tests and for `file:` resources, which sinter reads as
+  text: an `.eml` with 8-bit parts in another charset cannot fold faithfully, so such fixtures are kept 7-bit
+  (quoted-printable or base64). A build folds with Node's `TextDecoder`, whose labels depend on its ICU
+  (section 3).
 
 ### 2. The message
 
@@ -79,169 +110,238 @@ interface Message {
   type: 'message';
   headers: Headers;            // the headers to show (section 6)
   outer: Headers;              // the headers as transported
-  headerSource: 'protected' | 'outer';   // where every shown field but From came from
-  fromSource: 'protected' | 'outer';
+  sources: Sources;            // where each shown field came from (section 6)
   confidential: string[];      // header names the sender sent only encrypted (section 6), lowercase
   parts: Part[];               // what to show, in reading order
   attachments: Attachment[];
   calendar: Calendar[];        // text/calendar parts (iMIP), as text
-  steps: Step[];               // what the app is asked to do (section 5); empty for plain mail
+  steps: Step[];               // section 5; empty for plain mail
   summary: Summary;            // section 7
-  problems: Problem[];         // what was malformed, refused or repaired; for diagnostics, never content
+  problems: Problem[];         // what was malformed, refused or repaired (below); never content
 }
 
 type Part = { id: string; contentType: string; protection: Protection } & (
-  | { type: 'html'; html: string; legacyDisplay: boolean; inline: Inline[] }   // its own related parts
+  | { type: 'html'; html: string; legacyDisplay: boolean; inline: Inline[] }
   | { type: 'text'; text: string; flowed: boolean; delsp: boolean }
-  | { type: 'message'; message: Message }          // a forwarded message/rfc822, inline
-  | { type: 'encrypted'; step: string | null }     // not decrypted (yet): pending, failed, or not offered
-  | { type: 'report'; text: string }               // message/delivery-status and the like, as text
+  | { type: 'message'; message: Message; ref: Ref }     // a forwarded message/rfc822, inline
+  | { type: 'encrypted'; ref: Ref; step: string | null; reason: EncryptedReason }
+  | { type: 'report'; text: string }                    // message/delivery-status and the like, as text
 );
+
+type EncryptedReason =
+  | 'pending'                  // its decrypt step has no result yet
+  | 'failed'                   // its result was not 'ok', or had no integrity
+  | 'not-root'                 // not the message's root: the app may offer to open it (section 5)
+  | 'over-limit';
 
 interface Headers {
   subject: string | null;
   from: Address[]; sender: Address[]; replyTo: Address[];
   to: Address[]; cc: Address[];
-  date: string | null;         // ISO 8601, or null when unparseable
+  date: string | null;         // ISO 8601 with the sender's offset (`2026-11-24T09:30:00+01:00`); null when unparseable
   messageId: string | null; inReplyTo: string[]; references: string[];
   list: [name: string, value: string][];       // List-Id, List-Unsubscribe, List-Unsubscribe-Post
   autocrypt: string[];                         // Autocrypt headers, unfolded
   raw: [name: string, value: string][];        // every header, unfolded, not decoded
 }
 
+type Field = 'subject' | 'from' | 'sender' | 'replyTo' | 'to' | 'cc' | 'date' | 'messageId' | 'inReplyTo' | 'references';
+type Sources = { [F in Field]: 'protected' | 'outer' };
+
 interface Address {
   name: string | null;
   address: string | null;      // null when the addr-spec is ambiguous or malformed: never a guess
-  group?: string;
-  suspicious?: true;           // the display name holds `@` or `<`, or looks like another address
+  group?: string;              // the group's name; an empty group (`undisclosed-recipients:;`) is one
+                               // Address with name and address null
+  suspicious?: true;           // section 3
 }
 
-interface Ref { source: string; start: number; end: number; encoding: 'base64' | 'quoted-printable' | 'identity' }
+interface Ref {
+  source: 'input' | string;    // 'input', or the id of the decrypt step whose plaintext holds it
+  start: number; end: number;  // byte offsets in that source
+  encoding: 'base64' | 'quoted-printable' | 'identity';   // what mail.bytes undoes
+  canonical?: true;            // mail.bytes also converts bare LF to CRLF (section 5)
+}
 
 interface Attachment {
   id: string;
   filename: string;            // made safe (section 4)
+  originalFilename: string | null;   // as decoded, before section 4's rules; for display only, never for saving
   contentType: string;         // as declared, lowercased; not trusted
   disposition: 'attachment' | 'inline' | null;
+  kind: 'file' | 'related' | 'calendar' | 'message' | 'pgp-keys' | 'encrypted';
   contentId: string | null;
   size: number;                // decoded
   ref: Ref;
   protection: Protection;
 }
 
-interface Inline { contentId: string; attachment: string }   // the attachment's id
+interface Inline { contentId: string; attachment: string }   // an attachment's id
+
+interface Calendar { part: string; method: string | null; text: string; attachment: string }
+
+interface Problem {
+  code: ProblemCode;           // the table below
+  part: string | null;         // the entity or part it concerns
+  blocking: boolean;           // whether it stops steps (section 3)
+}
 ```
 
-- **Ids** are paths: the root entity is `1`, its parts `1.1`, `1.2`, theirs `1.2.1` (as IMAP numbers them);
-  inside a decrypted payload the path continues after the step's id and `/` (`1/1.2`). The same message gives
-  the same ids, so an app can key state by them.
+- **Ids** are paths. The root entity is `1`, its parts `1.1`, `1.2`, theirs `1.2.1`, as IMAP numbers them; a
+  non-multipart root is `1` with no children. Inside a decrypted payload the path continues after the decrypt
+  step's id and `/` (`1#3f…/1.2`). A text part split around cleartext-signed blocks (section 5) gives parts
+  `<id>:1`, `<id>:2`, … in order. Step ids are in section 5. The same bytes and options give the same ids.
 - **No map is keyed by the sender's strings.** Content-IDs, header names and list headers are in arrays of
-  pairs: an object keyed by `__proto__` stores nothing.
-- **Inline images belong to their body.** An HTML part's `inline` lists only the parts of its own
-  `multipart/related`, and only those with the same `protection` as the body: an unsigned part outside a
-  signed body cannot supply the image the signed body shows. A Content-ID that appears twice in one scope
-  resolves to nothing, and is a problem. `Content-Location` is never resolved.
+  pairs: an object keyed by `__proto__` stores nothing. (`Sources` has fixed keys.)
+- **Every related part is an attachment**, `kind: 'related'`, `disposition: 'inline'`: the reader does not
+  scan HTML (it imports no HTML parser), so it cannot tell which ones the body references; an app lists the
+  attachments of other kinds, or filters by `Inline`.
+- **Inline images belong to their body.** An HTML part's `inline` lists the related parts of its own
+  `multipart/related`; when that has none for a Content-ID, a part anywhere in the same message (not in a
+  nested message) whose Content-ID is unique in the message. In both cases, only parts with the same
+  `protection` as the body: an unsigned part outside a signed body cannot supply the image the signed body
+  shows. A Content-ID that appears twice in a scope resolves to nothing there, and is a problem.
+  `Content-Location` is never resolved.
 - **Inline images go to `mail.parse` as URLs**: an action reads each `Inline`'s bytes with `mail.bytes`,
   checks `mail.imageType` (PNG, JPEG, GIF, WebP, AVIF by their magic numbers; never SVG, whatever the declared
   type) and makes a blob URL; `cid` is then the map of those URLs. A blob URL has the page's origin, so the
   type check is what keeps an attachment from becoming a document there. An app whose server serves the parts
   keeps the `cid` template it has today, and must apply the same rule when serving them.
-- A `Part` goes straight to the existing helpers: `mail.parse(part.html, { …, cid, legacyDisplay:
+- **A `Part` goes straight to the existing helpers**: `mail.parse(part.html, { …, cid, legacyDisplay:
   part.legacyDisplay, encrypted: part.protection.encrypted })`, `mail.plain(part.text, { flowed: part.flowed,
-  delsp: part.delsp })`. With `encrypted: true`, `mail.parse` blocks remote images whatever `images` says:
-  a decrypted body never makes a request (EFAIL's channel, and a read receipt for content the sender meant to
-  be private).
+  delsp: part.delsp })`. With `encrypted: true`, `mail.parse` blocks remote images unless the call also says
+  `consent: true` (the reader's click for this message, never a standing per-sender setting): a decrypted
+  body makes no request on its own (EFAIL's channel, and a read receipt for content the sender meant to be
+  private). `origins` is reported either way, for the "show images" control.
+
+**Problems.** Each has a code; a blocking one stops every step in or below the entity it concerns, and in
+or below its descendants' cryptographic structures (section 3, "near crypto"). The list is closed: a new
+case gets a code and a row.
+
+| Code | Blocking | When |
+| --- | --- | --- |
+| `boundary-missing-close` | yes | a multipart ends without its closing delimiter |
+| `boundary-invalid` | yes | a boundary empty, longer than 70 characters, or starting with an ancestor's |
+| `duplicate-field` | yes | a repeated Content-Type, Content-Transfer-Encoding or Content-Disposition |
+| `duplicate-parameter` | yes | a repeated `boundary`, `charset`, `protocol`, `filename` or `name` |
+| `encoding-on-multipart` | yes | a transfer encoding other than 7bit, 8bit or binary on `multipart/*` or `message/*` |
+| `encoding-unknown` | yes | an unknown transfer encoding |
+| `no-header-end` | yes | a part whose headers run to its end |
+| `crypto-shape` | yes | a `multipart/encrypted` or `multipart/signed` not of the shape section 5 requires |
+| `armor-headers` | yes | a cleartext-signed block with armor headers other than `Hash:`, or lines starting `-` not dash-escaped |
+| `limit` | yes | a limit of section 4 reached |
+| `integrity` | yes | a decrypt result without `integrity: true` |
+| `duplicate-header` | no | a repeated From, Sender, Subject or Date (From: `summary.from` is `'unknown'`) |
+| `canonicalized` | no | bare LF line ends converted to CRLF for a signature |
+| `exchange-shape` | no | Exchange's rewritten encrypted message, read as `multipart/encrypted` (section 5) |
+| `charset-unknown`, `charset-fallback` | no | an unknown label read as UTF-8; invalid UTF-8 read as windows-1252 |
+| `base64-junk`, `qp-invalid` | no | characters outside the alphabet, padding mid-stream, a partial quantum; `=` not followed by two hex digits |
+| `rfc2231-segments` | no | continuation segments out of order, repeated or missing |
+| `content-id-duplicate` | no | a Content-ID twice in one scope |
+| `field-dropped` | no | a header field past a field limit |
+| `stale-result` | no | a result whose id matches no step |
+| `address-ambiguous` | no | an addr-spec read as `null` |
 
 ### 3. Reading MIME
 
 Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
 [Our own reader or a dependency](#our-own-reader-or-a-dependency).
 
-- **Bytes in, bytes kept.** Input is a `Uint8Array`. Each part is a byte range of the input (or of a
-  decrypted payload); nothing is decoded before its charset is known. A string input is encoded as UTF-8,
-  which suits tests and 7-bit fixtures; an 8-bit fixture is read from bytes.
+- **Bytes in, bytes kept.** Each part is a byte range of the input (or of a decrypted payload); nothing is
+  decoded before its charset is known.
 - **Line ends, defined once**: CRLF and bare LF end a line, everywhere (headers, boundaries, bodies, signed
   bytes); a bare CR is not a line end and is kept as a character. The same rule applies to every boundary
   search and to the signed bytes' canonical form (section 5).
 - **Headers**:
   - unfolded; the raw value kept in `raw`, undecoded;
   - structured fields (addresses, Content-Type, Content-Disposition, Message-ID lists) **tokenized first,
-    encoded words decoded after**, and only in phrases, comments and unstructured text, never in an addr-spec,
-    a parameter name or a token, so a decoded `<`, `>`, `,`, `@`, quote or line break is text, never structure
-    (Mailsploit, "Splitting the email atom");
+    encoded words decoded after**, and only in phrases (a display name, quoted or not: Outlook encodes inside
+    quotes), comments and unstructured text, never in an addr-spec, a parameter name or a token, so a decoded
+    `<`, `>`, `,`, `@`, quote or line break is text, never structure (Mailsploit, "Splitting the email atom");
   - every decoded value, `Headers` fields and filenames alike, has NUL, C0 controls, CR, LF and bidirectional
     controls removed; an app that reuses a value in a reply cannot inject a header with it;
   - an address list is read by the RFC 5322 grammar with its obsolete forms, iteratively (comments nested at
     most 8 deep, at most 1,000 addresses per field); an addr-spec the grammar cannot read one way only is
     `address: null`, which makes `summary.from` `'unknown'`, never a guess;
+  - `suspicious`: the display name, after decoding, contains `@` or `<`, unless it is the address itself
+    (ASCII case-insensitive, quotes aside);
   - encoded words (RFC 2047) decoded, adjacent ones joined without the space between them, consecutive words
     of one charset joined into one buffer and decoded once (linear, and a multi-byte character split across
     two words comes out whole); UTF-8 headers (RFC 6532);
   - parameters with RFC 2231 continuations and charsets (`filename*0*=`), and RFC 2047 words in `filename=`
     and `name=`, which Outlook and Gmail send against the standard;
-  - dates by RFC 5322 with the obsolete forms clients send.
-- **Duplicates and conflicts**, each a problem, each resolved one fixed way:
-  - a repeated `Content-Type`, `Content-Transfer-Encoding` or `Content-Disposition` field: the first counts;
-  - a repeated parameter (`boundary`, `charset`, `filename`, `name`, `protocol`): the first counts;
-  - a repeated `From`, `Sender`, `Subject` or `Date`: `headers` shows all `From` addresses, the first of the
-    others; `summary.from` is `'unknown'`;
-  - **inside or above a cryptographic structure, any of these, and any repair below (a missing closing
-    boundary, a boundary with trailing whitespace, an encoding on a multipart), means no step**: the part is
-    shown unlabelled, so a parser that would have read the message another way cannot be steered into a
-    badge.
-- **Boundaries**: a delimiter line is exactly `--` and the boundary, then optional whitespace, then the line
-  end (or `--` for the close); `--boundaryX` is not `--boundary`. A boundary that is empty or longer than 70
-  characters, or a child's boundary that starts with an ancestor's, is a problem (and, by the rule above,
-  stops a step).
-- **Transfer encodings**: base64 skips characters outside its alphabet, stops at the first `=` padding,
-  and drops a final partial quantum; quoted-printable keeps `=` not followed by two hex digits as it is,
-  and drops trailing whitespace before a soft line break. A `Content-Transfer-Encoding` other than 7bit, 8bit
-  or binary on `multipart/*` or `message/*` is ignored, and is a problem. An unknown encoding makes the
-  part an attachment, undecoded.
-- **Charsets**: decoded with the part's charset through `TextDecoder`, WHATWG labels only. A missing
-  charset on `text/*` is read as UTF-8; invalid UTF-8 falls back to windows-1252 (what a byte that is not
-  UTF-8 most often is); any other label, UTF-7 included, decodes as UTF-8 and adds a problem. UTF-7 is not
-  decoded because its escapes can hide text from whatever reads the message before the reader, and browsers
-  dropped it for that reason. WHATWG's `replacement` labels (ISO-2022-KR and others) decode to one
-  replacement character, as browsers do. Encoded words use the same table. Node without full ICU lacks some
-  labels: those parts add a problem, and the guide says so.
+  - dates by RFC 5322 with the obsolete forms clients send, kept in the sender's offset.
+- **Duplicates and conflicts** resolve one fixed way, each a problem (the table in section 2): a repeated
+  MIME field or parameter, the first counts; a repeated From, Sender, Subject or Date, `headers` shows all
+  From addresses and the first of the others.
+- **Near crypto**, a blocking problem means no step: it stops the steps of the entity it concerns, its
+  descendants, and of a cryptographic structure whose ancestors have it ("above" is the ancestors' MIME
+  fields and the delimiters that bound the entity, not the root's From, Subject or Date). The part is shown
+  unlabelled, so a parser that would have read the message another way cannot be steered into a badge.
+  Informational problems (a charset fallback, canonicalized line ends) never stop a step.
+- **Boundaries**: a delimiter line is exactly `--` and the boundary, then optional whitespace (RFC 2046's
+  transport padding, legal and not a problem), then the line end (or `--` for the close); `--boundaryX` is not
+  `--boundary`. A boundary that is empty or longer than 70 characters, or a child's boundary that starts with
+  an ancestor's, is `boundary-invalid`.
+- **Transfer encodings**:
+  - base64 skips characters outside its alphabet, decodes per quantum (padding in the middle, as in
+    concatenated chunks, ends that quantum and decoding continues), and drops a final partial quantum; each a
+    `base64-junk` problem;
+  - quoted-printable removes whitespace at the end of each encoded line (after a soft-break `=`, or on a line
+    without one), never whitespace before `=`, which is content (`hello =\r\nworld` is `hello world`); keeps
+    `=` not followed by two hex digits as it is (`qp-invalid`);
+  - a transfer encoding other than 7bit, 8bit or binary on `multipart/*` or `message/*` is ignored
+    (`encoding-on-multipart`); an unknown one makes the part an attachment, undecoded.
+- **Charsets**: decoded with the part's charset through `TextDecoder`, WHATWG labels only. A missing charset on
+  `text/*` is read as UTF-8; invalid UTF-8 falls back to windows-1252 (what a byte that is not UTF-8 most often
+  is); any other label, UTF-7 included, decodes as UTF-8 and adds a problem. UTF-7 is not decoded because its
+  escapes can hide text from whatever reads the message before the reader, and browsers dropped it for that
+  reason. WHATWG's `replacement` labels (ISO-2022-KR and others) decode to one replacement character, as
+  browsers do. Encoded words use the same table. An HTML part's `<meta charset>` is ignored: the MIME charset
+  decides. Node without full ICU lacks some labels: those parts add a problem, and the guide says so.
 - **Choosing what to show**:
   - `multipart/alternative`: the last part that can be shown (the standard's order is plainest first);
     `prefer` chooses between an HTML and a text candidate. **A text candidate that is wholly one armored
     message or one cleartext-signed block is chosen whatever `prefer` says**: inline-PGP senders put the
-    armor in both alternatives, and the HTML one is never a step (section 5). The parts not chosen are
-    neither parts nor attachments, and **their signatures and ciphertexts make no step and count for nothing
-    in the summary**.
-  - `multipart/related`: the root (`start`, else the first part) is shown; the rest are its `inline`, by
-    Content-ID; one the root does not reference is also an attachment.
+    armor in both alternatives, and the HTML one is never a step (section 5). The text and HTML of the parts
+    not chosen are neither parts nor attachments, and **their signatures and ciphertexts make no step and count
+    for nothing in the summary**; their other parts (Apple Mail nests attachments in the HTML branch) are still
+    attachments, and a `text/calendar` alternative is still in `calendar`.
+  - `multipart/related`: the root (`start`, else the first part) is shown; the rest are attachments of kind
+    `related` (section 2).
   - `multipart/mixed` and unknown `multipart/*`: each part in order. A `text/plain` or `text/html` part
     without `Content-Disposition: attachment` and without a filename is shown; the rest are attachments.
   - `multipart/digest`: parts default to `message/rfc822`.
   - `multipart/report`: the human part is shown; `message/delivery-status`,
     `message/disposition-notification` and `text/rfc822-headers` are `report` parts; the returned message is a
     `message` part.
-  - `message/rfc822` (and `message/global`): inline, a nested `Message`; as an attachment, an attachment the
-    app may read with `mail.mime` again. A nested message never makes steps (section 5).
-  - `text/calendar`: always in `calendar` (with its `method` parameter), and an attachment too, so it can be
-    saved. Its text is data for an iCalendar parser, never HTML: a description with markup is shown as text.
-  - `application/pgp-keys`: an attachment, marked so the app can offer to import it.
+  - `message/rfc822` (and `message/global`): inline, a nested `Message`; as an attachment, of kind `message`,
+    which the app may read with `mail.mime` again. A nested message never makes steps (section 5).
+  - `text/calendar`: always in `calendar` (with its `method` parameter), and an attachment of kind `calendar`,
+    so it can be saved. Its text is data for an iCalendar parser, never HTML: a description with markup is
+    shown as text.
+  - `application/pgp-keys`: an attachment of kind `pgp-keys`, so the app can offer to import it.
   - Opaque, never opened: `message/partial` (no reassembly), `message/external-body` (nothing fetched),
     TNEF (`winmail.dat`, `application/ms-tnef`) and uuencoded blocks in text: attachments, or text, as they
     are. Vendor headers (`X-Mozilla-External-Attachment-URL` and the like) are in `raw` and never acted on.
 - **Malformed mail** reads as a tolerant client reads it: a missing closing boundary ends the multipart at the
-  end of its parent; a boundary line with trailing whitespace is a boundary; a part with no blank line after
-  its headers has an empty body. Each is a problem, none throws.
+  end of its parent; a part with no blank line after its headers has an empty body. Each is a problem (blocking
+  near crypto), none throws.
 
 ### 4. Limits and safety
 
 - **Bounded work**: linear in the input, boundaries found in one pass; nesting at most 32 levels, walked
   without recursion; at most 1,000 parts; header blocks at most 1 MB for the message's root (long recipient
   lists, `Received`, ARC and Microsoft headers) and 64 kB for a part, at most 1,000 fields each; at most 8
-  levels of nested messages; at most 16 steps; at most 64 encoded words per header field. Past a limit, the
-  rest is one opaque attachment and a problem. A decoder's output is never larger than its input.
+  levels of nested messages; at most 16 steps; at most 64 encoded words per phrase and 4,096 per field.
+- **Past a limit**: an entity past a structural limit (depth, parts, nested messages) is one attachment with
+  its bytes, and a `limit` problem; a header block past its size, or a field past its counts, keeps what came
+  before and drops the rest (`field-dropped`); a step past 16 is not offered.
 - **One budget per call**: the limits count across everything one `mail.mime` call reads, the input, every
-  decrypted payload and every nested message together, so feeding results back cannot multiply the work;
-  a decrypted payload larger than 4 times its ciphertext (OpenPGP compresses) is refused as a problem.
+  decrypted payload and every nested message together, so feeding results back cannot multiply the work.
+  The bytes read in one call are bounded at 256 MiB and one decrypted payload at 64 MiB; there is no ratio to
+  the ciphertext, since OpenPGP compresses and the app has already decompressed. A decoder's output is never
+  larger than its input.
 - **No backtracking regular expressions**: the grammars are hand-written scanners; the test suite runs each
   hostile case under a time bound.
 - **Filenames**:
@@ -250,28 +350,32 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
   - removed: path separators, `:`, control characters, every bidirectional control (U+200E, U+200F, U+061C,
     U+202A to U+202E, U+2066 to U+2069: `evil‮fdp.exe`), leading dots, trailing dots and spaces;
   - a Windows reserved name (`CON`, `NUL`, `COM1` and the like, with any extension) gets a `_` prefix;
-  - at most 255 characters keeping the extension; empty becomes `attachment`. The original is in `raw`.
+  - at most 255 characters keeping the extension; empty becomes `attachment`. `originalFilename` keeps the
+    decoded name (controls removed) for display beside the safe one.
 - **Content types are not trusted**: the declared type is reported, lowercased and checked for syntax
   (`type/subtype`), and used only to choose what to show. Showing an attachment inline is the app's decision,
   by its own allowlist; an inline image's type comes from its bytes (`mail.imageType`).
-- **Content-IDs**: angle brackets stripped; an id that appears twice keeps the first.
+- **Content-IDs**: angle brackets stripped; see section 2 for duplicates.
 
 ### 5. Encryption and signatures: the steps
 
 `mail.mime` never decrypts or verifies. When the structure asks for it, `steps` lists what the app should do;
-the app reads the bytes with `mail.bytes`, does it, and calls `mail.mime` again with the result.
+the app reads the bytes with `mail.bytes`, does it, and calls `mail.mime` again with the result (the recipe in
+section 1).
 
 ```ts
-type Step =
-  | { id: string; kind: 'decrypt'; ciphertext: Ref; armored: boolean }
-  | { id: string; kind: 'verify'; signed: Ref; signature: Ref; micalg: string | null; canonicalized: boolean }
-  | { id: string; kind: 'verify-cleartext'; block: Ref; charset: string };
+type Step = { id: string; state: 'pending' | 'done' | 'failed' } & (
+  | { kind: 'decrypt'; part: string; ciphertext: Ref; armored: boolean }
+  | { kind: 'verify'; part: string; signed: Ref; signature: Ref; micalg: string | null }
+  | { kind: 'verify-cleartext'; part: string; block: Ref; charset: string }
+);
 
 interface Decrypted {
   status: 'ok' | 'failed' | 'no-key' | 'locked' | 'unsupported';
   plaintext?: Uint8Array;      // with 'ok'
   integrity: boolean;          // the app checked an integrity-protected packet (SEIPD v1 with its MDC, or
-                               // v2/AEAD) decrypted completely; false refuses the plaintext
+                               // v2/AEAD) decrypted completely, and that it was an encrypted message;
+                               // false refuses the plaintext
   signatures?: Verdict[];      // signatures inside the ciphertext (OpenPGP's one-pass)
 }
 
@@ -279,78 +383,107 @@ interface Verdict {
   status: 'good' | 'bad' | 'no-key' | 'expired' | 'revoked' | 'unsupported';
   fingerprint?: string;
   created?: string;            // ISO 8601
-  signer?: string[];           // the addresses of the key's user IDs that the app trusts as the key's
+  signer?: string[];           // addresses of the key's user IDs that the app trusts as the key's
 }
 ```
+
+- **Step ids**: the path of the entity the step is for, `#`, and the first 16 bytes of the SHA-256 of the bytes
+  it covers, in hex: the ciphertext for `decrypt`; the signed bytes (canonical) and the signature for
+  `verify`; the block for `verify-cleartext`, whose path is the part's and `:` and the block's number
+  (`1.1:2#…`). SHA-256 is a small synchronous implementation in the reader (`crypto.subtle` is async and not
+  a fold global); a collision-resistant hash is needed because a verdict for one message must not be
+  reusable for crafted bytes of another.
+- **`steps` lists every step**, with its state: `pending` without a result, `done` with one the library
+  accepted, `failed` with one it did not (no integrity, a decrypt status other than `ok`). An app runs the
+  `pending` ones.
 
 What becomes a step, and nothing else:
 
 - **PGP/MIME encrypted** (RFC 3156): the message's root is `multipart/encrypted;
   protocol="application/pgp-encrypted"` with exactly two parts, the first `application/pgp-encrypted`
-  containing `Version: 1`, the second `application/octet-stream`. **Only the root is decrypted**: content
-  decrypted from inside someone else's message cannot be told apart from theirs, and a reply would quote it to
-  them. The same structure anywhere else is one `encrypted` part (`step: null`), not two loose attachments,
-  so the app can offer to open it as a message of its own, in a view marked as such (Exchange rewrites
-  `multipart/encrypted` into `multipart/mixed`, and list managers wrap encrypted mail with footers: this
-  is where that mail ends up).
-- **The app's result is checked.** A `Decrypted` without `integrity: true` shows nothing: a missing or
-  failed MDC, a partial plaintext and a "ciphertext" that is only a signed or literal OpenPGP message are the
-  app's to refuse (openpgp.js: `allowUnauthenticatedMessages: false`, and checking the message was
-  encrypted). This is where EFAIL's CBC/CFB gadgets are stopped; never joining bodies stops its direct
-  exfiltration.
+  containing `Version: 1`, the second `application/octet-stream`. Also:
+  - **sign over encrypt**: the root is `multipart/signed` and its first part is that `multipart/encrypted`
+    (rare, legal): a verify step for the root and a decrypt step for the first part;
+  - **Exchange's rewrite**: the root is `multipart/mixed` whose parts are, in order, an optional
+    `text/plain` with only whitespace, `application/pgp-encrypted` containing `Version: 1`, and
+    `application/octet-stream` (Exchange's form of a `multipart/encrypted`, which Thunderbird reads the same
+    way): read as `multipart/encrypted`, with an `exchange-shape` problem.
+
+  **Only the root is decrypted on its own**: content decrypted from inside someone else's message cannot be
+  told apart from theirs, and a reply would quote it to them. The same structure anywhere else is one
+  `encrypted` part (`reason: 'not-root'`, with its `Ref`), not two loose attachments. **The reader may open
+  it**: an app that lists the part's id in `open` gets a decrypt step for it; what it decrypts to is shown in
+  that part's place, labelled encrypted, but never counted as the message's: `summary.encrypted` is `'some'`,
+  its headers are not applied, and its `from` is `'unknown'`. This is where Exchange variants not matched
+  above, list-manager footers around encrypted mail, and inline armor with a footer end up.
+- **The app's result is checked.** A `Decrypted` without `integrity: true` shows nothing (`integrity`
+  problem, the step `failed`): a missing or failed MDC, a partial plaintext and a "ciphertext" that is only a
+  signed or literal OpenPGP message are the app's to refuse (openpgp.js: `allowUnauthenticatedMessages:
+  false`, and checking the message was encrypted). This is where EFAIL's CBC/CFB gadgets are stopped; never
+  joining bodies stops its direct exfiltration.
 - **PGP/MIME signed**: `multipart/signed; protocol="application/pgp-signature"` with exactly two parts, the
-  second `application/pgp-signature`. Allowed **anywhere** but in an unchosen alternative or a nested
-  message (a mailing list wraps a signed message in `multipart/mixed` and appends a footer), because the
-  verdict labels only that part's subtree. `signed` is the first part's bytes, from the start of its headers to
-  the line break before the next delimiter (that line break belongs to the delimiter). RFC 3156 has the
-  receiver verify the canonical form, with CRLF line endings: bare LF line endings (maildir, mbox, JMAP blobs,
-  `file:` fixtures) are converted to CRLF, nothing else is changed, and `canonicalized` and a problem say so.
-  `mail.bytes` returns the canonical bytes. The signed part's text is never re-read as headers unless it is a
-  MIME entity, and a problem anywhere inside the signed subtree leaves its parts `signed: null` whatever the
-  verdict.
+  second `application/pgp-signature`. Allowed **anywhere** but in an unchosen alternative or a nested message
+  (a mailing list wraps a signed message in `multipart/mixed` and appends a footer), because the verdict
+  labels only that part's subtree. `signed` is the first part's bytes, from the start of its headers to the
+  line break before the next delimiter (that line break belongs to the delimiter). RFC 3156 has the receiver
+  verify the canonical form, with CRLF line endings: when the part has bare LF line endings (maildir, mbox,
+  JMAP blobs, `file:` fixtures), the `Ref` is `canonical`, `mail.bytes` converts them to CRLF and changes
+  nothing else, and the `canonicalized` problem (informational) says so. The signed part's text is never
+  re-read as headers unless it is a MIME entity, and a blocking problem inside the signed subtree leaves its
+  parts `signed: null` whatever the verdict.
 - **Inline PGP**, in a `text/plain` body:
   - an armored message is a decrypt step only when it is the whole body (whitespace aside) **and** the body is
-    the root message's only part shown: one among several parts, or inside a nested message, is an
-    `encrypted` part without a step;
+    the root message's only part shown (or the text alternative chosen by the rule of section 3); armor with
+    text around it, one among several parts, or inside a nested message is an `encrypted` part with
+    `reason: 'not-root'`, which the reader may open;
   - a cleartext-signed block is a `verify-cleartext` step only when `-----BEGIN PGP SIGNED MESSAGE-----` starts
-    a line that is not quoted (`>`), its armor headers are only `Hash:`, and the body has at most 4 blocks;
-    otherwise it is text and a problem. `block` is the block's bytes as sent with `charset`, so the app
-    verifies what the sender signed, not a re-encoding. The signed text shown is the block's text with
-    dash-escaping removed, which is exactly what is hashed; the text before and after the block are text
-    parts of their own, unsigned;
+    a line that is not quoted (`>`), its armor headers are only `Hash:`, every line of the signed text starting
+    with `-` is dash-escaped, and the body has at most 4 blocks; otherwise it is text and an `armor-headers`
+    problem. The rules make the reader's reading a strict subset of what OpenPGP implementations accept.
+    `block` is the block's bytes as sent, with `charset`, so the app verifies what the sender signed, not a
+    re-encoding. The signed part shown is the signed text with dash-escaping removed and each line's trailing
+    whitespace removed (what text-mode hashing covers; RFC 9580), never read as `flowed`, so unsigned trailing
+    spaces cannot rejoin lines; the text before and after the block are text parts of their own, unsigned;
   - armor inside HTML is never a step.
+- **Not steps**: separately encrypted attachments (`.pgp`, `.gpg`, `.asc` files, as Enigmail and GpgOL send
+  them) are attachments of kind `encrypted`; the app may decrypt the file itself, outside the message.
 
 With a decrypt result, the plaintext is read with section 3 as the payload (a MIME entity, or for inline PGP
 a body as it is), its parts labelled encrypted, and its own `multipart/signed` (sign then encrypt) becomes a
 further step. A payload whose root is itself `multipart/encrypted` (encrypted twice) makes one more decrypt
-step, at most once. A step without a result stays in `steps`, and its part is `encrypted` with `step` set: an
-encrypted message shows nothing until decrypted, and the app can say why.
+step, at most once. A step without a result leaves its part `encrypted` with `reason: 'pending'`: an encrypted
+message shows nothing until decrypted, and the app can say why.
 
 ### 6. Protected headers
 
 Read from the root of the cryptographic payload: the decrypted entity, or the signed part when the signed part
-is the message's root or the root of a decrypted payload.
+is the message's root or the root of a decrypted payload. Opened parts (section 5) have none.
 
 - **When they apply**: the payload's root carries protected headers when its Content-Type has the `hp`
   parameter (RFC 9788) or `protected-headers="v1"` (the older convention of Enigmail, Autocrypt, K-9 and
-  Thunderbird, on the root whatever its type, `text/plain` included). Then `headerSource` is `'protected'`
-  and **the whole set** comes from the payload: Subject, Reply-To, To, Cc, Date, Message-ID, In-Reply-To,
-  References. A field the payload does not have is empty, not the outer one: an attacker re-sending an old
-  ciphertext cannot add a `Reply-To` of their own next to an inner From. Fields that exist only outside
-  (`list`, `autocrypt`, `raw`) are never protected, whatever `headerSource` says: an app must not let them
+  Thunderbird, on the root whatever its type, `text/plain` included).
+- **With `hp`, the whole set** comes from the payload: Subject, Reply-To, To, Cc, Date, Message-ID,
+  In-Reply-To, References. RFC 9788 has the sender copy them all, so a field the payload does not have is
+  empty, not the outer one: an attacker re-sending an old ciphertext cannot add a `Reply-To` of their own.
+- **With `protected-headers="v1"`, field by field**: a field the payload has replaces the outer one, others
+  stay outer (K-9 protects only the Subject; senders differ on Date). Reply-To is the exception: it is taken
+  from the payload only, empty if the payload has none, since a reply is where a re-sent ciphertext pays off.
+- **From, in both forms**: the protected From replaces the outer one only with a `good` verdict on a signature
+  over the payload's root whose `signer` includes that address. Otherwise `headers.from` is the outer From and
+  `summary.from` says whether the inner one differs. Encryption alone proves nothing about the author: anyone
+  with the reader's public key can encrypt `From: ceo@…`.
+- **`sources`** records, for every field, whether the shown value came from the payload or from outside.
+  Fields that exist only outside (`list`, `autocrypt`, `raw`) are never protected: an app must not let them
   change what it does with encrypted content (the Delta Chat group-membership attack used such a header).
-- **From is the exception.** The protected From replaces the outer one only with a `good` verdict on a
-  signature over the payload's root whose `signer` includes that address. Otherwise `headers.from` is the
-  outer From (`fromSource: 'outer'`) and `summary.from` says whether the inner one differs. Encryption alone proves nothing about the
-  author: anyone with the reader's public key can encrypt `From: ceo@…`.
-- **Without protected headers** (older senders), `headerSource` is `'outer'`: the outer headers are shown as
-  they are, and `summary.from` is `'unknown'` for decrypted content unless a signature binds it.
+- **Without protected headers** (older senders), every source is `'outer'`.
 - **Addresses compare** by their addr-spec, ASCII case-insensitive in both parts, after Unicode NFC; nothing
-  else is normalized.
-- **Which headers were confidential**: with `hp="cipher"`, the outer headers the sender replaced or removed
-  (listed by `HP-Outer` in the payload) are in `confidential`. An app writing an unencrypted reply uses the
-  outer value of those, so it does not send the inner one in the clear.
-- **Legacy display**, honoured only inside a payload whose root carries protected headers:
+  else is normalized. A field with a `null` address never matches.
+- **Which headers were confidential**: with `hp="cipher"`, the payload's `HP-Outer` fields list the outer
+  header fields as sent; a protected field whose outer value differs from its inner one, or that has no outer
+  value, is in `confidential`. An app writing an unencrypted reply uses the outer value of those, and leaves
+  out a field that has none.
+- **Legacy display**, honoured only inside a payload whose root has the `hp` parameter or
+  `protected-headers="v1"`:
   - RFC 9788: a `text/plain` part with `hp-legacy-display="1"` loses its leading lines that are header fields,
     up to the blank line after them; an HTML part with it is `legacyDisplay: true`, and `mail.parse(html, {
     legacyDisplay: true })` drops the first `div` child of the body with class
@@ -364,25 +497,39 @@ is the message's root or the root of a decrypted payload.
 
 ```ts
 interface Protection {
-  encrypted: boolean;          // decrypted from the root's ciphertext
+  encrypted: boolean;          // decrypted from a ciphertext (the root's, or an opened part's)
+  opened?: true;               // from a part the reader opened (section 5)
   signed: Verdict['status'] | 'pending' | null;   // the innermost signature covering this part
   step?: string;               // that signature's step, or the decrypt step
   signer?: string[];
 }
 
 interface Summary {
-  encrypted: 'all' | 'some' | 'none';      // over parts and attachments
+  encrypted: 'all' | 'some' | 'none';      // over parts and attachments; opened parts count as 'some'
   signed: 'all' | 'some' | 'none';
-  from: 'matches' | 'differs' | 'unknown' | null;   // null for plain mail
-  headers: 'protected' | 'outer';
+  from: 'matches' | 'differs' | 'unknown' | null;
 }
 ```
 
-- `signed` is `'all'` only when **one** signature with a `good` verdict covers the payload's root and its
-  `signer` includes `headers.from`; parts signed by other keys, or by a key not bound to the From, are
-  `'some'`. `encrypted` is `'all'` when everything shown came from the root's ciphertext.
-- `headers: 'outer'` with `signed: 'all'` is a signed body under unsigned Subject, To and Date, which can be
-  replayed in another context: an app shows the badge on the body, not on the headers.
+- **Several verdicts for one step** (several signatures, or several keys): the part's `signed` is `good` if any
+  verdict is `good`, and `signer` is the union of the good verdicts' signers; otherwise the first status
+  present in the order `bad`, `revoked`, `expired`, `no-key`, `unsupported`.
+- **`summary.signed`** is `'all'` only when **one** signature with a `good` verdict covers the payload's root
+  (the message's root, or the root of the decrypted payload) and its `signer` includes the address of
+  `headers.from`; parts signed by other keys, or by a key not bound to the From, are `'some'`. `encrypted` is
+  `'all'` when everything shown came from the root's ciphertext.
+- **`summary.from`**, decided in this order:
+
+  | Case | `from` | `headers.from` |
+  | --- | --- | --- |
+  | nothing is encrypted and nothing shown is signed | `null` | outer |
+  | `headers.from` has not exactly one address, or a `null` one | `'unknown'` | outer |
+  | a good signature over the payload's root has a `signer` including the protected From (when there is one) or else the outer From | `'matches'` | that From |
+  | protected headers carry a From whose address differs from the outer one | `'differs'` | outer |
+  | anything else (encrypted and unsigned, signed by another key, a signature over a part only) | `'unknown'` | outer |
+
+- `sources` with `'outer'` fields and `signed: 'all'` is a signed body under unsigned Subject, To and Date,
+  which can be replayed in another context: an app shows the badge on the body, not on the headers.
 - An app shows a message-level badge only for `'all'`, and marks the parts otherwise. `'some'` is the case an
   attacker builds; it is also the mailing-list footer, which is why parts are labelled rather than the message
   refused.
@@ -394,14 +541,22 @@ interface Summary {
 
 ```
 sinter/
-  mime.ts          mail.mime, mail.bytes, mail.imageType: imports no HTML parser
-  mime/            the reader: headers, addresses, dates, encodings, structure, steps
+  mime.ts          mail.mime (imports the reader by its specifier), mail.bytes, mail.imageType
+  mime/            the reader, behind `@tiavision/sinter-mail/mime`: headers, addresses, dates, encodings,
+                   structure, steps, SHA-256
+  mime/bytes.ts    what mail.bytes and mail.imageType need: the decoders, canonical line ends, magic numbers
 ```
 
-Exported from the entry like `mail.plain`, and as `@tiavision/sinter-mail/mime` so `lazy` covers it; a page
-without MIME pays nothing. `mail.parse` gains the `legacyDisplay` and `encrypted` options. Budget: 12 kB gzip, to be measured
-(no charset tables: `TextDecoder` has them; the address and date grammars are the reader's). Pure: an
-`.eml` in a `file:` resource folds at build time.
+- **The import graph, as for `mail.parse`**: `sinter.helpers.ts` re-exports `mime`, `bytes` and `imageType`
+  from `./mime.js`; `mime.ts` imports the reader as `@tiavision/sinter-mail/mime` (a new `exports` entry,
+  `./mime` → `./sinter/mime/index.ts`), never by a relative path, so `sinter({ lazy })` loads it when a let
+  first needs `mail.mime` (the let is undefined until then); `mime.ts` imports `mime/bytes.ts` relatively, so
+  `mail.bytes` and `mail.imageType` are ordinary helpers, eager, and an action calls them without awaiting.
+- `mail.parse` gains the `legacyDisplay`, `encrypted` and `consent` options, in `optionsOf`, its `last()`
+  comparison and its cache key.
+- Budget: 12 kB gzip, to be measured (no charset tables: `TextDecoder` has them; the address and date
+  grammars and SHA-256 are the reader's). Pure: an `.eml` in a `file:` resource folds at build time, as text
+  (section 1).
 
 ## Our own reader or a dependency
 
@@ -491,17 +646,21 @@ Memory-safety bugs in C parsers (mutt, PHP's mailparse) do not carry over to Typ
 1. **Our own MIME reader**, after measuring the existing ones; their corpora and fixtures are borrowed
    ([Our own reader or a dependency](#our-own-reader-or-a-dependency)).
 2. **No cryptography in the library.** Keys, decryption, verification and trust are the app's (openpgp.js
-   in a `data-sn-call` action, a server, a hardware key); the library lists steps and reads results.
-3. **One pure call, no bytes in the result.** Results go in as options; bytes come out through `mail.bytes`.
-4. **Only the root is decrypted**, and the app must vouch for integrity. Other encrypted entities are one part
-   the app may open on its own.
+   in a `data-sn-call` action, a server, a hardware key); the library lists steps and reads results. Its one
+   hash, SHA-256, binds results to bytes and proves nothing else.
+3. **One pure call, no bytes in the result, results bound to bytes.** Results go in as options, keyed by ids
+   that carry a digest; bytes come out through `mail.bytes`.
+4. **Only the root is decrypted on its own**, and the app must vouch for integrity. Other encrypted entities
+   are one part the reader may open, shown in place and never counted as the message's.
 5. **Signatures anywhere shown, labels per part.** A verdict covers its part's subtree and nothing else;
    `'all'` needs one signature over the root by the From.
-6. **Inline PGP only as the only body** for encryption; cleartext signatures only line-anchored, unquoted, with
-   only `Hash:` headers, splitting the body.
-7. **Protected headers as a set, From only when signed.** No field is mixed from inner and outer.
+6. **Inline PGP only as the only body** for decryption on its own; cleartext signatures only line-anchored,
+   unquoted, with only `Hash:` headers and dash-escaped lines, splitting the body.
+7. **Protected headers per their form, From only when signed.** With `hp`, the payload's whole set; with
+   `protected-headers="v1"`, field by field, Reply-To only from the payload; `sources` says which is which.
 8. **Detection is structural, and strict near crypto.** Text that looks like armor in a quote, a forward or
-   HTML is text; anything ambiguous or repaired in or above a cryptographic structure means no step.
+   HTML is text; a blocking problem in or above a cryptographic structure means no step; informational
+   problems never do.
 9. **The steps are protocol-shaped, not PGP-shaped**, so S/MIME (`application/pkcs7-mime`,
    `multipart/signed; protocol="application/pkcs7-signature"`) can add step kinds without changing the
    message.
@@ -510,44 +669,50 @@ Memory-safety bugs in C parsers (mutt, PHP's mailparse) do not carry over to Typ
 
 ## Plan
 
-1. The reader: headers, addresses, dates, encodings, structure, limits. Tests: Stalwart's corpus and
-   jsmime's charset set (licenses permitting, with attribution), real messages (with consent, anonymized),
-   hostile ones (nesting, boundaries, encodings, the inputs of other parsers' advisories), and the known
-   attacks ([Pitfalls](#pitfalls-from-other-mime-parsers)); a fuzzer comparing our reader with Stalwart's on
+0. Read RFC 9788 in full (and the IETF MIME ambiguity draft, and PortSwigger's paper) and settle section 6's
+   details before the types are frozen: `hp`, `HP-Outer`, legacy display, its From guidance.
+1. The reader: headers, addresses, dates, encodings, structure, limits, problems, ids, `mail.bytes`,
+   `mail.imageType`, SHA-256. Tests: Stalwart's corpus and jsmime's charset set (licenses permitting, with
+   attribution), real messages (with consent, anonymized), hostile ones (nesting, boundaries, encodings, the
+   inputs of other parsers' advisories), and the known attacks
+   ([Pitfalls](#pitfalls-from-other-mime-parsers)); a fuzzer comparing our reader with Stalwart's on
    structure, as the HTML parser is compared with parse5.
 2. What to show: alternatives, related, mixed, digests, reports, attachments, inline, calendar, nested
-   messages; the `mail.parse` and `mail.plain` hand-off.
+   messages; the `mail.parse` and `mail.plain` hand-off, and `mail.parse`'s new options.
 3. Steps and results, tested with openpgp.js in the tests only (a dev dependency): messages from Thunderbird,
    Mailvelope, Proton, K-9/FairEmail, Delta Chat, Apple Mail with GPG Suite, and openpgp.js-based web
-   composers; and the published attacks (EFAIL, signature spoofing, re-wrapped ciphertexts).
-4. Protected headers, legacy display (`mail.parse`'s option), the summary.
-5. The guide (a section in `docs/mail.md`, a recipe: a reader with decrypt, badges and attachments) and
-   `llms.txt`.
+   composers; Exchange's rewrite; the published attacks (EFAIL, signature spoofing, re-wrapped ciphertexts,
+   stale results).
+4. Protected headers, legacy display, the summary.
+5. The guide (a section in `docs/mail.md`, a recipe: a reader with decrypt, badges and attachments, the action
+   of section 1) and `llms.txt`.
 6. A first app moves over ([For apps](#for-apps)).
 
 ## For apps
 
 What an app with its own MIME and PGP handling changes to move over:
 
-- **The reader renders from `mail.mime`** on the raw message; the app's own MIME parsing goes; its decrypt
-  and verify functions become actions that store a `Decrypted` or `Verdict[]` by step id. Decrypt must report
-  `integrity` honestly; verify must return only user IDs the app trusts as `signer`.
+- **The reader renders from `mail.mime`** on the raw message, held in state; the app's own MIME parsing
+  goes; its decrypt and verify functions become an action that runs the pending steps and stores a
+  `Decrypted` or `Verdict[]` by step id (section 1). Decrypt must report `integrity` honestly; verify must
+  return only user IDs the app trusts as `signer`.
+- **Results are per message.** Step ids carry a digest, so results from another message are ignored; an app
+  may still keep them per message, and should drop them when the reader closes it.
 - **A server's encrypted and signed flags become hints**: they can keep choosing whether to fetch the raw
   message; the badges come from `summary` and each part's `protection`. A server-side parser can stay for
   search and the list; a disagreement then changes what is found, not what is shown as verified.
-- **Badges follow the summary**: a message-level badge only for `'all'`, per-part marks otherwise, and a
-  warning when `from` is `'differs'` or `'unknown'` on decrypted content.
+- **Badges follow the summary**: a message-level badge only for `'all'`, per-part marks otherwise, a warning
+  when `from` is `'differs'` or `'unknown'` on decrypted content, and an opened part shown as its own block.
+- **Images in decrypted parts** load only after the reader's consent for that message (`consent: true`).
 - **Replies**: quote decrypted content only when `from` is `'matches'` (or after asking); in an unencrypted
-  reply, use the outer value of the `confidential` headers.
+  reply, use the outer value of the `confidential` headers, and leave out those that have none.
 - **The list**: encrypted subjects stay `...` until opened unless the browser keeps decrypted headers; that
   is the app's choice.
 
 ## Open questions
 
-- **RFC 9788's details**, from memory and to be checked against its text before step 4: the `hp` values
-  (`cipher`, `clear`), `HP-Outer`'s syntax, the exact legacy-display rules, and its advice on showing the
-  inner From without a signature.
+- **RFC 9788's details** (Plan, step 0).
 - **Signed but not encrypted, with protected headers**: a good signature's inner Subject wins (section 6).
   Is a differing outer Subject worth a problem of its own?
 - **`prefer`**: whether an app needs more than `'html' | 'text'`.
-- **Size**: whether 12 kB holds with the address and date grammars.
+- **Size**: whether 12 kB holds with the address and date grammars and SHA-256.
