@@ -39,7 +39,7 @@ export * as mail from '@tiavision/sinter-mail';
 export type { Body, Element } from '@tiavision/sinter-mail';
 ```
 
-sinter-mail needs sinter 0.22.0 or later (until it is released, sinter's main).
+sinter-mail needs sinter 0.22.0 or later.
 
 ## Three places, one function
 

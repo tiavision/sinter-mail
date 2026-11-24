@@ -65,6 +65,25 @@ test('with the package lazy, the reader is a chunk of its own, and the page\'s c
   const withBytes = chunks.filter((c) => c.code.includes(BYTES_HELPER));
   expect(withBytes.length).toBeGreaterThan(0);
   for (const c of withBytes) expect(c.code).not.toContain(READER);
-  // the page's chunk loads the reader's on demand: an import of it, never its code
-  expect(withBytes.some((c) => c.code.includes(reader[0]!.name))).toBe(true);
+  // the page loads mail.bytes with it and the reader on demand: from the page's script, its static imports reach a
+  // chunk with mail.bytes, never the reader's (sinter 0.22 puts the import() in the page's chunk, beside its other
+  // lazy helpers, and mail.bytes in a chunk it shares with the eager ones)
+  const loaded = staticImports(out.lazy!.html, chunks);
+  expect(withBytes.some((c) => loaded.has(c.name))).toBe(true);
+  expect(loaded.has(reader[0]!.name)).toBe(false);
+  expect(chunks.some((c) => loaded.has(c.name) && c.code.includes('import(`./'))).toBe(true);
 });
+
+/** the chunks the page loads before any let needs a lazy helper: its script and what that imports statically */
+function staticImports(html: string, chunks: { name: string; code: string }[]): Set<string> {
+  const byName = new Map(chunks.map((c) => [c.name, c.code]));
+  const todo = [...html.matchAll(/<script[^>]*\ssrc="[^"]*\/assets\/([^"/]+\.js)"/g)].map((m) => m[1]!);
+  const seen = new Set<string>();
+  while (todo.length) {
+    const name = todo.pop()!;
+    if (seen.has(name) || !byName.has(name)) continue;
+    seen.add(name);
+    for (const m of byName.get(name)!.matchAll(/(?:\bfrom|\bimport)\s*["']\.\/([^"']+\.js)["']/g)) todo.push(m[1]!);
+  }
+  return seen;
+}

@@ -40,7 +40,7 @@ tree, and generated components render each element, with every attribute and sty
 npm install @tiavision/sinter-mail
 ```
 
-Needs sinter 0.22.0 or later (until it is released, sinter's main).
+Needs sinter 0.22.0 or later.
 
 ```js
 // vite.config.js
