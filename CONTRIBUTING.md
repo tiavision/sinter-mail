@@ -36,6 +36,7 @@ sinter/
   components/
     mail-body.html        public: one body, and the slots an app fills (`link`, `image`)
     mail-width.html       public: the `media` that fits the reader's width, as an event (mail-width.ts beside it)
+    mail-warm.html        public, opt-in: runs the parser on sample emails in idle time (mail-warm.ts beside it)
   mail.css                optional, exported: the browser defaults emails count on, .mail-light, .mail-scroll
     internal/             generated from tags.ts: one component per tag, the dispatch, the table,
                           <mail-tree> (templates) and <mail-view> (the script builder)
@@ -48,6 +49,8 @@ sinter/
   raw.ts                  the raw tree between the parser and the cascade
   plain.ts, autolink.ts   mail.plain, with GFM's autolinks
   tree.ts                 mail.text, mail.links, mail.unquoted (mail.progressive, deprecated)
+  build.ts                the script builder: a tree as elements, for <mail-view>
+  warm.ts                 <mail-warm>'s sample emails
   sinter.helpers.ts       the helpers, re-exported by the entry
   index.ts                the entry
 scripts/
@@ -55,6 +58,9 @@ scripts/
   build-entities.mjs      writes sinter/parser/entities.ts; --check
 fixtures/                 pages for `sinter check`, and trees as JSON
 test/                     the tests (vitest), test/corpus/ the emails they read
+bench/                    the benches: html.mjs (an email's HTML from an API, against an iframe with DOMPurify),
+                          its emails (corpus/) and Caley's old reader (caley/), profile.mjs, and those of the
+                          rendering work before it
 docs/                     the guide and the proposals
 ```
 
@@ -105,7 +111,7 @@ docs/                     the guide and the proposals
 npm ci
 npx sinter check          # the fixture pages: compiled, type-checked, the library's rules
 npm run typecheck
-npm test                  # vitest: 200 tests, Chromium included
+npm test                  # vitest: 256 tests, Chromium included
 ```
 
 | Test | What it covers |
@@ -113,10 +119,34 @@ npm test                  # vitest: 200 tests, Chromium included
 | `test/parser.test.ts` | the parser against parse5: targeted cases, seeded random documents, the depth bound, hostile timings, the entity table up to date, purity |
 | `test/css.test.ts` | tokenizer, values and shorthands, selectors and specificity, media, the cascade's order, legacy hints, hostile stylesheets |
 | `test/css.browser.test.ts` | the cascade against Chromium's computed styles on email-like documents, at both widths |
-| `test/parse.test.ts` | mail.parse: what is kept, links, ids, images, options, the cache, the corpus's invariants, 35 attacks |
+| `test/parse.test.ts` | mail.parse: what is kept, links, ids, images, options, the cache, the corpus's invariants, 35 attacks, emails that name what every object has (`<constructor>`) |
 | `test/plain.test.ts`, `test/tree.test.ts` | mail.plain and autolinks, mail.text and mail.links |
+| `test/warm.test.ts` | `<mail-warm>`'s sample emails: three dialects, each with the parts of mail.parse it is there to run |
 | `test/components.test.ts` | the tag table, the types, the dispatch and the files agree; the generated files are current |
 | `test/check.test.ts` | `sinter check --strict` over the fixtures: no error, no warning |
 | `test/static.test.ts` | an email folded at build time: no JavaScript, the HTML is the tree |
 | `test/browser.test.ts` | Chromium under `script-src 'self'; style-src 'self'; require-trusted-types-for 'script'`: no violation, the styles applied; the CSP a folded email needs; render time and size |
 
+## Measuring
+
+A change to the parser, the cascade, the tree or the builder is measured before it is kept, against the checkout
+it changes:
+
+```sh
+node bench/parse.mjs ../base                                         # mail.parse in Node: the same trees, warm, cold
+BASE=../base node --experimental-strip-types bench/html.mjs 7 newsletter base,mail   # in Chromium, to the paint
+node --experimental-strip-types bench/profile.mjs newsletter next    # V8's profile of one message
+```
+
+- `bench/parse.mjs` first says whether both checkouts give the same trees (every email of both corpora under four
+  option sets, awkward inputs, frozen at every depth): a change that is only meant to be faster prints
+  `identical`. Then a later parse and its parts, and the first parse of a new process.
+- `bench/html.mjs` opens emails in a reader page and reads a Chromium trace: from the message's last byte to the
+  frame that paints the email, first email and a later one, beside Caley's old reader (DOMPurify and a sandboxed
+  iframe). A first email varies by 10 ms and more between runs; a later one by a few.
+- Two things the numbers taught: the first run of any code is three to four times slower than a later one, so a
+  change is judged on both; and a profile of this code is flat, so a faster parse comes from fewer allocations
+  and passes, not from one function.
+
+[docs/proposals/html-from-api.md](docs/proposals/html-from-api.md) has the method, the results and what was tried
+and left out.

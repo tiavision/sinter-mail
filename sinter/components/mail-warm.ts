@@ -3,7 +3,7 @@
 // first call and runs it in its interpreter until it has seen enough of it, which makes the first email of a session
 // three to four times as slow to parse as a later one. Nothing of it reaches the page.
 import { build } from '../build.js';
-import { parse } from '../parse.js';
+import { parseOnce } from '../parse.js';
 import { sample } from '../warm.js';
 import { MailWarmComponent } from './mail-warm.html';
 
@@ -20,7 +20,8 @@ export class MailWarm extends MailWarmComponent {
     started = true;
     let k = 0;
     const step = () => {
-      const b = parse(sample(k, k < SMALL ? 2 : 8), { images: 'proxy', proxy: '/?{url}', cid: '/?{cid}' });
+      // not kept: mail.parse's cache is for the emails the reader opens
+      const b = parseOnce(sample(k, k < SMALL ? 2 : 8), { images: 'proxy', proxy: '/?{url}', cid: '/?{cid}' });
       build(b);
       this.emit('sample', b);
       if (++k < ROUNDS) idle(step);

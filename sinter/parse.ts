@@ -24,6 +24,16 @@ export function parse(html: string | null | undefined, options?: ParseOptions): 
 }
 
 /**
+ * The tree of `html` under `options`, parsed now and kept nowhere: for <mail-warm>, whose sample emails are parsed
+ * for the parsing's sake. Through parse() they would stay in its cache, two dozen trees held for nothing in the
+ * room it has for real emails.
+ */
+export function parseOnce(html: string, options?: ParseOptions): Body {
+  const o = optionsOf(options);
+  return frozen(build(html, { images: o.images, proxy: o.proxy, cidTemplate: o.cidTemplate, cidMap: pairs(o.cidMap), media: o.media, dataImages: o.dataImages }));
+}
+
+/**
  * The tree of the call before, when this one has the same source and options. A let is its expression, read
  * at every binding, and memo()'s key holds the whole source (a 250 KB string built and hashed per read); this compares
  * the source by identity first (`===` on the same string is a pointer comparison). The state is in a closure, as memo's.
