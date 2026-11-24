@@ -31,7 +31,7 @@ Publishing needs, once:
 ## The package
 
 ```
-package.json              "sinter": "./sinter", exports ".", "./parser" (the lazy part)
+package.json              "sinter": "./sinter", exports ".", "./parser" and "./mime" (the lazy parts), "./mail.css"
 sinter/
   components/
     mail-body.html        public: one body, and the slots an app fills (`link`, `image`)
@@ -48,6 +48,20 @@ sinter/
   raw.ts                  the raw tree between the parser and the cascade
   plain.ts, autolink.ts   mail.plain, with GFM's autolinks
   tree.ts                 mail.text, mail.links, mail.unquoted (mail.progressive, deprecated)
+  mime.ts                 mail.mime: options, validation, the cache, freezing; imports the reader by its specifier
+  bytes.ts                mail.bytes, mail.imageType: imports mime/decode.ts and mime/magic.ts, never the reader
+  mime/                   the MIME reader, behind `@tiavision/sinter-mail/mime`:
+    index.ts              the entry: one call's read, the problems listed once each
+    types.ts              the message's public types (Message, Part, Ref, Step, Decrypted, Verdict, …)
+    scan.ts               the entity scan: boundaries, ids, Refs, limits, one budget per call, problems
+    headers.ts            header blocks, encoded words, parameters (RFC 2047, 2231, 6532)
+    address.ts, date.ts   RFC 5322 addresses (with A-label comparison) and dates
+    decode.ts, charset.ts transfer decoders and canonical line ends; charsets through TextDecoder
+    filename.ts, magic.ts safe filenames; image types by magic number
+    show.ts               choosing what to show: parts, attachments, inline sets, calendar, nested messages
+    crypto.ts, steps.ts   OpenPGP shapes, the steps, the app's results checked, inline armor
+    hp.ts, protect.ts     protected headers, reply, confidential, legacy display; protection and the summary
+    sha256.ts             SHA-256 and step digests
   sinter.helpers.ts       the helpers, re-exported by the entry
   index.ts                the entry
 scripts/
@@ -105,7 +119,7 @@ docs/                     the guide and the proposals
 npm ci
 npx sinter check          # the fixture pages: compiled, type-checked, the library's rules
 npm run typecheck
-npm test                  # vitest: 200 tests, Chromium included
+npm test                  # vitest: 728 tests, Chromium included
 ```
 
 | Test | What it covers |
@@ -118,5 +132,19 @@ npm test                  # vitest: 200 tests, Chromium included
 | `test/components.test.ts` | the tag table, the types, the dispatch and the files agree; the generated files are current |
 | `test/check.test.ts` | `sinter check --strict` over the fixtures: no error, no warning |
 | `test/static.test.ts` | an email folded at build time: no JavaScript, the HTML is the tree |
+| `test/mime-lexical.test.ts` | the reader's lexical layer: decoders, charsets, headers, encoded words, parameters, addresses, dates, filenames, SHA-256, magic numbers; hostile inputs under a time bound, purity |
+| `test/mime-structure.test.ts` | the entity scan, ids, boundaries, limits, problems and their blocking flags, choosing what to show, headers and attachments, mail.mime's options and cache, mail.bytes and mail.imageType |
+| `test/mime-corpus-structure.test.ts` | the reader against the corpus: Stalwart's messages against `structure.json`, the charset fixtures, every hostile fixture and generator within its time bound |
+| `test/mime-structure-review.test.ts` | the structure review's findings: bare CR in headers, cache bounds, opaque Refs, shared inline sets, a seeded structural fuzz of the scan |
+| `test/mime-crypto.test.ts` | OpenPGP steps, results, protected headers, protection and the summary, with real openpgp.js keys and messages through the action recipe (`test/mime-crypto-kit.ts`) |
+| `test/mime-crypto-attacks.test.ts` | the published attacks: EFAIL, re-sent and re-wrapped ciphertexts, partial signing, stale results, armor that is not a step, Content-IDs across protection |
+| `test/mime-crypto-review.test.ts` | the crypto review's reproductions: cleartext blocks read differently, one-pass signatures under the blocking rule, withdrawn steps, digests per call, `reply` |
+| `test/mime-corpus.test.ts` | the corpus loads and is well-formed; the generators are deterministic |
 | `test/browser.test.ts` | Chromium under `script-src 'self'; style-src 'self'; require-trusted-types-for 'script'`: no violation, the styles applied; the CSP a folded email needs; render time and size |
 
+### The MIME corpus
+
+`test/mime-corpus/` holds the reader's inputs; its [README](test/mime-corpus/README.md) says where each came from
+and how to regenerate them. Their licenses: Stalwart mail-parser's messages (Apache-2.0 OR MIT; Dovecot's suites
+MIT), jsmime's charset tests (MIT, `charsets/LICENSE-jsmime.txt`), the inputs of postal-mime's and Nodemailer's
+tests among the hostile fixtures (MIT-0), and the rest this package's (MIT).
