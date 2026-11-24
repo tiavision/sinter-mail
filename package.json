@@ -62,6 +62,7 @@
     "character-entities": "2.0.2",
     "character-entities-legacy": "3.0.0",
     "jsdom": "31.0.1",
+    "openpgp": "6.3.3",
     "parse5": "8.1.1",
     "playwright": "1.63.0",
     "typescript": "7.0.2",
