@@ -42,7 +42,8 @@ export function read(bytes: Uint8Array, options: ReadOptions): Message {
   const st = (r.crypto = newState(options, budget, s.root));
   const m = rootMessage(r, s.root);
   if (stale(st, options)) r.problems.push({ entity: null, code: 'stale-result', blocking: false });
-  if (r.cuts) annotate(m, r.cuts);
+  // an invalid cut marks no Ref: its holes may not start a line, so `missing` would mean nothing
+  if (r.cuts && valid) annotate(m, r.cuts);
   m.cut = options.holes.length ? (valid ? 'valid' : 'invalid') : null;
   m.problems = problemsOf(r.problems);
   return m;

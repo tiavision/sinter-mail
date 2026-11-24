@@ -6,6 +6,9 @@ import type { Hole } from './types.js';
 import { all, newBudget, scan } from './scan.js';
 import { leafCut } from './holes.js';
 import { cuttable, transferDecode } from './decode.js';
+import { cryptoShape } from './crypto.js';
+import { reader } from './show.js';
+import type { Entity } from './scan.js';
 
 export interface CutOptions {
   /** a body longer than this (encoded bytes) is cut; default 64 KiB */
@@ -14,6 +17,9 @@ export interface CutOptions {
   relatedOver?: number;
   /** at most this many holes, the largest bodies first; default 32 */
   max?: number;
+  /** also cut the ciphertext the reader decrypts without being asked (the root's): default false, since the app
+   * then fetches the whole message at once anyway; true for an app that shows a placeholder before the download */
+  rootCiphertext?: boolean;
 }
 
 export interface CutMessage {
@@ -31,8 +37,9 @@ export interface CutMessage {
  */
 export function cutMessage(raw: Uint8Array, options: Required<CutOptions>): CutMessage {
   const s = scan(raw, { source: 'input', prefix: '' }, newBudget());
+  const skip = options.rootCiphertext ? new Set<Entity>() : rootCiphertext(raw, s.root, s.problems);
   const chosen = all(s.root).filter((e) => {
-    if (!leafCut(e) || e.above || e.below) return false;
+    if (!leafCut(e) || e.above || e.below || skip.has(e)) return false;
     const limit = e.parent?.type === 'multipart/related' ? options.relatedOver : options.over;
     return e.end - e.bodyStart > limit && cuttable(raw, e.bodyStart, e.end);
   });
@@ -51,4 +58,23 @@ export function cutMessage(raw: Uint8Array, options: Required<CutOptions>): CutM
   }
   out.set(raw.subarray(from), n);
   return { raw: out, holes };
+}
+
+/**
+ * The leaves of the encrypted structures the reader decrypts without being asked: the root's, when it is a PGP/MIME
+ * encrypted structure or Exchange's rewrite of one, or the first part of a root multipart/signed (sign over
+ * encrypt). Cutting their ciphertext saves nothing: the cut message has nothing to show, and the app fetches the
+ * whole message at once to decrypt it. Encrypted structures anywhere else open only on request, and are cut like
+ * any attachment.
+ */
+function rootCiphertext(raw: Uint8Array, root: Entity, problems: Parameters<typeof reader>[1]): Set<Entity> {
+  const r = reader(new Map([['input', raw]]), problems.slice(), 'html');
+  const roots = [root];
+  if (cryptoShape(r, root) === 'signed' && root.children[0]) roots.push(root.children[0]);
+  const out = new Set<Entity>();
+  for (const e of roots) {
+    const shape = cryptoShape(r, e);
+    if (shape === 'encrypted' || shape === 'exchange') for (const x of all(e)) out.add(x);
+  }
+  return out;
 }

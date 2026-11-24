@@ -186,7 +186,8 @@ interface StepBase {
   id: string;
   state: 'pending' | 'done' | 'failed';
   part: string;
-  /** its bytes include a hole: it has no digest and takes no result; read the whole message to run it */
+  /** a step of a cut message (the `holes` option): it has no digest and takes no result; read the whole message to
+   * run it */
   incomplete?: true;
 }
 

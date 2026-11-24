@@ -168,6 +168,11 @@ describe('the reader checks every hole', () => {
     expect(mime(raw, { holes: [{ start: at, end: at + 10, size: 10 }] }).cut).toBe('invalid');
   });
 
+  test('mail.cut\'s option shapes are checked', () => {
+    expect(() => cut('x', { rootCiphertext: 'yes' as never })).toThrow(/`rootCiphertext` is true or false/);
+    expect(() => cut('x', { over: -1 })).toThrow(/`over`/);
+  });
+
   test('invalid option shapes throw', () => {
     expect(() => mime(good.raw, { holes: 'x' as never })).toThrow(/`holes` is an array/);
     expect(() => mime(good.raw, { holes: [{ start: -1, end: 2, size: 0 }] })).toThrow(/`holes\[0\]`/);
@@ -232,7 +237,9 @@ describe('steps over cut bytes', () => {
     const s = enc(eml(...HEAD, ...multipart('multipart/mixed', 'x',
       ['Content-Type: application/pgp-encrypted', '', 'Version: 1'],
       ['Content-Type: application/octet-stream; name="encrypted.asc"', 'Content-Transfer-Encoding: base64', '', ...base64Lines(200_000)])));
-    const c = cut(s);
+    // the root's ciphertext: not cut by default (the app fetches the whole message to decrypt anyway)
+    expect(cut(s).holes).toEqual([]);
+    const c = cut(s, { rootCiphertext: true });
     expect(c.holes).toHaveLength(1);
     const m = mime(c.raw, { holes: c.holes });
     const full = mime(s);
@@ -240,6 +247,15 @@ describe('steps over cut bytes', () => {
     expect(m.steps).toEqual([expect.objectContaining({ kind: 'decrypt', state: 'pending', incomplete: true, id: '1#cut' })]);
     expect(m.parts).toEqual([expect.objectContaining({ type: 'encrypted', reason: 'incomplete', step: '1#cut' })]);
     expect((m.parts[0] as Part & { type: 'encrypted' }).ref.missing).toBeDefined();
+  });
+
+  test('sign over encrypt: the root\'s ciphertext inside the signed part is not cut by default', () => {
+    const exchange = ['Content-Type: multipart/mixed; boundary="x"', '', '--x', 'Content-Type: application/pgp-encrypted', '', 'Version: 1',
+      '--x', 'Content-Type: application/octet-stream', 'Content-Transfer-Encoding: base64', '', ...base64Lines(200_000), '--x--'];
+    const s = enc(eml(...HEAD, ...multipart('multipart/signed; protocol="application/pgp-signature"; micalg=pgp-sha256', 's',
+      exchange, ['Content-Type: application/pgp-signature', '', '-----BEGIN PGP SIGNATURE-----', '', 'iQ==', '-----END PGP SIGNATURE-----'])));
+    expect(cut(s).holes).toEqual([]);
+    expect(cut(s, { rootCiphertext: true }).holes).toHaveLength(1);
   });
 
   test('an armored PGP/MIME ciphertext is never cut: its lines start with `--`', () => {
@@ -283,8 +299,9 @@ describe('review findings', () => {
     const m = mime(c.raw, { holes: c.holes });
     expect(m.cut).toBe('valid');
     const step = m.steps.find((x) => x.kind === 'verify-cleartext')!;
+    expect(step).toMatchObject({ incomplete: true, id: '1.1:1#cut' });
     const v = mime(c.raw, { holes: c.holes, verdicts: { [step.id]: [{ status: 'good', signer: ['a@example.test'] }] } });
-    expect(v.parts[0]!.protection.signed).toBe('good');
+    expect(v.parts[0]!.protection.signed).toBe('pending');
     expect(v.summary.from).not.toBe('matches');
     // the same message whole, without the trick, does bind the From: only the cut withholds it
     const plain = eml(...HEAD, ...multipart('multipart/mixed', 'b', cleartext, ['Content-Type: application/pdf', '', ...base64Lines(100_000)]));
@@ -323,6 +340,66 @@ describe('review findings', () => {
     const step = mime(c.raw, { holes: c.holes }).steps[0]!;
     expect(step.kind === 'verify' && step.signed.canonical).toBe(true);
     if (step.kind === 'verify' && full.steps[0]!.kind === 'verify') expect(fetchRef(s, c.raw, step.signed)).toEqual(refBytes(s, full.steps[0]!.signed));
+  });
+});
+
+describe('second review: every step of a cut message is incomplete', () => {
+  /** `whole` with the bytes from just after `startMark` up to `endMark` cut out, as an identity body */
+  const withHole = (whole: string, startMark: string, endMark: string) => {
+    const a = whole.indexOf(startMark) + startMark.length, b = whole.indexOf(endMark, a);
+    return { raw: enc(whole.slice(0, a) + whole.slice(b)), holes: [{ start: a, end: b, size: b - a }] };
+  };
+  const good = (m: Message) => Object.fromEntries(m.steps.map((s) => [s.id, [{ status: 'good' as const, signer: ['alice@example.test'] }]]));
+  const SIGNED = ['Content-Type: multipart/signed; boundary=s; protocol="application/pgp-signature"; micalg=pgp-sha256', '',
+    '--s', 'Content-Type: text/plain', '', 'I approve.', '--s', 'Content-Type: application/pgp-signature', '', 'SIG', '--s--', ''];
+
+  test('a signed sibling of a cut body that hides an outer delimiter: no label (the whole message has none)', () => {
+    const whole = eml('From: M <m@evil.test>', 'Subject: s', 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary=o', '',
+      '--o', 'Content-Type: multipart/mixed; boundary=r', '', '--r', ...SIGNED,
+      '--r', 'Content-Type: application/octet-stream', '', 'HOLEdata', '--o', 'Content-Type: text/plain', '', 'hidden text', 'ENDHOLE', '--r--', '', '--o--', '');
+    const c = withHole(whole, 'octet-stream\r\n\r\n', '\r\n--r--');
+    const m = mime(c.raw, { holes: c.holes });
+    expect(m.cut).toBe('valid');
+    expect(m.steps.every((x) => x.incomplete)).toBe(true);
+    const v = mime(c.raw, { holes: c.holes, verdicts: good(m) });
+    expect(v.parts.map((p) => p.protection.signed)).not.toContain('good');
+    expect(v.summary.signed).toBe('none');
+    const w = mime(enc(whole), { verdicts: good(mime(enc(whole))) });
+    expect(w.summary.signed).toBe('none');
+  });
+
+  test('a signed part that is epilogue in the whole message (a hidden close delimiter): pending, never good', () => {
+    const whole = eml('From: M <m@evil.test>', 'Subject: s', 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary=o', '',
+      '--o', 'Content-Type: application/octet-stream', '', 'HOLEdata', '--o--', 'junk', '--o', ...SIGNED, '--o--', '');
+    const c = withHole(whole, 'octet-stream\r\n\r\n', '\r\n--o\r\nContent-Type: multipart/signed');
+    const m = mime(c.raw, { holes: c.holes });
+    const v = mime(c.raw, { holes: c.holes, verdicts: good(m) });
+    expect(v.parts.find((p) => p.type === 'text')!.protection.signed).toBe('pending');
+    expect(v.summary.signed).toBe('none');
+    expect(() => fetchRef(enc(whole), c.raw, m.attachments[0]!.ref)).toThrow(/starting with `--`/);
+  });
+
+  test('an armored text opened in a cut message is an incomplete step: nothing decrypted, reply unchanged', () => {
+    const whole = eml('From: M <m@evil.test>', 'Reply-To: leak@evil.test', 'Subject: s', 'MIME-Version: 1.0', ...multipart('multipart/mixed', 'o',
+      ['Content-Type: text/plain', '', '-----BEGIN PGP MESSAGE-----', '', 'hQEMA', '=abcd', '-----END PGP MESSAGE-----'],
+      ['Content-Type: application/pdf', 'Content-Transfer-Encoding: base64', 'Content-Disposition: attachment', '', ...base64Lines(3000)]));
+    const c = cut(enc(whole), { over: 100 });
+    const first = mime(c.raw, { holes: c.holes });
+    const id = (first.parts[0] as Part & { type: 'encrypted' }).step;
+    expect(first.parts[0]).toMatchObject({ type: 'encrypted', reason: 'not-root' });
+    const m = mime(c.raw, { holes: c.holes, open: [id], decrypted: { [id]: { status: 'ok', plaintext: enc('secret'), integrity: true } } });
+    expect(m.parts[0]).toMatchObject({ type: 'encrypted', reason: 'incomplete', step: '1.1#cut' });
+    expect(m.steps).toEqual([expect.objectContaining({ kind: 'decrypt', incomplete: true, id: '1.1#cut' })]);
+    expect(m.parts.some((p) => p.type === 'text' && p.text.includes('secret'))).toBe(false);
+    expect(m.reply).toEqual(first.reply);
+  });
+
+  test('an invalid cut marks no Ref', () => {
+    const whole = eml('From: a@a.test', 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary=o', '', '--o', 'Content-Type: application/pdf', '', 'AAAA-', '-o--', 'more', '--o--', '');
+    const a = whole.indexOf('-\r\n-o--') + 1;
+    const m = mime(enc(whole.slice(0, a) + whole.slice(a + 2)), { holes: [{ start: a, end: a + 2, size: 2 }] });
+    expect(m.cut).toBe('invalid');
+    for (const x of m.attachments) expect(x.ref.missing).toBeUndefined();
   });
 });
 
@@ -371,7 +448,7 @@ describe('more shapes', () => {
     const s = enc(eml(...HEAD, ...multipart('multipart/mixed', 'x',
       ['Content-Type: application/pgp-encrypted', '', 'Version: 1'],
       ['Content-Type: application/octet-stream', 'Content-Transfer-Encoding: base64', '', ...base64Lines(200_000)])));
-    const c = cut(s);
+    const c = cut(s, { rootCiphertext: true });
     const m = mime(c.raw, { holes: c.holes, decrypted: { '1#cut': { status: 'ok', plaintext: enc(eml('Content-Type: text/plain', '', 'secret')), integrity: true } } });
     expect(m.steps[0]!.state).toBe('pending');
     expect(m.parts[0]).toMatchObject({ type: 'encrypted', reason: 'incomplete' });
