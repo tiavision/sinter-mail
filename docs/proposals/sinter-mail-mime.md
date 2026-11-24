@@ -645,7 +645,10 @@ none.
   else the protected From, even when the shown From is the outer one: RFC 9788 has replies use only the
   protected fields for recipients (§4.4.4, §6.2), which also sends a reply to a re-sent ciphertext to its
   author, not to whoever re-sent it. When such a payload has neither, `reply` is empty: the app asks (the outer
-  sender may only have re-sent it). Otherwise the shown Reply-To, else the shown From.
+  sender may only have re-sent it). In a decrypted payload without protected headers, nothing binds the outer Reply-To: `reply` is the
+  outer From when a signature inside the ciphertext binds it, else empty (a re-sent ciphertext, or one re-sent as
+  inline armor, which strips its headers, must not send a reply quoting it to whoever re-sent it). Otherwise (no
+  encryption) the shown Reply-To, else the shown From.
 - **`sources`** records, for every field, whether the shown value came from the payload or from outside.
   Fields that exist only outside (`list`, `autocrypt`, `raw`) are never protected: an app must not let them
   change what it does with encrypted content (the Delta Chat group-membership attack used such a header).

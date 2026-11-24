@@ -722,7 +722,10 @@ nothing outside the payload should change what the app does with encrypted conte
 
 - **Address a reply to `reply`.** For an encrypted payload with protected headers it is the protected Reply-To,
   else the protected From, so a reply to a re-sent ciphertext goes to its author, not to whoever re-sent it; empty
-  when the payload names neither (ask the reader). Otherwise the shown Reply-To, else the shown From.
+  when the payload names neither (ask the reader). In a decrypted payload without protected headers, nothing binds the outer Reply-To: `reply` is the
+  outer From when a signature inside the ciphertext binds it, else empty (a re-sent ciphertext, or one re-sent as
+  inline armor, which strips its headers, must not send a reply quoting it to whoever re-sent it). Otherwise (no
+  encryption) the shown Reply-To, else the shown From.
 - **Quote decrypted content only when `summary.from` is `'matches'`**, or after asking: otherwise the outer sender
   may have wrapped someone else's ciphertext to read it back from your reply.
 - **An unencrypted reply leaves out what was confidential.** Each name in `confidential` was sent only encrypted:

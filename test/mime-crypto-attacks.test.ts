@@ -82,9 +82,9 @@ describe('re-wrapped and re-sent ciphertexts', () => {
     expect(m.confidential).toEqual(['from', 'subject']);
   });
 
-  test('without protected headers the reply goes to the outer sender, and from is not matches', async () => {
+  test('without protected headers and unsigned, nothing binds the outer sender: reply is empty, from not matches', async () => {
     const m = await read(pgpMime(MALLORY, await encrypt(crlf('Content-Type: text/plain\n\nold'), bob)), app);
-    expect([addrs(m.reply), m.summary.from]).toEqual([['mallory@evil.test'], 'unknown']);
+    expect([addrs(m.reply), m.summary.from]).toEqual([[], 'unknown']);
   });
 
   test('a signed and encrypted ciphertext re-sent: the signature binds the protected From, which is shown', async () => {

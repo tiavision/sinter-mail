@@ -275,9 +275,12 @@ describe('finding 8: reply', () => {
       expect(m.reply, ct).toEqual([]);
       expect(addrs(m.headers.from)).toEqual(['mallory@evil.test']);
     }
-    // without protected headers: the outer sender
+    // without protected headers and unsigned: nothing binds the outer sender either, so empty too
     const plain = await read(pgpMime(MALLORY, await encrypt(eml('Content-Type: text/plain', '', 'hello'), bob)), app);
-    expect(addrs(plain.reply)).toEqual(['mallory@evil.test']);
+    expect(plain.reply).toEqual([]);
+    // signed inside by the outer From: that From
+    const signed = await read(pgpMime(MALLORY, await encrypt(eml('Content-Type: text/plain', '', 'hello'), bob, mallory)), app);
+    expect(addrs(signed.reply)).toEqual(['mallory@evil.test']);
   });
 });
 
@@ -419,5 +422,36 @@ describe('nested messages\' summaries', () => {
     const n = m.parts[0] as Part & { type: 'message' };
     expect(n.message.parts[0]!.protection).toEqual({ encrypted: false, signed: null });
     expect(n.message.summary).toEqual({ encrypted: 'none', signed: 'none', from: null });
+  });
+});
+
+describe('replies to a re-sent ciphertext without protected headers (the last adversarial pass)', () => {
+  let alice: Keys, bob: Keys, mallory: Keys, app: App;
+  beforeAll(async () => {
+    [alice, bob, mallory] = await Promise.all([key('Alice', 'alice@example.test'), key('Bob', 'bob@example.test'), key('Mallory', 'mallory@evil.test')]);
+    app = new App(bob, [alice, bob, mallory]);
+  });
+  const SPOOF = ['From: Alice <alice@example.test>', 'Reply-To: Alice <mallory@evil.test>', 'To: bob@example.test', 'Subject: Re: quick question'];
+  const HP = crlf('Content-Type: text/plain; hp="cipher"\nFrom: Alice <alice@example.test>\nTo: bob@example.test\nSubject: the merger\nHP-Outer: Subject: [...]\n\nALICE SECRET\n');
+  const NOHP = crlf('Content-Type: text/plain\n\nALICE SECRET\n');
+
+  test('a decrypted payload without protected headers never replies to the unsigned outer Reply-To', async () => {
+    for (const inner of [HP, NOHP]) {
+      const c = await encrypt(inner, bob, alice);
+      // PGP/MIME without a form, inline armor (which strips any form), inline armor as a mixed's only text part
+      const shapes = [eml(...SPOOF, '', c), eml(...SPOOF, 'MIME-Version: 1.0', ...multipart('multipart/mixed', 'm', ['Content-Type: text/plain', '', c]))];
+      if (inner === NOHP) shapes.push(pgpMime(SPOOF, c));
+      for (const raw of shapes) {
+        const m = await read(raw, app);
+        expect(m.summary.from).toBe('matches');
+        expect(addrs(m.reply)).toEqual(['alice@example.test']);
+      }
+    }
+  });
+
+  test('unsigned: reply is empty, the app asks', async () => {
+    const m = await read(eml(...SPOOF, '', await encrypt(NOHP, bob)), app);
+    expect(m.summary.from).toBe('unknown');
+    expect(m.reply).toEqual([]);
   });
 });

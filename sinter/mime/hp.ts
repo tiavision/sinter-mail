@@ -90,7 +90,11 @@ export function applyProtected(root: RootInfo, outerRoot: Entity, outer: Headers
   const form = protectionForm(P);
   const counts = root.encrypted || root.sigs.some((s) => s.status === 'good');
   if (!P || !form || !counts) {
-    return { headers: outer, sources: OUTER(), reply: outer.replyTo.length ? outer.replyTo : outer.from, confidential: [], hpOuter: [], protectedFrom: null };
+    // a decrypted payload without protected headers: nothing binds the outer Reply-To, and a re-sent ciphertext (or
+    // one re-sent as inline armor, which strips its headers) would send the reply, quoting the plaintext, to whoever
+    // re-sent it. The outer From when a signature inside the ciphertext binds it; else empty, the app asks.
+    const reply = root.encrypted ? (rootSignedBy(root.sigs, single(outer.from)) ? outer.from : []) : outer.replyTo.length ? outer.replyTo : outer.from;
+    return { headers: outer, sources: OUTER(), reply, confidential: [], hpOuter: [], protectedFrom: null };
   }
   const ph = inner();
   const has = (name: string) => P.fields.some((f) => f.name === name);
