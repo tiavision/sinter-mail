@@ -122,7 +122,9 @@ It keeps 60 properties (colours, fonts, text, box, borders, table layout, displa
 value re-serialized. Selectors with `:hover`, `:focus`, `::before` and the like never match; `@media` rules
 are evaluated at the `media` option's width (and `prefers-color-scheme` for both schemes, below); `@import`, `@font-face`, `@keyframes` and `@supports` are
 dropped. Never kept: `position`, `z-index`, `transform`, `url()` in any value (background images
-included), `var()`, `calc()`, negative margins.
+included), `var()`, `calc()`, negative margins (written as 0; an inline image's small negative
+`margin-bottom`, an icon lowered onto the middle of its line, is written as the `vertical-align` that lowers it
+as far).
 
 `<mail-body>` writes each element's styles inline, and leaves out what the email hides: an element whose
 `display` is `none` at the parsed width is not in the page, nor anything inside it, so a mobile-only copy of

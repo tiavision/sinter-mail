@@ -241,6 +241,9 @@ export function resolve(root: RawElement, options: ResolveOptions): Resolved {
     if (candidates.length === 0 && inline === null && hs.length === 0) continue;
     let hkey = '';
     for (let i = 0; i < hs.length; i++) hkey += hs[i][0] + ':' + hs[i][1] + ';';
+    // an image's style is not shared with other tags': finish writes its negative margin-bottom differently
+    const img = e.el.tag === 'img';
+    const skey = img ? '\0img' + hkey : hkey;
     let slot = inlines.get(inline ?? '');
     if (!slot) inlines.set(inline ?? '', (slot = { own: undefined, plain: node(), hinted: null }));
     // Not for an element that matches more than CACHED rules (a hostile stylesheet's thousands): its
@@ -250,10 +253,10 @@ export function resolve(root: RawElement, options: ResolveOptions): Resolved {
     let at: Node | null = null;
     if (candidates.length <= CACHED && !rootOrBody) {
       let n: Node | undefined = slot.plain;
-      if (hkey !== '') {
+      if (skey !== '') {
         const byHints = (slot.hinted ??= new Map());
-        n = byHints.get(hkey);
-        if (!n) byHints.set(hkey, (n = node()));
+        n = byHints.get(skey);
+        if (!n) byHints.set(skey, (n = node()));
       }
       for (let i = 0; i < candidates.length; i++) {
         const id = candidates[i].id;
@@ -290,7 +293,7 @@ export function resolve(root: RawElement, options: ResolveOptions): Resolved {
       const v = values[SCHEME];
       if (v !== undefined && !WIDE.has(v)) for (const n of v.split(' ')) colorScheme.add(n);
     }
-    const style = finish(values);
+    const style = finish(values, img);
     if (at) at.style = style;
     if (style) out.set(e.el, style);
   }
@@ -303,7 +306,7 @@ interface Inline {
   own: StyleRule | null | undefined;
   /** the styles of elements with no hints, by their matched entries */
   plain: Node;
-  /** the others', by their hints' key, then their matched entries */
+  /** the others' (and images'), by their hints' key, then their matched entries */
   hinted: Map<string, Node> | null;
 }
 
@@ -406,16 +409,41 @@ function compiled(list: readonly Assignment[]): Compiled {
 const TEXT_DECORATION = -1, OVERFLOW = -2;
 const KEPT = PROPERTIES.map((p) => (p === 'text-decoration' ? TEXT_DECORATION : p === 'overflow' ? OVERFLOW : ID.get(p as Longhand)!));
 const [TD_LINE, TD_STYLE, TD_COLOR, OVERFLOW_X, OVERFLOW_Y] = (['text-decoration-line', 'text-decoration-style', 'text-decoration-color', 'overflow-x', 'overflow-y'] as const).map((l) => ID.get(l)!);
+const [MARGIN_BOTTOM, VERTICAL_ALIGN, DISPLAY, FLOAT] = (['margin-bottom', 'vertical-align', 'display', 'float'] as const).map((l) => ID.get(l)!);
+
+/**
+ * The vertical-align that puts an image where its negative margin-bottom does, or null. An inline image sits
+ * on the baseline by its margin box's bottom edge, so `margin-bottom: -6px` lowers it 6 px, as
+ * `vertical-align: -6px` does. The margin would let the image hang out of the email's box (and a float's or
+ * a block's margin would move it out); vertical-align cannot, as the line box grows around what it lowers.
+ * The bound is values.ts's (about one em, as vertical-align's own). Only for an image inline (by its
+ * default or its style) on the baseline, not floated; a box whose display the app changes ignores
+ * vertical-align and keeps 0. Not for an inline-block with text in it: its baseline is its last line's, and a
+ * margin does not move it.
+ */
+function lowered(values: (string | undefined)[], img: boolean): string | null {
+  const mb = values[MARGIN_BOTTOM];
+  if (!img || mb === undefined || mb[0] !== '-') return null;
+  const d = values[DISPLAY], va = values[VERTICAL_ALIGN], f = values[FLOAT];
+  if (d !== undefined && d !== 'inline' && d !== 'inline-block') return null;
+  if (va !== undefined && va !== 'baseline') return null;
+  if (f !== undefined && f !== 'none') return null;
+  return mb;
+}
 
 /** the tracked longhands as the element's style: the kept properties, in PROPERTIES order */
-function finish(values: (string | undefined)[]): Style | null {
+function finish(values: (string | undefined)[], img: boolean): Style | null {
   const style: Style = {};
   let any = false;
+  const shift = lowered(values, img);
   for (let k = 0; k < KEPT.length; k++) {
     const id = KEPT[k];
     let v: string | null | undefined;
     if (id === TEXT_DECORATION) v = joinTextDecoration(values[TD_LINE], values[TD_STYLE], values[TD_COLOR]);
     else if (id === OVERFLOW) v = joinOverflow(values[OVERFLOW_X], values[OVERFLOW_Y]);
+    // a negative margin is never written (values.ts keeps a small one in margin-bottom for lowered)
+    else if (id === MARGIN_BOTTOM && values[id]?.[0] === '-') v = '0';
+    else if (id === VERTICAL_ALIGN && shift !== null) v = shift;
     else v = values[id];
     if (v != null && safe(v)) { style[PROPERTIES[k]] = v; any = true; }
   }

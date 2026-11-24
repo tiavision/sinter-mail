@@ -451,6 +451,12 @@ const ATTACKS = [
   '<p style="background: \\75 rl(https://tracker.example/r)">x</p>',
   '<div style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999">overlay</div>',
   '<div style="margin-top:-1000px">over the app</div>',
+  // small negative margins that reach out where vertical-align would not: em of a large font, nesting, blocks
+  '<p style="font-size:500px;line-height:0"><img style="display:inline-block;height:400px;margin-bottom:-1em"></p>',
+  '<span style="display:inline-block;margin-top:-16px">'.repeat(30) + 'x',
+  '<div style="display:flex">' + '<span style="display:inline-block;float:left;margin-top:-16px;margin-bottom:-16px">'.repeat(30) + 'x</div>',
+  '<p>x<br><img style="margin-bottom:-16px;margin-left:-16px;margin-right:-16px"></p>',
+  '<p style="margin:-16px -1em -16px">x</p>',
   '<style>p::before { content: "fake" } a:visited { color: red } input[value^="a"] { background: url(https://k.example/a) }</style><p>x</p>',
   '<style>@font-face { font-family: X; src: url(https://evil.example/f.woff) } p { font-family: X }</style><p>x</p>',
   '<video poster="https://tracker.example/v.jpg"></video><input type=image src="https://tracker.example/i">',
@@ -468,7 +474,10 @@ describe('attacks', () => {
       const json = JSON.stringify(b);
       expect(json).not.toMatch(/javascript:|vbscript:|data:text|onerror|onload|evil\.example|tracker\.example|\bk\.example|attacker\.example\/\?/i);
       for (const e of els(b)) {
-        expect(e.style['margin-top'] ?? '', 'negative margin').not.toMatch(/^-/);
+        for (const side of ['top', 'right', 'bottom', 'left'] as const) expect(e.style[`margin-${side}`] ?? '', 'negative margin').not.toMatch(/^-/);
+        // a lowered image's vertical-align is within vertical-align's own bound (about one em)
+        const va = /^-(\d+(?:\.\d+)?)(px|em)$/.exec(e.style['vertical-align'] ?? '');
+        if (va) expect(Number(va[1]) * (va[2] === 'em' ? 16 : 1), 'vertical-align bound').toBeLessThanOrEqual(16);
         expect(DROP.has(e.tag)).toBe(false);
       }
     });
