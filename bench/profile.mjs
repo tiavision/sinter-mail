@@ -2,6 +2,7 @@
 // built unminified, with V8's sampling profiler around one message.
 //
 //   node --experimental-strip-types bench/profile.mjs [email=newsletter] [which=first|next] [runs=5] [top=40]
+// WARM=1: with <mail-warm> on the page; IDLE=<ms>: how long the loaded page waits before its first message (300).
 //
 // `first`: the first message opened in a loaded page (cold code: the time includes compiling and the
 // interpreter); `next`: after the corpus was opened twice. Self time per function and per module of the bundle,
@@ -68,7 +69,6 @@ try {
   for (let r = 0; r < +runsArg; r++) {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const p = await ctx.newPage();
-    if (process.env.ROUNDS) await p.addInitScript(`window.__ROUNDS = ${+process.env.ROUNDS}`);
     await p.goto(url);
     await p.waitForTimeout(+(process.env.IDLE ?? 300));
     if (which === 'next') for (let k = 0; k < 2; k++) for (const w of CORPUS) await open(p, w);
