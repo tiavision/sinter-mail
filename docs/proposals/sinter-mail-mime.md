@@ -407,32 +407,44 @@ without MIME pays nothing. `mail.parse` gains the `legacyDisplay` and `encrypted
 
 Our own. The existing parsers were measured against what sections 1 to 5 need: (1) bytes in, a charset per
 part; (2) the part tree, bodies not joined; (3) exact byte ranges, for `multipart/signed`; (4) the strict
-structure visible; (5) bounded work, past a limit a problem rather than a throw; (6) browser and Node without
-builtins, ESM, small, maintained; (7) RFC 2047, 2231, addresses, dates. Sizes are minified and gzipped, bundled
-with esbuild for the browser; behaviour was probed on the bundled code.
+structure visible, **every repair of malformed structure recorded**; (5) bounded work, past a limit a problem
+rather than a throw; (6) browser and Node without builtins, ESM, under `script-src 'self'` (so no
+WebAssembly), maintained; (7) RFC 2047, 2231, addresses, dates. Sizes are minified and gzipped, bundled with
+esbuild for the browser; behaviour was probed on the bundled code.
 
 | Package | Last release | Size | Meets | Fails |
 | --- | --- | --- | --- | --- |
 | postal-mime 4.2.1 | 2026-11 | 30.0 kB | 1, 6, 7; 5 partly | 2 (joins bodies with `\n`), 3 (the tree is internal, no offsets), 4; a limit rejects the whole message; recursive |
 | mailparser 3.15 | 2026-11 | Node only (422 kB) | 1, 3 (through mailsplit), 7 | 2, 6 (`stream`, `buffer`, `crypto`, iconv); in maintenance, pointing to postal-mime |
-| @protontech/jsmimeparser 3.0.2 | 2025-08, deprecated | 8.5 kB | 1, 4 (raw API), 7 | 2 (joins with `<br>`), 3, 5 (no limits; recursion overflows on 20,000 parts), 6 (archived) |
-| typescript-email-parser 1.0 (a port of Stalwart's Rust mail-parser) | 2026-08 | 24.4 kB for the MIME layer alone | 1, 2, 3 (exact RFC 3156 range), 4, 7; walks without recursion | 5 (no part, depth or header limits), 6 (CommonJS, charset tables, one maintainer) |
+| @protontech/jsmimeparser 3.0.2 | 2025-08, deprecated | 8.5 kB | 1, 7; 4 partly (raw API) | 2 (joins with `<br>`), 3, 5 (no limits; recursion overflows on 20,000 parts), 6 (archived) |
+| typescript-email-parser 1.0 (a port of Stalwart's Rust mail-parser) | 2026-08 | 24.4 kB for the MIME layer alone | 1, 2, 3 (exact RFC 3156 range), 7; walks without recursion | 4 ("tolerant and best-effort": repairs unrecorded, one `is_encoding_problem` flag per part), 5 (no part, depth or header limits; `maxBytes` throws), 6 (CommonJS, one maintainer, no security policy) |
+| Stalwart mail-parser, built to WebAssembly | (Rust, maintained) | about 220 kB of wasm | 1, 2, 3, 7; fuzzed, in production | 4 (lenient, as above), 6 (instantiating WebAssembly needs `'wasm-unsafe-eval'` in `script-src`; a Rust toolchain in the build); the published build, mail-parser-wasm, flattens to one HTML and one text |
 | emailjs-mime-parser 2.0.7 | 2019 | 226 kB | — | 1, 3, 5 (`fromCharCode.apply` overflows on 2 MB), 6 |
 | letterparser 0.1.8 | 2024 | 3.5 kB | size | 1 (strings only), 3, 5, 7 (no RFC 2231) |
 | eml-parse-js 1.2 beta | 2025 | 204 kB | — | 1, 3, 5, 6 |
 | eml-format, mailparser-mit | 2019 | Node only | — | 6 |
-| mail-parser-wasm 0.2.3 | 2026-10 | 223 kB of wasm | — | 1 to 4, 6: a flattened HTML and text |
 
-- **No candidate meets 2 to 5 together**, and those are the requirements the crypto steps rest on.
-- **Wrapping costs about as much as writing.** postal-mime would need its core forked to expose the tree and
-  byte ranges, and its advisories (three in a month: quadratic RFC 2047 decoding, boundary matching, address
-  spoofing) would become merges into the fork. typescript-email-parser would need conversion to ESM, limits
-  added, its charset tables and strict PEG layer removed, and a single maintainer's code adopted.
-- **Size**: every candidate that works is 24 to 30 kB, against a budget of 12 kB; `TextDecoder` already
-  holds the charsets.
+The decision does not rest on size; without the budget it is the same:
+
+- **Repairs must be visible.** The crypto steps are refused when the structure around them was ambiguous or
+  repaired (section 3, [Decisions](#decisions), 8): that is what keeps a lenient reading from being steered
+  into a badge. Every candidate that reads the tree well is lenient and silent about it, by design. Recording
+  repairs is not a wrapper around such a parser; it is the boundary scan again, which is half the reader.
+- **Limits must be problems, not throws.** A message past a limit still shows what it can (section 4). The
+  candidates have no limits (typescript-email-parser, jsmime) or reject the whole message (postal-mime);
+  adding them means patching the walk, which means a fork.
+- **The policy rules out WebAssembly.** The best-tested parser, Stalwart's, would need `'wasm-unsafe-eval'`,
+  and sinter-mail renders under `script-src 'self'`.
+- **A fork is ours anyway.** postal-mime would need its core forked to expose the tree and byte ranges, and
+  its advisories (three in a month: quadratic RFC 2047 decoding, boundary matching, address spoofing) would
+  become merges into the fork. typescript-email-parser would need repairs recorded, limits added, conversion
+  to ESM, and a single maintainer's code adopted, with every bug it shares with Stalwart ours to notice. What
+  is worth taking from both, the offset model and the stack walk, is taken as design (below).
 - **The bugs are in what we must own anyway**: other parsers' advisories are in encoded-word joining,
   boundary matching, address parsing and recursion ([Pitfalls](#pitfalls-from-other-mime-parsers)), which
   the crypto steps depend on most.
+- **Size settles it further**: every candidate that works is 24 kB or more, against a budget of 12 kB;
+  `TextDecoder` already holds the charsets.
 
 Borrowed, with their licenses:
 
