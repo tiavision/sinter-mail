@@ -28,6 +28,7 @@
   "exports": {
     ".": "./sinter/index.ts",
     "./parser": "./sinter/engine.ts",
+    "./mime": "./sinter/mime/index.ts",
     "./mail.css": "./sinter/mail.css",
     "./package.json": "./package.json"
   },
