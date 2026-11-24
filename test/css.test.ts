@@ -96,6 +96,15 @@ describe('values', () => {
     expect(ex('width', '-10px')).toBeNull();
     expect(ex('margin-left', '-10px')).toEqual({ 'margin-left': '0' });
     expect(ex('margin', '-10px 0 5px')).toEqual({ 'margin-top': '0', 'margin-right': '0', 'margin-bottom': '5px', 'margin-left': '0' });
+    // a small negative margin-bottom is tracked, for the cascade to write as 0 or as an image's vertical-align
+    expect(ex('margin-bottom', '-6px')).toEqual({ 'margin-bottom': '-6px' });
+    expect(ex('margin-bottom', '-1em')).toEqual({ 'margin-bottom': '-1em' });
+    expect(ex('margin-bottom', '-17px')).toEqual({ 'margin-bottom': '0' });
+    expect(ex('margin-bottom', '-2em')).toEqual({ 'margin-bottom': '0' });
+    expect(ex('margin-bottom', '-10%')).toEqual({ 'margin-bottom': '0' });
+    expect(ex('margin-bottom', '10%')).toEqual({ 'margin-bottom': '10%' });
+    expect(ex('margin', '-6px')).toEqual({ 'margin-top': '0', 'margin-right': '0', 'margin-bottom': '-6px', 'margin-left': '0' });
+    expect(ex('margin', '5px 10px -6px')).toEqual({ 'margin-top': '5px', 'margin-right': '10px', 'margin-bottom': '-6px', 'margin-left': '10px' });
     expect(ex('padding', '-1px')).toBeNull();
     expect(ex('text-indent', '-9999px')).toEqual({ 'text-indent': '0' });
     expect(ex('letter-spacing', '-0.5px')).toEqual({ 'letter-spacing': '-0.5px' });
@@ -349,6 +358,39 @@ describe('the cascade', () => {
       p.c { height: 4px } .c { font-size: 10px !important }
       </style><p id=x class=c style="width: 2px; height: 5px; font-size: 20px; line-height: 2 !important">`);
     expect(s.x).toEqual({ color: 'red', 'line-height': '2', 'font-size': '10px', width: '1px', height: '5px' });
+  });
+  test('a small negative margin-bottom lowers an inline image by vertical-align, never as a margin', () => {
+    // a shop's card logo, centred on its line by the margin (made up)
+    const icon = 'height: 24px; display: inline-block; margin-top: 5px; margin-bottom: -6px';
+    expect(one(`<p><img id=x style="${icon}">ends with 1234</p>`)).toEqual({
+      display: 'inline-block', 'vertical-align': '-6px', height: '24px', 'margin-top': '5px', 'margin-bottom': '0',
+    });
+    expect(one('<img id=x style="margin: 0 0 -0.5em">')).toMatchObject({ 'vertical-align': '-0.5em', 'margin-bottom': '0' });
+    expect(one('<img id=x style="display: inline; margin-bottom: -6px">')).toMatchObject({ 'vertical-align': '-6px' });
+    expect(one('<img id=x style="vertical-align: baseline; margin-bottom: -6px">')).toMatchObject({ 'vertical-align': '-6px' });
+    // not where vertical-align would not do what the margin does: written as 0, as every negative margin
+    const zero = { 'margin-bottom': '0' };
+    expect(one('<img id=x style="margin-bottom: -6px; display: block">')).toEqual({ display: 'block', ...zero });
+    expect(one('<img id=x style="margin-bottom: -6px; float: left">')).toEqual({ float: 'left', ...zero });
+    expect(one('<img id=x style="margin-bottom: -6px; vertical-align: middle">')).toEqual({ 'vertical-align': 'middle', ...zero });
+    expect(one('<img id=x align=middle style="margin-bottom: -6px">')).toEqual({ 'vertical-align': 'middle', ...zero });
+    expect(one('<img id=x style="margin-bottom: -6px; display: inherit">')).toEqual({ display: 'inherit', ...zero });
+    expect(one('<img id=x style="margin-bottom: -20px">')).toEqual(zero);
+    expect(one('<img id=x style="margin-bottom: -10%">')).toEqual(zero);
+    // an inline-block with text in it sits on its last line's baseline: the margin does not move it
+    expect(one('<span id=x style="display: inline-block; margin-bottom: -6px">x</span>')).toEqual({ display: 'inline-block', ...zero });
+    expect(one('<p id=x style="margin-bottom: -6px">x</p>')).toEqual(zero);
+    // the margin cascades as margin-bottom: a later or more important one replaces it
+    expect(one('<style>img { margin-bottom: -6px }</style><img id=x style="margin-bottom: 2px">')).toEqual({ 'margin-bottom': '2px' });
+    expect(one('<style>img { margin: 0 !important }</style><img id=x style="margin-bottom: -6px">')).toEqual({
+      'margin-top': '0', 'margin-right': '0', 'margin-bottom': '0', 'margin-left': '0',
+    });
+    expect(one('<img id=x style="margin-bottom: -6px; margin-bottom: unset">')).toEqual({ 'margin-bottom': 'unset' });
+    // one inline style on an image and on a span: the cache shares styles by inline text, not by tag
+    const s = styles('<img id=a style="margin-bottom: -6px"><span id=b style="margin-bottom: -6px">x</span><img id=c style="margin-bottom: -6px">');
+    expect(s.a).toEqual({ 'vertical-align': '-6px', ...zero });
+    expect(s.b).toEqual(zero);
+    expect(s.c).toEqual(s.a);
   });
   test('inline !important beats author !important', () => {
     expect(one('<style>p { color: red !important }</style><p id=x style="color: blue !important">')).toEqual({ color: 'blue' });

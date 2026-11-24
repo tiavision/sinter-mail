@@ -339,6 +339,31 @@ test('mail.css keeps an image in a table cell at its size, beside a cell of long
   }
 });
 
+test('a small negative margin-bottom on an image puts it where the browser does, by vertical-align (a card logo on its line)', async () => {
+  // a shop's order confirmation, made up: a logo lowered onto the middle of its line of text by margin-bottom: -6px
+  const { parse } = await import('../sinter/parse.js');
+  const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const html = `<p style="font-family: Arial, sans-serif; line-height: 150%; font-size: 16px; margin: 0;">
+<img src="${pixel}" height="24" alt="" style="height: 24px; width: 38px; display: inline-block; margin-right: 10px; margin-top: 5px; margin-bottom: -6px;">
+<span style="font-size: 16px;">ends with 1234</span><br></p>`;
+  // where the image's top is from the text's, as written
+  const offset = () => {
+    const img = document.querySelector('#message img, body > p img')!.getBoundingClientRect();
+    const span = document.querySelector('#message span, body > p span')!.getBoundingClientRect();
+    return img.top - span.top;
+  };
+  const { page: native } = await tab();
+  await native.setContent(`<!doctype html><body>${html}</body>`);
+  const expected = await native.evaluate(offset);
+  await native.close();
+  message = JSON.stringify(parse(html, { images: 'allow' }));
+  const { page: p } = await tab();
+  await p.goto(await serve(dist('api')));
+  await p.waitForFunction(() => document.querySelector('#message img'));
+  expect(await p.evaluate(offset)).toBeCloseTo(expected, 0);
+  await p.close();
+});
+
 test('<mail-warm> requests nothing: its samples\' images, pixel and fonts stay unloaded (proxied, they would be the app\'s own URLs)', async () => {
   const base = await serve(dist('warm'));
   const { page: p, errors } = await tab();

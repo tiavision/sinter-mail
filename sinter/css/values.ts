@@ -5,7 +5,9 @@
 // What is kept is a simple form of what browsers accept: lengths in absolute and font-relative units,
 // percentages, colours, keywords, font lists. Not kept: viewport units (the email's box is not the
 // viewport), math functions, `var()`, `env()`, `attr()`, images and any other function, negative margins
-// (an email must not reach outside its box over the app), vendor-prefixed properties. A kept value
+// (an email must not reach outside its box over the app: a small negative margin-bottom is tracked here, and
+// index.ts, finish, writes it as 0 or as the vertical-align that lowers an image as far), vendor-prefixed
+// properties. A kept value
 // never contains a backslash or a function the runtime refuses: strings are re-quoted from their decoded
 // characters, and the only functions written are rgb(), rgba(), hsl() and hsla() with numbers in them.
 import type { Property } from '../sinter.types.js';
@@ -247,6 +249,13 @@ export function quote(s: string): string | null {
 // the single-value longhands: each a check of the one component value
 type Check = (v: CV | undefined) => string | null;
 
+/**
+ * margin-bottom: a negative length down to about one em is tracked as written, for finish (index.ts) to write
+ * as 0 or as an image's vertical-align (`margin-bottom: -6px`, an icon lowered onto the middle of its line);
+ * a larger one, or a negative percentage, is 0 as every negative margin is
+ */
+const MARGIN_BOTTOM: Check = (v) => (kw(v) === 'auto' ? 'auto' : length(v, { neg: 'small' }) ?? length(v, { pct: true, neg: 'clamp' }));
+
 const SINGLE = table<Partial<Record<Longhand, Check>>>({
   color,
   'background-color': color,
@@ -272,7 +281,7 @@ const SINGLE = table<Partial<Record<Longhand, Check>>>({
   'max-height': box('none'),
   'margin-top': (v) => (kw(v) === 'auto' ? 'auto' : length(v, { pct: true, neg: 'clamp' })),
   'margin-right': (v) => (kw(v) === 'auto' ? 'auto' : length(v, { pct: true, neg: 'clamp' })),
-  'margin-bottom': (v) => (kw(v) === 'auto' ? 'auto' : length(v, { pct: true, neg: 'clamp' })),
+  'margin-bottom': MARGIN_BOTTOM,
   'margin-left': (v) => (kw(v) === 'auto' ? 'auto' : length(v, { pct: true, neg: 'clamp' })),
   'padding-top': (v) => length(v, { pct: true }),
   'padding-right': (v) => length(v, { pct: true }),
@@ -373,7 +382,11 @@ export function expand(name: string, value: CV[] | string): Assignment[] | null 
     return v === null ? null : [[name as Longhand, v]];
   }
   switch (name) {
-    case 'margin': return fourSides(xs, SINGLE['margin-top']!, (s) => `margin-${s}` as Longhand);
+    case 'margin': {
+      // every side checked as margin-bottom, then the other sides' negatives written as 0
+      const a = fourSides(xs, MARGIN_BOTTOM, (s) => `margin-${s}` as Longhand);
+      return a && a.map(([l, v]) => [l, l !== 'margin-bottom' && v[0] === '-' ? '0' : v]);
+    }
     case 'padding': return fourSides(xs, SINGLE['padding-top']!, (s) => `padding-${s}` as Longhand);
     case 'border-width': return fourSides(xs, BORDER_WIDTH, (s) => `border-${s}-width` as Longhand);
     case 'border-style': return fourSides(xs, BORDER_STYLE, (s) => `border-${s}-style` as Longhand);
