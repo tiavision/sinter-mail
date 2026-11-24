@@ -233,7 +233,7 @@ describe('near-boundary lines', () => {
 });
 
 describe('inline sets', () => {
-  test('499 HTML parts beside 499 Content-IDs share one frozen set: built once, still right', () => {
+  test('499 HTML parts beside 499 Content-IDs share one frozen set of the first 64: built once, still right, JSON linear', () => {
     let s = 'Content-Type: multipart/mixed; boundary=m\r\n\r\n';
     for (let i = 0; i < 499; i++) s += '--m\r\nContent-Type: text/html\r\n\r\n';
     for (let i = 0; i < 499; i++) s += `--m\r\nContent-Type: image/png\r\nContent-ID: <${i}@x>\r\n\r\n`;
@@ -244,8 +244,12 @@ describe('inline sets', () => {
     const html = m.parts as (Part & { type: 'html' })[];
     expect(html).toHaveLength(499);
     const set = html[0]!.inline;
-    expect(set).toHaveLength(499);
+    // the message-wide fallback is capped at 64 per part, in document order (show.MAX_INLINE_ELSEWHERE)
+    expect(set).toHaveLength(64);
+    expect(set).toEqual(m.attachments.slice(0, 64).map((a, i) => ({ contentId: `${i}@x`, attachment: a.id })));
     expect(set[7]).toEqual({ contentId: '7@x', attachment: m.attachments[7]!.id });
+    // serialized, the shared set is written once per part: bounded by the cap, not quadratic
+    expect(JSON.stringify(m).length).toBeLessThan(3_000_000);
     expect(Object.isFrozen(set)).toBe(true);
     for (const p of html) expect(p.inline).toBe(set);
     // one set held, however many parts show it: the distinct objects are linear in the input
@@ -258,6 +262,18 @@ describe('inline sets', () => {
       for (const v of Object.values(x)) stack.push(v);
     }
     expect(distinct.size).toBeLessThan(20_000);
+  });
+
+  test('the cap is on the message-wide fallback only: a part\'s own related parts are all in its set', () => {
+    const own = Array.from({ length: 70 }, (_, i) => ['--r', 'Content-Type: image/png', `Content-ID: <own${i}>`, '', 'P']).flat();
+    const out = Array.from({ length: 70 }, (_, i) => ['Content-Type: image/png', `Content-ID: <out${i}>`, '', 'Q']);
+    const m = mime(eml(...multipart('multipart/mixed', 'm',
+      ['Content-Type: multipart/related; boundary=r', '', '--r', 'Content-Type: text/html', '', 'b', ...own, '--r--'], ...out)));
+    const set = (m.parts[0] as Part & { type: 'html' }).inline;
+    expect(set).toHaveLength(70 + 64);
+    expect(set.slice(0, 70).map((x) => x.contentId)).toEqual(Array.from({ length: 70 }, (_, i) => `own${i}`));
+    expect(set.slice(70).map((x) => x.contentId)).toEqual(Array.from({ length: 64 }, (_, i) => `out${i}`));
+    expect(m.problems).toEqual([]);
   });
 
   test('parts with another related scope or protection get their own set', () => {

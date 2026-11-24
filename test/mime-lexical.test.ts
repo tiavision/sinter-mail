@@ -1097,7 +1097,7 @@ describe('purity', () => {
       ['address', ['addresses', 'sameAddress', 'addressKey', 'punycode']],
       ['date', ['parseDate']],
       ['filename', ['filename', 'safeName']],
-      ['sha256', ['sha256', 'hex', 'stepDigest', 'verifyDigest']],
+      ['sha256', ['sha256', 'hex', 'stepDigest', 'verifyDigest', 'cleartextDigest']],
       ['magic', ['imageType']],
     ];
     for (const [file, names] of entries) {

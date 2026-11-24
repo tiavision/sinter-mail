@@ -9,7 +9,7 @@ import type { Ctx, Reader, Scope } from './show.js';
 import type { Part } from './types.js';
 import { canonicalize, transferDecode } from './decode.js';
 import { newBudget, MAX_PAYLOAD } from './scan.js';
-import { stepDigest, verifyDigest } from './sha256.js';
+import { cleartextDigest, stepDigest, verifyDigest } from './sha256.js';
 
 /** a signature over the payload's root (section 7): its step, its combined status, its signer */
 export interface Sig { step: string; status: Verdict['status'] | 'pending'; signer: string[] }
@@ -99,27 +99,16 @@ export function refBytes(r: Reader, ref: Ref): Uint8Array {
   return ref.canonical ? canonicalize(out) : out;
 }
 
-/** digests by source (the input, a payload: by identity) and Ref, so a cache miss of mail.mime hashes nothing twice */
-const digests = new WeakMap<Uint8Array, Map<string, string>>();
+/** a decrypt step's digest: over the bytes `ref` names. Digests are computed per call, never kept across calls by
+ * input identity: an input changed in place must not keep an old result's digest ("Settled for implementation") */
+export const digestOf = (r: Reader, ref: Ref, bytes?: Uint8Array) => stepDigest(bytes ?? refBytes(r, ref));
 
-const refKey = (ref: Ref) => `${ref.start}:${ref.end}:${ref.encoding}:${ref.canonical ? 1 : 0}:${ref.slice ? ref.slice.join(',') : ''}`;
-
-function cached(r: Reader, ref: Ref, key: string, f: () => string): string {
-  const src = r.sources.get(ref.source)!;
-  let of = digests.get(src);
-  if (!of) digests.set(src, (of = new Map()));
-  let d = of.get(key);
-  if (d === undefined) of.set(key, (d = f()));
-  return d;
-}
-
-/** a decrypt or verify-cleartext step's digest: over the bytes `ref` names */
-export const digestOf = (r: Reader, ref: Ref, bytes?: Uint8Array) =>
-  cached(r, ref, 'd' + refKey(ref), () => stepDigest(bytes ?? refBytes(r, ref)));
+/** a verify-cleartext step's digest: the normalized charset label's length and bytes, then the block */
+export const cleartextDigestOf = (r: Reader, ref: Ref, charset: string, bytes?: Uint8Array) =>
+  cleartextDigest(charset, bytes ?? refBytes(r, ref));
 
 /** a verify step's digest: the signed bytes' length, the signed bytes, the signature ("Settled for implementation") */
-export const verifyDigestOf = (r: Reader, signed: Ref, signature: Ref) =>
-  cached(r, signed, 'v' + refKey(signed) + '|' + refKey(signature), () => verifyDigest(refBytes(r, signed), refBytes(r, signature)));
+export const verifyDigestOf = (r: Reader, signed: Ref, signature: Ref) => verifyDigest(refBytes(r, signed), refBytes(r, signature));
 
 const ORDER: Verdict['status'][] = ['bad', 'revoked', 'expired', 'no-key', 'unsupported'];
 
@@ -291,6 +280,33 @@ export function findBlocks(b: Uint8Array): Block[] {
     pos = n;
   }
   return out;
+}
+
+/**
+ * Whether a cleartext-signed block reads the same to the reader and to an OpenPGP implementation (section 5): no CR
+ * that is not followed by LF, no control byte other than TAB, CR and LF; and in `text`, the block decoded as an app
+ * decodes it (charset.decodeAsApp), the lines that read as armor lines (`-----` first, once CRs and trailing
+ * whitespace are removed, a line also split where JavaScript's multiline `^` matches: U+2028, U+2029, and NEL to be
+ * safe) are exactly the reader's three: BEGIN PGP SIGNED MESSAGE, BEGIN PGP SIGNATURE, END PGP SIGNATURE. Otherwise
+ * an implementation that removes CRs or reads lines differently would end the signed text elsewhere than the reader,
+ * and show text it did not sign as signed. The charset's own rule (stateless ASCII superset) is the caller's.
+ */
+export function cleartextSafe(b: Uint8Array, blk: Block, text: string): boolean {
+  for (let i = blk.start; i < blk.end; i++) {
+    const c = b[i]!;
+    if (c === 0x0d ? b[i + 1] !== 0x0a : (c < 0x20 && c !== 0x09 && c !== 0x0a) || c === 0x7f) return false;
+  }
+  const want = [BEGIN_SIGNED, BEGIN_SIGNATURE, END_SIGNATURE];
+  let n = 0;
+  for (const line of text.split('\n')) {
+    for (const piece of line.replace(/\r/g, '').split(/[\u2028\u2029\u0085]/)) {
+      const t = piece.trimEnd();
+      if (!t.startsWith('-----')) continue;
+      if (n >= want.length || t !== want[n]) return false;
+      n++;
+    }
+  }
+  return n === want.length;
 }
 
 /** whether the bytes start (whitespace aside) with an armored message's BEGIN line */

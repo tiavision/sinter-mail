@@ -7,7 +7,8 @@
 //   `not-root`, with the id its step would have; listed in `open`, it gets the step and is shown in place, opened.
 // - PGP/MIME signed anywhere shown but in a nested message: a verify step labelling its first part's subtree.
 // - Inline PGP in a text/plain body: anchored cleartext-signed blocks split the part around them, each a
-//   verify-cleartext step; an armored message is a root decrypt step only as the whole body of the root's only
+//   verify-cleartext step (unless an OpenPGP implementation could read the block differently: its charset, a bare
+//   CR, a control byte, a line that is almost an armor line; then text, `armor-headers`); an armored message is a root decrypt step only as the whole body of the root's only
 //   part shown (decided once the walk is done, `resolveCandidates`), otherwise an encrypted part, not-root.
 // A blocking problem near crypto (in the entity, an ancestor or a descendant) makes no step: the part is shown
 // unlabelled.
@@ -15,19 +16,34 @@ import type { Entity } from './scan.js';
 import type { Part, Protection, Ref, Verdict } from './types.js';
 import { all, paramOf, scan } from './scan.js';
 import { attach, body, problem, textPart, textQuiet, walk, type Ctx, type Mode, type Reader, type Scope } from './show.js';
-import { asciiLower, decodeText } from './charset.js';
+import { asciiLower, asciiSuperset, decodeAsApp, decodeText, normalizeLabel } from './charset.js';
 import { base64Result, ignore } from './decode.js';
 import {
-  accept, armored, canOffer, combine, digestOf, findBlocks, offer, refBytes, shownSigned, signedBy, stateOf,
-  verifyDigestOf, whitespace, withdraw, type CryptoState, type Sig,
+  accept, armored, canOffer, cleartextDigestOf, cleartextSafe, combine, digestOf, findBlocks, offer, refBytes, shownSigned,
+  signedBy, stateOf, verifyDigestOf, whitespace, withdraw, type CryptoState, type Sig,
 } from './steps.js';
 import { hasBareLF } from './decode.js';
 import { legacyText, protectionForm, v1Display } from './hp.js';
 
 export type Shape = 'encrypted' | 'exchange' | 'signed';
 
-/** whether a text is `Version: 1` on a line of its own (application/pgp-encrypted's body, RFC 3156) */
-const versionOne = (t: string) => t.split(/\r?\n/).some((l) => l.trim() === 'Version: 1');
+/** how much of application/pgp-encrypted's body is looked at for `Version: 1`: the line is its first in practice, and
+ * a long body (a megabyte of line breaks) costs nothing beyond its decoding */
+const VERSION_SCAN = 1024;
+
+/** whether a text has `Version: 1` on a line of its own (application/pgp-encrypted's body, RFC 3156) among the lines
+ * that end within its first kilobyte (or the whole text, when it is shorter) */
+function versionOne(t: string): boolean {
+  const end = Math.min(t.length, VERSION_SCAN);
+  for (let i = 0; i < end;) {
+    let lf = t.indexOf('\n', i);
+    if (lf < 0) lf = t.length;
+    if (lf > end) return false;
+    if (t.slice(i, lf).trim() === 'Version: 1') return true;
+    i = lf + 1;
+  }
+  return false;
+}
 
 const blank = (t: string) => t.trim() === '';
 
@@ -41,6 +57,14 @@ const blank = (t: string) => t.trim() === '';
  */
 export function cryptoShape(r: Reader, e: Entity): Shape | null {
   if (e.boundary === null) return null;
+  // once per entity and call: flavor() asks again for every alternative above it
+  const shapes = (r.shapes ??= new Map());
+  let shape = shapes.get(e);
+  if (shape === undefined) shapes.set(e, (shape = shapeOf(r, e)));
+  return shape;
+}
+
+function shapeOf(r: Reader, e: Entity): Shape | null {
   if (e.type === 'multipart/encrypted') return 'encrypted';
   const c = e.children;
   if (e.type === 'multipart/signed') {
@@ -153,7 +177,11 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
   // the payload's blocking problems are below the encrypted entity, and so below everything above it
   if (s.root.below) for (let x: Entity | null = e; x && !x.below; x = x.parent) x.below = true;
   const R = s.root;
-  const protection = payloadProtection(ctx.protection, id, a.d.signatures, !root);
+  // signatures inside the ciphertext label the payload under the rule of a multipart/signed (section 6): a blocking
+  // problem anywhere in it, mid-stream base64 padding included (scanned before the walk), and they label nothing
+  let sigs = a.d.signatures?.length ? a.d.signatures : undefined;
+  if (sigs && signedBlocked(r, R)) sigs = undefined;
+  const protection = payloadProtection(ctx.protection, id, sigs, !root);
   const sub: Ctx = { ...ctx, protection, legacy: false, hide: null };
   if (root) {
     st.root.encrypted = true;
@@ -161,11 +189,15 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
     if (st.root.decrypts < 2) st.rootDecrypt.add(R);
     const P = cryptoShape(r, R) === 'signed' ? R.children[0]! : R;
     st.root.payload = P;
-    if (a.d.signatures?.length) st.root.sigs.push({ step: id, ...combine(a.d.signatures) });
     sub.legacy = protectionForm(P)?.form === 'hp';
     sub.hide = v1Display(P);
   }
+  const parts = scope.parts.length, attachments = scope.attachments.length;
   walk(r, R, scope, 'show', sub);
+  if (!sigs) return;
+  // a blocking problem found while walking the payload: its signatures label nothing after all
+  if (R.above || R.below) relabel(scope, parts, attachments, id, payloadProtection(ctx.protection, id, undefined, !root));
+  else if (root) st.root.sigs.push({ step: id, ...combine(sigs) });
 }
 
 /** whether a signed subtree has a blocking problem: one recorded, or base64 with padding mid-stream in any part of it
@@ -190,8 +222,8 @@ function relabel(scope: Scope, parts: number, attachments: number, step: string,
     const q: Protection = { encrypted: p.encrypted, signed: base.signed };
     if (p.opened) q.opened = true;
     const slash = id.lastIndexOf('/');
-    // under a decryption below the signature, the decrypt step labels it
-    const decryptStep = p.encrypted && !base.encrypted && slash > 0 ? id.slice(0, slash) : base.step;
+    // a decrypted part unsigned: the decrypt step whose plaintext holds it labels it (its id up to the last `/`)
+    const decryptStep = p.encrypted && slash > 0 ? id.slice(0, slash) : base.step;
     if (base.signed !== null ? base.step !== undefined : decryptStep !== undefined) q.step = base.signed !== null ? base.step : decryptStep;
     if (base.signer) q.signer = [...base.signer];
     return q;
@@ -218,8 +250,11 @@ export function showSigned(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: 
     st.rootDecrypt.add(signed);
     if (!st.root.encrypted) st.root.payload = signed;
   }
-  if (mode !== 'show' || e.nested > 0 || e.above || e.below || !canOffer(st)) {
-    if (mode === 'show' && e.nested === 0 && !e.above && !e.below && !st.budget.overrun) problem(r, e, 'limit', true);
+  const offerable = mode === 'show' && e.nested === 0 && !e.above && !e.below;
+  // the padding scan runs before the walk: a step withdrawn after its subtree was walked would leave steps offered
+  // and labels given inside it on the way
+  if (!offerable || !canOffer(st) || signedBlocked(r, e)) {
+    if (offerable && !canOffer(st) && !st.budget.overrun) problem(r, e, 'limit', true);
     walk(r, signed, scope, mode, ctx);
     return;
   }
@@ -233,8 +268,9 @@ export function showSigned(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: 
   offer(st, { id, state: vs ? 'done' : 'pending', part: e.id, kind: 'verify', signed: signedRef, signature, micalg: micalg === null ? null : asciiLower(micalg) });
   const parts = scope.parts.length, attachments = scope.attachments.length;
   walk(r, signed, scope, 'show', { ...ctx, protection: signedBy(ctx.protection, id, c.status, c.signer) });
-  if (signedBlocked(r, e)) {
-    // a blocking problem in the signed subtree (found while walking it, or mid-stream padding): no step, no label
+  if (e.above || e.below) {
+    // a blocking problem found while walking the signed subtree: no step, no label (the candidates and cleartext
+    // blocks inside it read their part's protection once the walk is done)
     withdraw(st, id);
     relabel(scope, parts, attachments, id, ctx.protection);
     return;
@@ -276,13 +312,18 @@ function inlineEncrypted(r: Reader, e: Entity, pid: string, id: string, ref: Ref
   }
   r.sources.set(id, a.plaintext);
   const t = textEntity(st, `${id}/1`, id, a.plaintext.length, e);
-  const sub: Ctx = { ...ctx, protection: payloadProtection(ctx.protection, id, a.d.signatures, !root), legacy: false, hide: null };
+  const sigs = a.d.signatures?.length ? a.d.signatures : undefined;
+  const sub: Ctx = { ...ctx, protection: payloadProtection(ctx.protection, id, sigs, !root), legacy: false, hide: null };
   if (root) {
     st.root.encrypted = true;
     st.root.payload = t;
-    if (a.d.signatures?.length) st.root.sigs.push({ step: id, ...combine(a.d.signatures) });
   }
+  const parts = scope.parts.length, attachments = scope.attachments.length;
   if (!showText(r, t, scope, sub)) scope.parts.push(textPart(r, t, sub));
+  if (!sigs) return;
+  // as for a MIME payload: a blocking problem found in it, and its signatures label nothing
+  if (t.above || t.below) relabel(scope, parts, attachments, id, payloadProtection(ctx.protection, id, undefined, !root));
+  else if (root) st.root.sigs.push({ step: id, ...combine(sigs) });
 }
 
 /** a plain text part of `bytes[s, e)` of the entity, `id` */
@@ -316,7 +357,14 @@ export function showText(r: Reader, e: Entity, scope: Scope, ctx: Ctx): boolean 
   }
   if (e.type !== 'text/plain' || !textQuiet(r, e).includes('-----BEGIN PGP ')) return false;
   const bytes = body(r, e, ignore);
-  const found = findBlocks(bytes);
+  const label = paramOf(e.params, 'charset');
+  const charset = (label === null ? '' : normalizeLabel(label)) || 'utf-8';
+  // a block the reader and an OpenPGP implementation could read differently is text, as a block with other armor
+  // headers is: a charset that is not a stateless ASCII superset, a bare CR, a control byte, a line that reads as an
+  // armor line once CRs and trailing whitespace are removed but is not one as sent (steps.cleartextSafe)
+  const ascii = asciiSuperset(charset);
+  const found = findBlocks(bytes).map((b) => b.kind === 'signed' && b.ok
+    && !(ascii && cleartextSafe(bytes, b, decodeAsApp(bytes.subarray(b.start, b.end), charset))) ? { ...b, ok: false } : b);
   if (found.some((b) => b.kind === 'signed' && !b.ok)) problem(r, e, 'armor-headers');
   // near crypto: no step, the part shown as text; a nested message's cleartext signatures make no step either
   if (e.above) return false;
@@ -337,7 +385,6 @@ export function showText(r: Reader, e: Entity, scope: Scope, ctx: Ctx): boolean 
     } else inlineEncrypted(r, e, e.id, id, whole, scope, ctx, false);
     return true;
   }
-  const charset = asciiLower(paramOf(e.params, 'charset') ?? 'utf-8');
   // wholly one cleartext-signed block (whitespace aside): its signature may cover the root message (protect.ts)
   const wholeSigned = blocks.length === 1 && blocks[0]!.kind === 'signed' && !nested
     && whitespace(bytes, 0, blocks[0]!.start) && whitespace(bytes, blocks[0]!.next, bytes.length);
@@ -346,7 +393,8 @@ export function showText(r: Reader, e: Entity, scope: Scope, ctx: Ctx): boolean 
     if (!whitespace(bytes, pos, b.start)) scope.parts.push(segment(r, e, `${e.id}:${++n}`, bytes, pos, b.start, ctx));
     const pid = `${e.id}:${++n}`;
     const ref: Ref = { ...whole, slice: [b.start, b.end] };
-    const id = `${pid}#${digestOf(r, ref, bytes.slice(b.start, b.end))}`;
+    const id = b.kind === 'message' ? `${pid}#${digestOf(r, ref, bytes.slice(b.start, b.end))}`
+      : `${pid}#${cleartextDigestOf(r, ref, charset, bytes.slice(b.start, b.end))}`;
     if (b.kind === 'message') inlineEncrypted(r, e, pid, id, ref, scope, ctx, false);
     else {
       let protection = { ...ctx.protection }, sig: Omit<Sig, 'step'> | null = null;
@@ -380,10 +428,18 @@ export function resolveCandidates(r: Reader, scope: Scope): void {
   for (const c of st.candidates) {
     const at = c.scope.parts.indexOf(c.part);
     if (at < 0) continue;
+    // its part's protection now: a signature around it may have been withdrawn after it was found (relabel)
+    const ctx: Ctx = { ...c.ctx, protection: { ...c.part.protection } };
+    if (c.entity.above) {
+      // a blocking problem above it, found after it: no step of any kind, not even one to open; shown as text
+      st.known.delete(c.part.step);
+      c.scope.parts.splice(at, 1, textPart(r, c.entity, ctx));
+      continue;
+    }
     const root = c.scope === scope && scope.parts.length === 1 && st.root.decrypts === 0 && !st.root.encrypted;
     if (!root && !st.open.has(c.part.step)) continue;
     const sub: Scope = { parts: [], attachments: [], calendar: [], html: [], of: new Map() };
-    inlineEncrypted(r, c.entity, c.part.id, c.part.step, c.part.ref, sub, c.ctx, root);
+    inlineEncrypted(r, c.entity, c.part.id, c.part.step, c.part.ref, sub, ctx, root);
     c.scope.parts.splice(at, 1, ...sub.parts);
   }
   st.candidates.length = 0;

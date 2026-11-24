@@ -14,6 +14,7 @@ import { clean, messageIds, unstructured, type RawField } from './headers.js';
 import { checkSigned, cryptoShape, encryptedFile, showEncrypted, showSigned, showText } from './crypto.js';
 import { all, isMultipart, isNestedMessage, paramOf, type Entity, type Found } from './scan.js';
 import type { CryptoState } from './steps.js';
+import type { Shape } from './crypto.js';
 
 /** what a walk reads from and reports to: one call's sources and problems */
 export interface Reader {
@@ -25,10 +26,14 @@ export interface Reader {
   texts: Map<Entity, { text: string; codes: ProblemCode[] }>;
   /** the steps' state (steps.ts): the options' results, the steps offered, the budget; made on first use */
   crypto?: CryptoState;
+  /** each multipart's cryptographic shape (crypto.cryptoShape), once per call; made on first use */
+  shapes?: Map<Entity, Shape | null>;
+  /** each entity's flavor (flavor), once per call: alternatives nested in alternatives ask for it again; made on first use */
+  flavors?: Map<Entity, Flavor>;
 }
 
 export function reader(sources: Map<string, Uint8Array>, problems: Found[], prefer: 'html' | 'text'): Reader {
-  return { sources, problems, prefer, texts: new Map() };
+  return { sources, problems, prefer, texts: new Map(), shapes: new Map(), flavors: new Map() };
 }
 
 /**
@@ -201,7 +206,16 @@ function alternative(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: Ctx): 
  * What a candidate of an alternative shows: `html`, `text`, `other` (something shown that is neither, such as an
  * encrypted part), or null (nothing to show). A multipart shows HTML when any part of it does.
  */
-export function flavor(r: Reader, e: Entity): 'html' | 'text' | 'other' | null {
+export type Flavor = 'html' | 'text' | 'other' | null;
+
+export function flavor(r: Reader, e: Entity): Flavor {
+  const flavors = (r.flavors ??= new Map());
+  let f = flavors.get(e);
+  if (f === undefined) flavors.set(e, (f = flavorOf(r, e)));
+  return f;
+}
+
+function flavorOf(r: Reader, e: Entity): Flavor {
   if (e.opaque) return null;
   if (e.boundary !== null) {
     const shape = cryptoShape(r, e);
@@ -307,10 +321,17 @@ export function contentIdOf(e: Entity): string | null {
   return id || null;
 }
 
+/** the attachments elsewhere in the message one inline set takes at most, in document order (its own related parts
+ * are not counted): many HTML parts beside many Content-IDs would otherwise make a message whose JSON is quadratic in
+ * the input (499 parts beside 499 Content-IDs: about 250,000 entries). No problem is recorded: a body that refers to
+ * more than 64 images it does not hold itself is not one a sender makes. */
+export const MAX_INLINE_ELSEWHERE = 64;
+
 /**
  * Each HTML part's inline set (section 2): the related parts of its own multipart/related, plus the attachments
- * elsewhere in the message whose Content-ID is unique in it and not among the first; only those with the part's
- * protection. A Content-ID twice in a scope resolves to nothing there (`content-id-duplicate`).
+ * elsewhere in the message whose Content-ID is unique in it and not among the first, at most 64 of those
+ * (MAX_INLINE_ELSEWHERE); only those with the part's protection. A Content-ID twice in a scope resolves to nothing
+ * there (`content-id-duplicate`).
  */
 export function inline(r: Reader, scope: Scope): void {
   const counts = new Map<string, number>();
@@ -358,9 +379,11 @@ function inlineSet(scope: Scope, protection: Protection, related: Attachment[] |
       if (sameProtection(a.protection, protection)) out.push(Object.freeze({ contentId: a.contentId, attachment: a.id }));
     }
   }
+  let elsewhere = 0;
   for (const a of scope.attachments) {
+    if (elsewhere >= MAX_INLINE_ELSEWHERE) break;
     if (a.contentId === null || own.has(a.contentId) || counts.get(a.contentId)! > 1 || mine.has(a)) continue;
-    if (sameProtection(a.protection, protection)) out.push(Object.freeze({ contentId: a.contentId, attachment: a.id }));
+    if (sameProtection(a.protection, protection)) { out.push(Object.freeze({ contentId: a.contentId, attachment: a.id })); elsewhere++; }
   }
   return Object.freeze(out) as Inline[];
 }

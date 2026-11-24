@@ -4,7 +4,7 @@ import type { Address, Message, Protection, Summary } from './types.js';
 import type { Entity } from './scan.js';
 import { headersOf, inline, problem, unprotected, walk, type Reader, type Scope } from './show.js';
 import { resolveCandidates } from './crypto.js';
-import { applyProtected, signedBy, single } from './hp.js';
+import { applyProtected, protectionForm, signedBy, single } from './hp.js';
 import { stateOf, type RootInfo } from './steps.js';
 import { sameAddress } from './address.js';
 
@@ -33,13 +33,17 @@ export function rootMessage(r: Reader, root: Entity): Message {
 /**
  * A root message whose only part shown is one text part that is wholly one cleartext-signed block (whitespace aside,
  * nothing before or after it), of the input or of the root's payload: that signature is over the payload's root,
- * for `summary.signed` and `summary.from`, as an armored message in the same place is the root's decrypt step
- * (section 5). Any other cleartext block labels only its own part.
+ * for `summary.signed` and `summary.from` against the outer From, as an armored message in the same place is the
+ * root's decrypt step (section 5). Only when the payload has no protected headers form: a cleartext signature covers
+ * its text, never a header section, so it never makes protected headers apply, never binds a protected From and never
+ * changes `reply`. Not when the part's label is no longer the block's (withdrawn) or a blocking problem is above it.
+ * Any other cleartext block labels only its own part.
  */
 function cleartextRoot(r: Reader, scope: Scope): void {
   const st = stateOf(r);
   for (const c of st.cleartexts) {
     if (c.scope !== scope || scope.parts.length !== 1 || scope.parts[0] !== c.part) continue;
+    if (c.entity.above || c.part.protection.step !== c.sig.step || protectionForm(st.root.payload) !== null) continue;
     const src = c.entity.source;
     if (src === 'input' ? st.root.encrypted : !(st.root.encrypted && st.root.payload?.source === src)) continue;
     st.root.sigs.push(c.sig);

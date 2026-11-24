@@ -77,7 +77,9 @@ const OUTER = (): Sources => ({
  * Protected headers apply when the root has a payload that counts (decrypted; or signed only, with a good verdict)
  * and carries a form. With `hp` the whole set comes from the payload (a field it lacks is empty); with v1 field by
  * field, Reply-To from the payload only. From is the payload's only with a good signature over the payload's root
- * whose signer includes it. Lists, Autocrypt and raw are always the outer ones.
+ * whose signer includes it (a cleartext block's signature is never among `root.sigs` here: protect.cleartextRoot).
+ * `reply`, in an encrypted payload: the protected Reply-To, else the protected From, else empty. Lists, Autocrypt
+ * and raw are always the outer ones.
  */
 export function applyProtected(root: RootInfo, outerRoot: Entity, outer: Headers, inner: () => Headers): Applied {
   const P = root.payload;
@@ -94,9 +96,10 @@ export function applyProtected(root: RootInfo, outerRoot: Entity, outer: Headers
   for (const [f, name] of FIELDS) if (form.form === 'hp' || f === 'replyTo' || has(name)) set(f);
   const protectedFrom = has('from') ? ph.from : null;
   if (protectedFrom && signedBy(root.sigs, single(protectedFrom))) set('from');
+  // in an encrypted payload, the protected Reply-To, else the protected From; neither: empty, the app asks (the
+  // outer sender may only have re-sent it)
   let reply: Address[];
-  if (root.encrypted && ph.replyTo.length) reply = ph.replyTo;
-  else if (root.encrypted && protectedFrom?.length) reply = protectedFrom;
+  if (root.encrypted) reply = ph.replyTo.length ? ph.replyTo : protectedFrom?.length ? protectedFrom : [];
   else reply = headers.replyTo.length ? headers.replyTo : headers.from;
   return { headers, sources, reply, confidential: root.encrypted ? confidential(P, outerRoot.fields, form) : [], protectedFrom };
 }

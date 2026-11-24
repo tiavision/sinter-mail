@@ -86,3 +86,13 @@ export function verifyDigest(signed: Uint8Array, signature: Uint8Array): string 
   const length = new Uint8Array([n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
   return hex(sha256(length, signed, signature).subarray(0, 16));
 }
+
+/** a verify-cleartext step's digest: over the charset label's length (4 bytes, big-endian), its bytes (the label is
+ * ASCII once normalized; any other code unit is taken modulo 256), then the block */
+export function cleartextDigest(charset: string, block: Uint8Array): string {
+  const n = charset.length;
+  const label = new Uint8Array(4 + n);
+  label[0] = n >>> 24; label[1] = (n >>> 16) & 255; label[2] = (n >>> 8) & 255; label[3] = n & 255;
+  for (let i = 0; i < n; i++) label[4 + i] = charset.charCodeAt(i) & 255;
+  return hex(sha256(label, block).subarray(0, 16));
+}

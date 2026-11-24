@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, test } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { mime } from '../sinter/mime.js';
 import { bytes } from '../sinter/bytes.js';
-import { stepDigest, verifyDigest } from '../sinter/mime/sha256.js';
+import { cleartextDigest, stepDigest, verifyDigest } from '../sinter/mime/sha256.js';
 import type { Message, Part, Step } from '../sinter/mime/types.js';
 import {
   addrs, App, clearsign, codes, crlf, detach, eml, encrypt, key, multipart, pgpMime, pgpSigned, read, texts, unlock, utf8,
@@ -273,7 +273,7 @@ describe('inline PGP', () => {
     const pending = mime(raw);
     const s = pending.steps[0] as Step & { kind: 'verify-cleartext' };
     expect(pending.steps).toMatchObject([{ kind: 'verify-cleartext', part: '1:2', charset: 'utf-8', block: { slice: [expect.any(Number), expect.any(Number)] } }]);
-    expect(s.id).toBe(`1:2#${stepDigest(bytes(raw, s.block))}`);
+    expect(s.id).toBe(`1:2#${cleartextDigest('utf-8', bytes(raw, s.block))}`);
     expect(new TextDecoder().decode(bytes(raw, s.block))).toBe(block);
     const m = await read(raw, app);
     expect(m.parts).toEqual([

@@ -104,3 +104,33 @@ export function decodeText(bytes: Uint8Array, label: string | null | undefined, 
   }
   return decoder.decode(bytes);
 }
+
+/** WHATWG encodings that are not stateless ASCII supersets: an ASCII byte there is not always its character */
+const NOT_ASCII = new Set(['iso-2022-jp', 'utf-16be', 'utf-16le', 'replacement']);
+
+/**
+ * Whether `label` names a charset that is a stateless ASCII superset as this runtime reads it: every ASCII byte its
+ * own character, whatever came before it. Missing or empty is UTF-8. Not: ISO-2022-*, UTF-16*, and every label
+ * TextDecoder does not know (UTF-32 and UTF-7 among them: the reader would read them as UTF-8, and an app with
+ * another decoder otherwise).
+ */
+export function asciiSuperset(label: string | null | undefined): boolean {
+  const l = label == null ? '' : normalizeLabel(label);
+  if (UTF8.has(l) || WINDOWS_1252.has(l) || l === 'x-user-defined') return true;
+  if (REPLACEMENT.has(l)) return false;
+  try {
+    return !NOT_ASCII.has(new TextDecoder(l).encoding);
+  } catch {
+    return false;
+  }
+}
+
+/** `bytes` as an app decodes them with TextDecoder (invalid sequences U+FFFD, no fallback), for a label TextDecoder
+ * knows; otherwise as decodeText reads them */
+export function decodeAsApp(bytes: Uint8Array, label: string): string {
+  try {
+    return new TextDecoder(label === '' ? 'utf-8' : label).decode(bytes);
+  } catch {
+    return decodeText(bytes, label, () => {});
+  }
+}
