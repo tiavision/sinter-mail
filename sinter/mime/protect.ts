@@ -7,7 +7,7 @@ import { headersOf, inline, problem, unprotected, walk, type Reader, type Scope 
 import { resolveCandidates } from './crypto.js';
 import { applyProtected, protectionForm } from './hp.js';
 import { stateOf } from './steps.js';
-import { protections, summarize } from './summary.js';
+import { nestedSummaries, protections, summarize } from './summary.js';
 
 /** the message of the input's root: its walk, then the root decision of inline PGP, inline sets, headers, summary */
 export function rootMessage(r: Reader, root: Entity): Message {
@@ -17,6 +17,7 @@ export function rootMessage(r: Reader, root: Entity): Message {
   resolveCandidates(r, scope);
   cleartextRoot(r, scope);
   inline(r, scope);
+  nestedSummaries(scope.parts, st.root.encrypted);
   const outer = headersOf(root.fields, (c) => problem(r, root, c));
   const P = st.root.payload;
   const applied = applyProtected(st.root, root, outer, () => headersOf(P!.fields, (c) => problem(r, P, c)));

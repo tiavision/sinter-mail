@@ -526,9 +526,9 @@ describe('purity', () => {
     const { foldVerdict } = (await import(check)) as { foldVerdict: (file: string, name: string, root: string) => { fold: boolean } };
     const root = fileURLToPath(new URL('..', import.meta.url));
     const at = (f: string) => fileURLToPath(new URL(`../sinter/${f}`, import.meta.url));
-    for (const [f, n] of [['mime.ts', 'mime'], ['mime/index.ts', 'read'], ['mime/crypto.ts', 'showEncrypted'], ['mime/crypto.ts', 'showSigned'],
+    for (const [f, n] of [['mime.ts', 'mime'], ['mime.ts', 'forget'], ['mime/index.ts', 'read'], ['mime/crypto.ts', 'showEncrypted'], ['mime/crypto.ts', 'showSigned'],
       ['mime/crypto.ts', 'showText'], ['mime/crypto.ts', 'resolveCandidates'], ['mime/steps.ts', 'findBlocks'], ['mime/steps.ts', 'combine'],
-      ['mime/hp.ts', 'applyProtected'], ['mime/protect.ts', 'rootMessage'], ['mime/summary.ts', 'summarize'], ['mime/cache.ts', 'cached']]) {
+      ['mime/hp.ts', 'applyProtected'], ['mime/protect.ts', 'rootMessage'], ['mime/summary.ts', 'summarize'], ['mime/summary.ts', 'nestedSummaries'], ['mime/cache.ts', 'cached']]) {
       expect(foldVerdict(at(f), n, root), `${f} ${n}`).toEqual({ fold: true });
     }
   });

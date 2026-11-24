@@ -186,6 +186,9 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
   const protection = payloadProtection(ctx.protection, id, sigs, !root);
   const sub: Ctx = { ...ctx, protection, legacy: false, hide: null };
   if (root) {
+    // a signature over the payload's root is made inside the innermost root ciphertext: one found before this decrypt
+    // (around it, or in an outer layer) labels nothing in it and binds no From
+    st.root.sigs.length = 0;
     st.root.encrypted = true;
     st.payloadRoots.add(R);
     if (st.root.decrypts < 2) st.rootDecrypt.add(R);
@@ -199,7 +202,8 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
   if (!sigs) return;
   // a blocking problem found while walking the payload: its signatures label nothing after all
   if (R.above || R.below) relabel(scope, parts, attachments, id, payloadProtection(ctx.protection, id, undefined, !root));
-  else if (root) st.root.sigs.push({ step: id, ...combine(sigs) });
+  // encrypted twice: only the inner layer's signatures are over the payload's root
+  else if (root && st.root.payload?.source === id) st.root.sigs.push({ step: id, ...combine(sigs) });
 }
 
 /** whether a signed subtree has a blocking problem: one recorded, or base64 with padding mid-stream in any part of it
@@ -320,6 +324,9 @@ function inlineEncrypted(r: Reader, e: Entity, pid: string, id: string, ref: Ref
   const sigs = a.d.signatures?.length ? a.d.signatures : undefined;
   const sub: Ctx = { ...ctx, protection: payloadProtection(ctx.protection, id, sigs, !root), legacy: false, hide: null };
   if (root) {
+    // as for a MIME payload: a signature around the armor (a multipart/signed whose signed part holds it) is no
+    // signature over the payload's root
+    st.root.sigs.length = 0;
     st.root.encrypted = true;
     st.root.payload = t;
   }
@@ -328,7 +335,7 @@ function inlineEncrypted(r: Reader, e: Entity, pid: string, id: string, ref: Ref
   if (!sigs) return;
   // as for a MIME payload: a blocking problem found in it, and its signatures label nothing
   if (t.above || t.below) relabel(scope, parts, attachments, id, payloadProtection(ctx.protection, id, undefined, !root));
-  else if (root) st.root.sigs.push({ step: id, ...combine(sigs) });
+  else if (root && st.root.payload?.source === id) st.root.sigs.push({ step: id, ...combine(sigs) });
 }
 
 /** a plain text part of `bytes[s, e)` of the entity, `id` */

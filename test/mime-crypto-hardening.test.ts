@@ -291,3 +291,133 @@ test('a verify-cleartext id: the normalized charset label\'s length and bytes, t
   expect(s.id).not.toBe(`1:1#${stepDigest(bytes(raw, s.block))}`);
   expect((m.parts[0] as Part).protection.step).toBe(s.id);
 });
+
+describe('sign over encrypt: only signatures inside the innermost root ciphertext are over the payload\'s root', () => {
+  /** the message read with every not-root part opened, as an app opening them all would */
+  async function readOpen(raw: string): Promise<Message> {
+    let open: string[] = [];
+    for (;;) {
+      const m = await read(raw, app, open);
+      const more: string[] = [];
+      const visit = (ps: readonly Part[]) => {
+        for (const p of ps) {
+          if (p.type === 'encrypted' && p.reason === 'not-root' && !open.includes(p.step)) more.push(p.step);
+          if (p.type === 'message') visit(p.message.parts);
+        }
+      };
+      visit(m.parts);
+      if (!more.length) return m;
+      open = [...open, ...more];
+    }
+  }
+  const encEntity = (armor: string, b = 'enc') => multipart('multipart/encrypted; protocol="application/pgp-encrypted"', b,
+    ['Content-Type: application/pgp-encrypted', '', 'Version: 1', ''], ['Content-Type: application/octet-stream', '', armor]).slice(0, -1).join('\r\n');
+  const SECRET = crlf('Content-Type: text/plain; protected-headers="v1"\nFrom: Alice <alice@example.test>\nSubject: secret\n\nALICE SECRET\n');
+  const SECRET_NOHP = crlf('Content-Type: text/plain\n\nALICE SECRET\n');
+  const signedBy = async (outer: string[], part: string, by: Keys) => pgpSigned(outer, part, await detach(part, by));
+
+  test('Mallory\'s multipart/signed around a text part holding only Alice\'s armored ciphertext: from is not hers', async () => {
+    for (const inner of [undefined, alice]) {
+      const c = await encrypt('ALICE SECRET', bob, inner);
+      const text = crlf('Content-Type: text/plain\n\n') + c;
+      const alt = multipart('multipart/alternative', 'al', ['Content-Type: text/plain', '', c], ['Content-Type: text/html', '', '<p>hi</p>']).slice(0, -1).join('\r\n');
+      for (const part of [text, alt]) {
+        const m = await read(await signedBy(MALLORY, part, mallory), app);
+        expect(kinds(m)).toEqual([['verify', 'done'], ['decrypt', 'done']]);
+        expect(texts(m)).toEqual(['ALICE SECRET']);
+        expect(m.summary).toEqual({ encrypted: 'all', signed: inner ? 'some' : 'none', from: 'unknown' });
+        expect(addrs(m.headers.from)).toEqual(['mallory@evil.test']);
+      }
+    }
+  });
+
+  test('encrypted twice, Mallory\'s one-pass signature on the outer layer around Alice\'s ciphertext: no From bound', async () => {
+    for (const inner of [SECRET, SECRET_NOHP]) {
+      const c = await encrypt(inner, bob);
+      const m = await read(pgpMime(MALLORY, await encrypt(encEntity(c, 'in') + '\r\n', bob, mallory)), app);
+      expect(kinds(m)).toEqual([['decrypt', 'done'], ['decrypt', 'done']]);
+      // with protected headers, Alice's unsigned protected From differs from the outer one; without, nothing binds it
+      expect(m.summary).toEqual({ encrypted: 'all', signed: 'none', from: inner === SECRET ? 'differs' : 'unknown' });
+      expect(addrs(m.headers.from)).toEqual(['mallory@evil.test']);
+    }
+  });
+
+  test('Alice\'s own one-pass signature inside her ciphertext, From Alice: all, all, matches (MIME, inline, twice, under her multipart/signed)', async () => {
+    const want = { encrypted: 'all', signed: 'all', from: 'matches' };
+    for (const inner of [SECRET, SECRET_NOHP]) {
+      const c = await encrypt(inner, bob, alice);
+      expect((await read(pgpMime(ALICE, c), app)).summary, 'mime').toEqual(want);
+      expect((await read(await signedBy(ALICE, encEntity(c), alice), app)).summary, 'signed over').toEqual(want);
+      // encrypted twice, the outer layer unsigned or signed by Mallory: the inner layer's signature is the root's
+      for (const outer of [undefined, mallory]) {
+        const m = await read(pgpMime(ALICE, await encrypt(encEntity(c, 'in') + '\r\n', bob, outer)), app);
+        expect(m.summary, `twice ${outer ? 'mallory' : 'unsigned'}`).toEqual(want);
+        expect(addrs(m.headers.from)).toEqual(['alice@example.test']);
+      }
+    }
+    const armor = await encrypt('ALICE SECRET', bob, alice);
+    expect((await read(eml(...ALICE, '', armor), app)).summary, 'inline').toEqual(want);
+    expect((await read(await signedBy(ALICE, crlf('Content-Type: text/plain\n\n') + armor, alice), app)).summary, 'inline signed over').toEqual(want);
+  });
+
+  test('anything opened: from is never matches (re-wrapped content an app must not quote as the sender\'s)', async () => {
+    for (const signer of [undefined, alice]) for (const inner of [SECRET, SECRET_NOHP]) {
+      const c = await encrypt(inner, bob, signer);
+      const c2 = await encrypt('ALICE SECRET', bob, signer);
+      const cases: [string, string][] = [
+        ['mixed [cipher, footer]', await signedBy(MALLORY, multipart('multipart/mixed', 'mx', encEntity(c).split('\r\n'), ['Content-Type: text/plain', '', 'footer by mallory']).slice(0, -1).join('\r\n'), mallory)],
+        ['mixed [cipher]', await signedBy(MALLORY, multipart('multipart/mixed', 'mx', encEntity(c).split('\r\n')).slice(0, -1).join('\r\n'), mallory)],
+        ['nested message', await signedBy(MALLORY, ['Content-Type: message/rfc822', '', 'From: Alice <alice@example.test>', 'Subject: fwd', 'MIME-Version: 1.0', encEntity(c)].join('\r\n'), mallory)],
+        ['armor with text', await signedBy(MALLORY, crlf('Content-Type: text/plain\n\nhello bob, see below\n\n') + c2 + '\r\n-- \r\nmallory', mallory)],
+        ['one-pass around armored text', pgpMime(MALLORY, await encrypt(crlf('Content-Type: text/plain\n\n') + c2, bob, mallory))],
+        ['inline in inline', eml(...MALLORY, '', await encrypt(c2, bob, mallory))],
+      ];
+      for (const [name, raw] of cases) {
+        const m = await readOpen(raw);
+        const opened = [...m.parts, ...m.attachments, ...m.parts.flatMap((p) => (p.type === 'message' ? [...p.message.parts, ...p.message.attachments] : []))]
+          .some((p) => p.protection.opened);
+        expect(opened, name).toBe(true);
+        expect(m.summary.from, name).toBe('unknown');
+        expect(addrs(m.headers.from), name).toEqual(['mallory@evil.test']);
+        for (const p of m.parts) if (p.type === 'message') expect(p.message.summary.from, `${name} nested`).not.toBe('matches');
+      }
+    }
+  });
+});
+
+describe('nested messages\' summaries', () => {
+  const GOOD = [{ status: 'good' as const, signer: ['alice@example.test'] }];
+  const enc = (b: string) => [`Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary=${b}`, '', `--${b}`,
+    'Content-Type: application/pgp-encrypted', '', 'Version: 1', `--${b}`, 'Content-Type: application/octet-stream', '', 'C', `--${b}--`];
+  const nested = ['Content-Type: message/rfc822', '', 'From: Alice <alice@example.test>', 'Subject: n', 'Content-Type: text/plain', '', 'nested body'];
+  const bad = ['Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary=bb', '', '--bb', 'Content-Type: text/plain', '', 'x', '--bb--'];
+  const decrypted = (raw: string, payload: string[]) =>
+    mime(raw, { decrypted: { [mime(raw).steps[0]!.id]: { status: 'ok', integrity: true, plaintext: utf8(crlf(payload.join('\n'))), signatures: GOOD } } });
+  const raw = eml('From: Alice <alice@example.test>', 'MIME-Version: 1.0', ...enc('e1'));
+
+  test('decided once the read is done: a payload\'s signatures withdrawn after the nested message was walked', () => {
+    const m = decrypted(raw, multipart('multipart/mixed', 'pm', nested, bad));
+    expect(m.problems).toContainEqual(expect.objectContaining({ code: 'crypto-shape', blocking: true }));
+    const n = m.parts[0] as Part & { type: 'message' };
+    expect(n.message.parts[0]!.protection.signed).toBeNull();
+    expect(n.message.summary).toEqual({ encrypted: 'all', signed: 'none', from: 'unknown' });
+    expect(m.summary).toEqual({ encrypted: 'all', signed: 'none', from: 'unknown' });
+  });
+
+  test('a nested message wholly in the root\'s ciphertext: encrypted all, as the root', () => {
+    const m = decrypted(raw, multipart('multipart/mixed', 'pm', ['Content-Type: text/plain', '', 'intro'], nested));
+    expect(m.summary).toEqual({ encrypted: 'all', signed: 'all', from: 'matches' });
+    const n = m.parts[1] as Part & { type: 'message' };
+    expect(n.message.summary).toEqual({ encrypted: 'all', signed: 'some', from: 'unknown' });
+  });
+
+  test('a multipart/signed withdrawn by a blocking problem after its nested message: the nested summary is unsigned', async () => {
+    const raw2 = eml(...ALICE, 'MIME-Version: 1.0', ...multipart('multipart/signed; protocol="application/pgp-signature"', 'out',
+      multipart('multipart/mixed', 'mx', nested, bad).slice(0, -1), ['Content-Type: application/pgp-signature', '', 'sig']));
+    const m = mime(raw2);
+    expect(m.steps).toEqual([]);
+    const n = m.parts[0] as Part & { type: 'message' };
+    expect(n.message.parts[0]!.protection).toEqual({ encrypted: false, signed: null });
+    expect(n.message.summary).toEqual({ encrypted: 'none', signed: 'none', from: null });
+  });
+});

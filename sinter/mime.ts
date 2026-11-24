@@ -1,6 +1,6 @@
 // `mail.mime(bytes, options)`: a whole message to its headers, parts, attachments and problems
 // (docs/proposals/sinter-mail-mime.md, sections 1 and 2). This module validates the options and keeps the results,
-// frozen (mime/cache.ts, `mail.mime.clear()` drops them); the reader itself is `@tiavision/sinter-mail/mime`, imported by that specifier and never by a
+// frozen (mime/cache.ts, `mail.forget()` or `mail.mime.clear()` drops them); the reader itself is `@tiavision/sinter-mail/mime`, imported by that specifier and never by a
 // relative path, so that an app listing the package in `sinter({ lazy })` loads the reader on demand (mail.mime is
 // then a lazy helper: in a let, undefined until the reader has arrived).
 //
@@ -21,11 +21,16 @@ export function mime(bytes: Uint8Array | string, options?: MimeOptions): Message
 }
 
 /** drops every message kept, and the plaintexts of the results they were read with (on lock or logout), as a
- * memo()'d helper's `.clear()` does; the next call reads again */
-mime.clear = (): void => {
+ * memo()'d helper's `.clear()` does; the next call reads again. `mail.forget()` is the same as a plain function: with
+ * the package in `sinter({ lazy })` an action's import is a stub that refuses property access, so `mail.mime.clear`
+ * cannot be reached there, and `await mail.forget()` works in lazy and eager apps alike */
+export function forget(): void {
   last.clear();
   clearCache();
-};
+}
+
+/** `mail.mime.clear()`: forget(), as a property of the helper */
+mime.clear = (): void => forget();
 
 const fail = (msg: string): never => {
   throw new TypeError(`mail.mime: ${msg}`);

@@ -4,7 +4,8 @@
 // Content-ID, a truncated close, multipart/report's own parts, problems of a nested root, the mbox line, and a
 // structural fuzz of the scan.
 import { describe, expect, test } from 'vitest';
-import { mime } from '../sinter/mime.js';
+import { forget, mime } from '../sinter/mime.js';
+import * as mail from '../sinter/index.js';
 import { cacheSize } from '../sinter/mime/cache.js';
 import { bytes as refBytes } from '../sinter/bytes.js';
 import { all, scan } from '../sinter/mime/scan.js';
@@ -145,6 +146,22 @@ describe('mail.mime\'s options and cache', () => {
     expect(again).toEqual(m);
     // the call before is forgotten too: the same input and options read again after clear()
     mime.clear();
+    expect(mime(raw, { decrypted: d })).not.toBe(again);
+  });
+
+  test('mail.forget() does what mail.mime.clear() does, as a plain export of the package (reachable from a lazy action)', () => {
+    expect(mail.forget).toBe(forget);
+    const raw = enc('Subject: f\r\n\r\nhi');
+    const d = { x: { status: 'ok' as const, integrity: true, plaintext: new Uint8Array(1024) } };
+    const m = mime(raw, { decrypted: d });
+    expect(mime(raw, { decrypted: d })).toBe(m);
+    expect(forget()).toBeUndefined();
+    expect(cacheSize()).toEqual({ inputs: 0, entries: 0, cost: 0 });
+    const again = mime(raw, { decrypted: d });
+    expect(again).not.toBe(m);
+    expect(again).toEqual(m);
+    // the call before is forgotten too
+    mail.forget();
     expect(mime(raw, { decrypted: d })).not.toBe(again);
   });
 });

@@ -116,7 +116,8 @@ export function message(r: Reader, root: Entity, protection: Protection = unprot
   walk(r, root, scope, 'show', { related: null, report: false, protection });
   inline(r, scope);
   const headers = headersOf(root.fields, (c) => problem(r, root, c));
-  // its own summary, by the same rules over its own parts (nested ones' included) and headers, with no steps
+  // its own summary, by the same rules over its own parts (nested ones' included) and headers, with no steps; decided
+  // again once the root message's read is done (summary.nestedSummaries), when a label withdrawn after this walk is known
   const { summary } = summarize(protections(scope.parts, scope.attachments), NO_ROOT(), headers, null);
   return {
     type: 'message', headers, outer: headers, sources: OUTER(), reply: headers.replyTo.length ? headers.replyTo : headers.from,
