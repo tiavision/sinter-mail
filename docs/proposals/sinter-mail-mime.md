@@ -240,7 +240,6 @@ case gets a code and a row.
 | `content-type-invalid` | yes | a Content-Type that does not parse: read as `text/plain; charset=us-ascii` (RFC 2045) |
 | `encoding-on-multipart` | yes | a transfer encoding other than 7bit, 8bit or binary on `multipart/*` or `message/*` |
 | `encoding-unknown` | yes | an unknown transfer encoding |
-| `no-header-end` | yes | a part whose headers run to its end |
 | `crypto-shape` | yes | a `multipart/encrypted` or `multipart/signed` not of the shape section 5 requires |
 | `armor-headers` | no | an anchored cleartext-signed block with armor headers other than `Hash:`, or lines starting `-` not dash-escaped: no step for it |
 | `limit` | yes | a limit of section 4 reached |
@@ -257,6 +256,7 @@ case gets a code and a row.
 | `field-dropped` | no | a header field past a field limit |
 | `stale-result` | no | a result whose id matches no step |
 | `address-ambiguous` | no | an addr-spec read as `null` |
+| `no-header-end` | no | a part whose headers run to its end: legal (RFC 2046), an empty body |
 | `legacy-display` | no | a `text/plain` part with `hp-legacy-display="1"` and no blank line: nothing dropped |
 
 ### 3. Reading MIME
@@ -277,10 +277,12 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
     `<`, `>`, `,`, `@`, quote or line break is text, never structure (Mailsploit, "Splitting the email atom");
   - an encoded word counts only as a whole atom after tokenizing (bounded by whitespace, a special or the field's
     ends, so `=?utf8?q?=61=62=63?=<x@y>` decodes its name), or a quoted string's whole content; one glued inside
-    an atom (`collab=?x?b?QA==?=psres.net`) is literal text. One with an unknown charset, or one
+    an atom (`collab=?x?b?QA==?=psres.net`), or one whose encoded text holds a space or `?`, is literal text; RFC
+    2231's language suffix (`=?utf-8*en?q?…?=`) is accepted and ignored; invalid UTF-8 inside one falls back to
+    windows-1252 as in bodies. One with an unknown charset, or one
     `TextDecoder` rejects, is left as written (RFC 2047 §6.2), with `charset-unknown`;
   - every decoded value, `Headers` fields and filenames alike, has NUL, C0 controls, CR, LF and bidirectional
-    controls removed; an app that reuses a value in a reply cannot inject a header with it. In a raw structural
+    controls removed (a TAB becomes a space); an app that reuses a value in a reply cannot inject a header with it. In a raw structural
     field (Content-Type, Content-Transfer-Encoding, Content-Disposition) a control byte is also the blocking
     `control-in-structure`: parsers disagree on it (the MIME ambiguity Internet-Draft makes NUL fatal);
   - an address list is read by the RFC 5322 grammar with its obsolete forms, iteratively (comments nested at
@@ -361,8 +363,8 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
     TNEF (`winmail.dat`, `application/ms-tnef`) and uuencoded blocks in text: attachments, or text, as they
     are. Vendor headers (`X-Mozilla-External-Attachment-URL` and the like) are in `raw` and never acted on.
 - **Malformed mail** reads as a tolerant client reads it: a missing closing boundary ends the multipart at the
-  end of its parent; a part with no blank line after its headers has an empty body. Each is a problem (blocking
-  near crypto), none throws.
+  end of its parent (blocking near crypto); a part with no blank line after its headers has an empty body, which
+  is legal (`no-header-end`, informational). None throws.
 
 ### 4. Limits and safety
 
