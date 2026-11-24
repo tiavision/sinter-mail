@@ -315,7 +315,7 @@ export async function rawMessage(id: string, ctx: CallContext): Promise<Uint8Arr
 }
 ```
 
-The bytes stay in state; the message is computed from them, and from the results of [the steps](#encrypted-and-signed-mail)
+The bytes are kept as they arrived (a resource, or state) and never changed; the message is computed from them, and from the results of [the steps](#encrypted-and-signed-mail)
 when the message is encrypted or signed. It runs in the browser, on a server (Node) and at build time, over an
 `.eml` in a `file:` resource (read as text: keep such a fixture 7-bit, its 8-bit parts quoted-printable or base64).
 

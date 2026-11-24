@@ -1,7 +1,65 @@
 # Proposal: MIME and OpenPGP structure in sinter-mail
 
-Status: accepted for implementation, revision 7 (RFC 9788, the MIME ambiguity draft and Heyes's paper read in full, after three reviews, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
+Status: built (not released), Plan steps 0 to 5, from revision 7 (RFC 9788, the MIME ambiguity draft and Heyes's paper read in full, after three reviews, a survey of the existing parsers and a survey of their vulnerabilities) and the rules the security reviews of each layer added. The guide is [Whole messages](../mail.md#whole-messages-mailmimebytes-options) and [Encrypted and signed mail](../mail.md#encrypted-and-signed-mail) in docs/mail.md. Where the build departs from this text is listed in [Implementation status](#implementation-status); the sections below are the design. Follows [Later](sinter-mail.md#later) of the first
 proposal. Why the structure belongs in the library is in [The case](#the-case).
+
+## Implementation status
+
+Built in three layers (lexical, structure, OpenPGP), each reviewed for security and fixed against its review's
+reproductions, which are regression tests: 487 tests in `test/mime-*.test.ts`.
+
+| Step | State | Where it departs from this text |
+| --- | --- | --- |
+| 0, reading | done | as proposed |
+| 1, the reader | done | the fuzzer against Stalwart's reader is not built: a seeded structural fuzz checks the scan's own invariants; no real messages collected with consent; 96 of Stalwart's 97 messages with expected results agree, the one that differs on purpose (below) |
+| 2, what to show | done | the inline fallback is capped; `mail.parse`'s options folded into `images` (below) |
+| 3, steps and results | done | the messages are made with openpgp.js in the tests (PGP/MIME, sign over encrypt, Exchange's rewrite, encrypted twice, inline PGP, both protected-headers forms), not collected from Thunderbird, Mailvelope, Proton, K-9, Delta Chat or Apple Mail |
+| 4, protected headers, summary | done | as amended after the review (below) |
+| 5, the guide | done | in docs/mail.md, with a recipe tested against the package; llms.txt |
+| 6, an app moves over | not started | |
+
+### As built
+
+- **`mail.parse`'s `encrypted` and `consent`** are not options of the tree: `encrypted` without `consent` makes
+  `images` `'block'` before the cache key is made, so a decrypted body shares plain `'block'`'s tree and `last()`
+  needs no field for them (section 8 records it). `proxy` is still validated when it is unused.
+- **Inline sets**: the parts taken from elsewhere in the message are at most 64 per HTML part, in document order,
+  without a problem (section 2 amended); sets that share their `multipart/related` and protection are one frozen
+  array.
+- **The cleartext root rule**: a root message whose only part shown is wholly one cleartext-signed block (of the
+  input, or of the root's decrypted payload) counts that signature as the root's for `summary.signed` and
+  `summary.from` against the outer From, and only when the payload has no protected-headers form; it never
+  applies protected headers, binds a protected From or changes `reply` (section 5 amended after the crypto
+  review). Any other block labels its own part.
+- **Cleartext blocks** make no step when they hold a bare CR, a control byte, a line that reads as an armor line
+  once CRs and trailing whitespace are removed (U+2028, U+2029 and NEL counted as line breaks), or are in a
+  stateful or non-ASCII-superset charset; their digest covers the charset label. At most 4 anchored blocks count,
+  armored messages and cleartext blocks together.
+- **Dates**: military zone letters other than `Z`, unknown zone names, a missing zone and `-0000` are an unknown
+  offset, written `-00:00` (RFC 3339's form); the obsolete US zones are their offsets.
+- **Withdrawn steps**: a step whose subtree turns out to have a blocking problem (found while walking it, mid-stream
+  base64 padding included) is withdrawn: no `pending` label, no result accepted. One-pass signatures inside a
+  ciphertext obey the same rule, the padding scanned before the walk.
+- **Results**: a decrypt result whose plaintext is over 64 MiB, or over what the call's budget has left, fails the
+  step with reason `'over-limit'` and a `limit` problem (with `part: null` when it overran the call's budget). An
+  empty verdict list combines to `'unsupported'`. An empty `signatures` list in a `Decrypted` is no signature.
+- **`summary.signed` is `'all'`** only when the good root signature's signer includes the shown From and every
+  part and attachment is `good` with that From among its signers: stricter wording than section 7, the same rule.
+- **`reply`** is empty when an encrypted payload with protected headers has neither Reply-To nor From.
+- **Inline PGP payloads**: the plaintext of an armored text body is read as a `text/plain` body without a charset
+  (UTF-8, windows-1252 when invalid); the part's id is the step's and `/1`.
+- **Encrypted structures not shown** (in an alternative not chosen, or with a blocking problem near them) are
+  attachments of kind `'encrypted'`, their Ref the whole entity.
+- **The cache**: at most 32 inputs and 16 MiB, counting each input's length, 4 kB per message kept and the
+  plaintexts the kept options hold, and 4 option sets per input; the input just read is kept whatever its cost.
+  `mail.bytes` keeps the UTF-8 of the last string input it encoded.
+- **The walk** is iterative in the scan (an explicit stack); choosing what to show recurses once per level, which
+  the scan bounds at 32.
+- **Size**: the reader with `mail.mime` is about 23 kB gzip (rolldown, minified), against the 12 kB budget of
+  section 8; `mail.bytes` and `mail.imageType` about 2 kB.
+- **Corpus**: Stalwart's `malformed/017.eml` reads as `text/plain` with `content-type-invalid`, as section 2's table
+  has it, not as Stalwart's expected tree; `thirdparty/011.eml` (an empty body whose blank line is the delimiter's
+  line break) is no problem.
 
 ## Goals
 

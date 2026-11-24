@@ -508,9 +508,11 @@ Answered: the parser (our own; section 2 of the status), the style binding's cos
 
 ## Later
 
-- **MIME and PGP/MIME**: proposed in [sinter-mail-mime.md](sinter-mail-mime.md), with a reader of our own
-  rather than postal-mime (which joins HTML parts and does not return a signed part's bytes). The app
-  decrypts and verifies; the library checks the structure, reads the payload, applies protected headers
-  and labels each part.
+- **MIME and PGP/MIME**: built (not released), as [sinter-mail-mime.md](sinter-mail-mime.md) proposes, with a
+  reader of our own rather than postal-mime (which joins HTML parts and does not return a signed part's bytes):
+  `mail.mime`, `mail.bytes` and `mail.imageType`, in the guide's
+  [Whole messages](../mail.md#whole-messages-mailmimebytes-options) and
+  [Encrypted and signed mail](../mail.md#encrypted-and-signed-mail). The app decrypts and verifies; the library
+  checks the structure, reads the payload, applies protected headers and labels each part.
 - **Quoted replies in HTML email** (`blockquote type=cite`, Gmail's and Outlook's markers), into `part`.
 - **Background images**, through a checked `background` attribute on tables and cells.
