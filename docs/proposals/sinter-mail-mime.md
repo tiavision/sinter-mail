@@ -244,7 +244,7 @@ case gets a code and a row.
 | `crypto-shape` | yes | a `multipart/encrypted` or `multipart/signed` not of the shape section 5 requires |
 | `armor-headers` | no | an anchored cleartext-signed block with armor headers other than `Hash:`, or lines starting `-` not dash-escaped: no step for it |
 | `limit` | yes | a limit of section 4 reached |
-| `control-in-structure` | yes | a NUL or other control byte in any field name, or in a raw Content-Type, Content-Transfer-Encoding, Content-Disposition or MIME-Version value (and so its boundary) |
+| `control-in-structure` | yes | a NUL or other control byte in any field name, or in a raw Content-Type, Content-Transfer-Encoding, Content-Disposition or MIME-Version value (and so its boundary); a bare CR anywhere in an entity's header block (a parser that ends lines at CR sees another field) |
 | `integrity` | yes | a decrypt result without `integrity: true` |
 | `duplicate-header` | no | a repeated From, Sender, Subject or Date (From: `summary.from` is `'unknown'`) |
 | `canonicalized` | no | bare LF line ends converted to CRLF for a signature |
