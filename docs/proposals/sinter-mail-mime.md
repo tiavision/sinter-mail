@@ -210,7 +210,8 @@ interface Problem {
 - **Inline images belong to their body.** An HTML part's `inline` is a set, decided without reading the HTML:
   the related parts of its own `multipart/related`, plus the parts elsewhere in the same message (not in a
   nested message) whose Content-ID is unique in the message and not among the first; in both cases only parts
-  with the same `protection` as the body: an unsigned part outside a signed body cannot supply the image the signed body
+  with the same `protection` as the body (the parts from elsewhere at most 64 per body, in document order, so a
+  message of many HTML parts and many images cannot make its result quadratic in size): an unsigned part outside a signed body cannot supply the image the signed body
   shows. A Content-ID that appears twice in a scope resolves to nothing there, and is a problem.
   `Content-Location` is never resolved.
 - **Inline images go to `mail.parse` as URLs**: an action reads each `Inline`'s bytes with `mail.bytes`,
