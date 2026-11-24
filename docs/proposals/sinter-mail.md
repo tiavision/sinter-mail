@@ -508,13 +508,9 @@ Answered: the parser (our own; section 2 of the status), the style binding's cos
 
 ## Later
 
-- **MIME**: reading a message into its bodies and attachments, through
-  [postal-mime](https://github.com/postalsys/postal-mime) (browser and Node, limits on nesting, headers
-  and parts, careful charset handling), not a parser of our own. It joins a message's HTML parts into one
-  string, which is safe only for content that was all encrypted or all not: see PGP.
-- **PGP/MIME**: the app decrypts and verifies (openpgp.js in a `data-sn-call` action); this library would
-  check the outer structure (`multipart/encrypted` with its two parts, nothing else), read the decrypted
-  payload, and mark which bodies were encrypted or signed. Verifying a `multipart/signed` part needs its
-  raw bytes, which postal-mime does not return: to be asked upstream.
+- **MIME and PGP/MIME**: proposed in [sinter-mail-mime.md](sinter-mail-mime.md), with a reader of our own
+  rather than postal-mime (which joins HTML parts and does not return a signed part's bytes). The app
+  decrypts and verifies; the library checks the structure, reads the payload, applies protected headers
+  and labels each part.
 - **Quoted replies in HTML email** (`blockquote type=cite`, Gmail's and Outlook's markers), into `part`.
 - **Background images**, through a checked `background` attribute on tables and cells.
