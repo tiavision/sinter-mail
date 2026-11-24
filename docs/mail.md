@@ -331,7 +331,8 @@ when the message is encrypted or signed. It runs in the browser, on a server (No
 | `sources` | for each shown field, `'protected'` or `'outer'` |
 | `reply` | whom a reply goes to |
 | `confidential` | header names, lowercase, that the sender sent only encrypted |
-| `steps`, `summary` | what the app is asked to decrypt or verify, and what it proved ([below](#encrypted-and-signed-mail)); empty and all `'none'` for plain mail |
+| `hpOuter` | the payload root's `HP-Outer` fields, `[name, value]` with the name lowercase: what the outer header said, for [an unencrypted reply](#replies); only with `hp="cipher"` in a decrypted root, else empty |
+| `steps`, `summary` | what the app is asked to decrypt or verify, and what it proved ([below](#encrypted-and-signed-mail)); for plain mail no steps and `{ encrypted: 'none', signed: 'none', from: null }` |
 | `problems` | what was malformed, refused or repaired: `{ code, part, blocking }`, never content |
 
 An address is `{ name, address }`: `address` is `null` when the address is ambiguous or malformed (never a guess),
@@ -342,8 +343,10 @@ literal). Show such an address in full. A `date` is ISO 8601 in the sender's off
 bidirectional characters removed, so a header reused in a reply cannot add another.
 
 Ids are paths, as IMAP numbers parts: the root is `1`, its parts `1.1`, `1.2`, theirs `1.2.1`, through nested
-messages too; inside a decrypted payload they continue after the step's id (`1#3f…/1.2`). The same bytes and
-options give the same ids.
+messages too; inside a decrypted payload they continue after the step's id (`1#3f…/1.2`). A nested message's
+multipart root shares the id of its `message/rfc822` part, as in IMAP; when that root is shown whole (an encrypted
+part, or one attachment of its bytes) it is `<id>.1`, so no two parts or attachments have the same id, but its
+problems still name the message part. The same bytes and options give the same ids.
 
 ### Parts
 
@@ -351,7 +354,7 @@ options give the same ids.
 | --- | --- | --- |
 | `'html'` | `html`, `legacyDisplay`, `inline` | `mail.parse(p.html, { cid, legacyDisplay: p.legacyDisplay, encrypted: p.protection.encrypted })` |
 | `'text'` | `text`, `flowed`, `delsp` | `mail.plain(p.text, { flowed: p.flowed, delsp: p.delsp })` |
-| `'message'` | `message` (a `Message`), `ref` | a forwarded `message/rfc822` shown inline: render its parts as these |
+| `'message'` | `message` (a `Message`, with its own `summary`), `ref` | a forwarded `message/rfc822` shown inline: render its parts as these |
 | `'report'` | `text` | a delivery or read report (`message/delivery-status` and the like): `mail.plain(p.text)` |
 | `'encrypted'` | `ref`, `step`, `reason` | what the reader cannot read yet: `'pending'`, `'failed'`, `'not-root'` (the reader may open it) or `'over-limit'` ([below](#encrypted-and-signed-mail)) |
 
@@ -383,7 +386,8 @@ HTML part's `<meta charset>` is ignored.
 ### Attachments and inline images: `mail.bytes`, `mail.imageType`
 
 The message holds no bytes: an attachment, an encrypted part and a step hold a `Ref` (a byte range and its transfer
-encoding), and `mail.bytes(raw, ref, { decrypted })` returns the bytes it names, decoded, as a new array.
+encoding), and `mail.bytes(raw, ref, { decrypted })` returns the bytes it names, decoded, as a new array over its
+own `ArrayBuffer` (a `Uint8Array<ArrayBuffer>`, which `new Blob([…])` takes as it is).
 `decrypted` (the same results as `mail.mime`'s) is needed for a Ref inside a decrypted payload; a Ref outside its
 source, or whose payload has no `'ok'` result, throws a `TypeError`.
 
@@ -410,7 +414,7 @@ export async function inlineImages(raw: Uint8Array, msg: Message, results: MimeO
       const a = msg.attachments.find((x) => x.id === attachment)!;
       const bytes = await mail.bytes(raw, a.ref, results);
       const type = await mail.imageType(bytes);   // the type from the bytes, never the declared one
-      if (type) cid[contentId] = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: `image/${type}` }));
+      if (type) cid[contentId] = URL.createObjectURL(new Blob([bytes], { type: `image/${type}` }));
     }
     out[p.id] = cid;
   }
@@ -443,18 +447,22 @@ of another message (or of an earlier version of this one) never apply.
 The same bytes and options give the same message, frozen at every depth and JSON-shaped (it can be cloned, sent
 from a server, folded at build time). As a let is read again and again, `mail.mime` keeps its last message: the
 input compared by identity (a typed array is never compared byte by byte), `prefer` by value, and each result
-entry by key and by identity. Behind it, a cache of 32 inputs and 16 MiB (the inputs, and the plaintexts the
-kept options hold), 4 option sets per input.
+entry by key and by identity. Behind it, a cache of 32 inputs and 16 MiB (the inputs, an estimate of each message
+kept, and the plaintexts the kept options hold), 4 option sets per input.
 
 So **never change an input or a result in place**: a `Uint8Array` written into, or a stored `Decrypted` whose
 `plaintext` is replaced, gives the message read before. Store a new array or a new result object instead; the
 options object itself may be new at every read.
 
+The kept messages hold decrypted text, and the kept options their plaintexts. When the reader locks the app or
+logs out, call `mail.mime.clear()` as well as dropping the results from state: it drops every message kept and the
+plaintexts it holds, and the next call reads again.
+
 ### Lazy
 
 `mail.mime` lives in its own module, which imports the reader as `@tiavision/sinter-mail/mime`: with the package in
-`sinter({ lazy })`, the reader is a chunk of its own (about 23 kB gzip, apart from the HTML parser) and a let that
-calls `mail.mime` is `undefined` until it has loaded. Guard it (`data-sn-if="msg"`). `mail.bytes` and
+`sinter({ lazy })`, the reader is a chunk of its own (about 24 kB gzip with `mail.mime`, apart from the HTML
+parser) and a let that calls `mail.mime` is `undefined` until it has loaded. Guard it (`data-sn-if="msg"`). `mail.bytes` and
 `mail.imageType` import no reader and stay ordinary helpers.
 
 In an action module, every import of a lazy package is a stub that returns a Promise, so every call of it is
@@ -466,8 +474,11 @@ the package. The examples here await them; awaiting is harmless when the package
 `problems` lists each code once per part. A **blocking** one is structure that parsers read differently (two
 boundaries, a duplicate Content-Type, a boundary that is a prefix of its parent's, a control byte in a structural
 field): the message is still shown as a tolerant client shows it, but no step is offered in, above or below it, so
-its parts are never badged. Informational ones (`charset-fallback`, `canonicalized`, `no-header-end`, …) change
-nothing. Show at most a generic "this message is malformed"; the codes are for logs and tests.
+its parts are never badged. Three blocking problems are about the app's results, not the structure: `integrity`,
+a `limit` for a plaintext over 64 MiB, and a `limit` for a part opened past the step limit. They are listed as
+blocking and fail their step (the part shows nothing), but stop nothing around them: a signature the encrypted
+part is under keeps its step and its label. Informational ones (`charset-fallback`, `canonicalized`,
+`no-header-end`, …) change nothing. Show at most a generic "this message is malformed"; the codes are for logs and tests.
 
 ## Encrypted and signed mail
 
@@ -491,8 +502,8 @@ decrypted payload can ask for more steps (a signature inside, a second encryptio
 interface Decrypted {
   status: 'ok' | 'failed' | 'no-key' | 'locked' | 'unsupported';
   plaintext?: Uint8Array;     // with 'ok'
-  integrity: boolean;         // required with 'ok': an integrity-protected packet decrypted completely,
-                              // and the message was encrypted; false shows nothing
+  integrity?: boolean;        // required with 'ok': an integrity-protected packet decrypted completely,
+                              // and the message was encrypted; anything but true shows nothing
   signatures?: Verdict[];     // signatures inside the ciphertext
 }
 
@@ -632,7 +643,7 @@ async function verdict(sig: openpgp.VerifyMessageResult['signatures'][number], r
 
 Each part and attachment has a `protection`: `encrypted` (decrypted from a ciphertext), `opened` (from a part the
 reader opened), `signed` (the innermost signature over it: a verdict's status, `'pending'`, or `null`), its `step`
-and `signer`. `summary` is over the whole message:
+and `signer`. `summary` is over the whole message, the parts and attachments of nested messages included:
 
 | `summary` | Values | |
 | --- | --- | --- |
@@ -652,6 +663,15 @@ How to show it:
   `'differs'`, `headers.from` is the outer From; show the protected one beside it as a claim.
 - **Opened parts apart**: a part with `protection.opened` was decrypted from inside someone else's message (a
   forward, a list footer around it). Show it in a box of its own, labelled, never as the message's own content.
+- **A signature outside a ciphertext labels nothing inside it.** Anyone can sign someone else's ciphertext: in
+  sign over encrypt (a `multipart/signed` around the `multipart/encrypted`), and in a signed multipart around a
+  part the reader opened, the outer signature covers the ciphertext only. Its verify step is offered, so the app
+  may say who sent the ciphertext on, but its verdict labels no part of the plaintext, is no signature over the
+  payload's root and binds no From. The decrypted parts carry the signatures inside the ciphertext
+  (`Decrypted.signatures`), or `signed: null`.
+- **A nested message has its own `summary`**, by the same rules over its own parts, but it has no steps of its
+  own: `encrypted` is never `'all'` (`'some'` when anything in it is encrypted or opened), and `from` is `null` or
+  `'unknown'`, never `'matches'`.
 - `encrypted` parts that are `'pending'` say why nothing shows yet; `'failed'` that the app's result was refused.
 
 ### Opening an encrypted part: `open`
@@ -704,8 +724,9 @@ nothing outside the payload should change what the app does with encrypted conte
 - **Quote decrypted content only when `summary.from` is `'matches'`**, or after asking: otherwise the outer sender
   may have wrapped someone else's ciphertext to read it back from your reply.
 - **An unencrypted reply leaves out what was confidential.** Each name in `confidential` was sent only encrypted:
-  in a reply that is not encrypted, use the value the message was transported with (`outer`, the sender's
-  `HP-Outer`), or leave the field out when it has none.
+  in a reply that is not encrypted, use the value the sender gave for the outside, its entry in `hpOuter` (with
+  `protected-headers="v1"`, which has no `HP-Outer`, the field in `outer`), or leave the field out when it has
+  none.
 
 ### What the library never does
 

@@ -6,7 +6,7 @@ proposal. Why the structure belongs in the library is in [The case](#the-case).
 ## Implementation status
 
 Built in three layers (lexical, structure, OpenPGP), each reviewed for security and fixed against its review's
-reproductions, which are regression tests: 487 tests in `test/mime-*.test.ts`.
+reproductions, which are regression tests: 500 tests in `test/mime-*.test.ts`.
 
 | Step | State | Where it departs from this text |
 | --- | --- | --- |
@@ -43,6 +43,21 @@ reproductions, which are regression tests: 487 tests in `test/mime-*.test.ts`.
 - **Results**: a decrypt result whose plaintext is over 64 MiB, or over what the call's budget has left, fails the
   step with reason `'over-limit'` and a `limit` problem (with `part: null` when it overran the call's budget). An
   empty verdict list combines to `'unsupported'`. An empty `signatures` list in a `Decrypted` is no signature.
+- **Problems from the app's results**: `integrity`, a `limit` for a plaintext over 64 MiB, and a `limit` for a part
+  opened past the step limit are about a result or the reader's choice, not the structure: listed as blocking,
+  they fail their step, but stop nothing around it (a signature the encrypted part is under keeps its step and
+  its label; section 2 amended). The call's byte budget overrun still stops every step not yet offered.
+- **Signatures outside a ciphertext**: sign over encrypt is built as section 5 has it, its verify step offered and
+  its verdict labelling nothing in the payload; the same holds for any signature outside a ciphertext, such as a
+  signed multipart around a part the reader opened. What a ciphertext decrypts to carries the signatures inside
+  it, or `signed: null`.
+- **Nested messages** have a summary of their own, by section 7's rules over their own parts with no steps
+  (`encrypted` never `'all'`, `'some'` when anything in them is encrypted or opened; `from` `null` or `'unknown'`,
+  never `'matches'`); the root's summary counts the parts and attachments of nested messages (section 7 amended).
+  A nested message's multipart root, which shares its message part's id, is `<id>.1` when shown whole; its
+  problems still name the message part (section 2 amended).
+- **`hpOuter`**: the payload root's `HP-Outer` fields, for a confidential field in an unencrypted reply (section 6),
+  only with `hp="cipher"` in a `done` root decrypt.
 - **`summary.signed` is `'all'`** only when the good root signature's signer includes the shown From and every
   part and attachment is `good` with that From among its signers: stricter wording than section 7, the same rule.
 - **`reply`** is empty when an encrypted payload with protected headers has neither Reply-To nor From.
@@ -50,13 +65,19 @@ reproductions, which are regression tests: 487 tests in `test/mime-*.test.ts`.
   (UTF-8, windows-1252 when invalid); the part's id is the step's and `/1`.
 - **Encrypted structures not shown** (in an alternative not chosen, or with a blocking problem near them) are
   attachments of kind `'encrypted'`, their Ref the whole entity.
-- **The cache**: at most 32 inputs and 16 MiB, counting each input's length, 4 kB per message kept and the
+- **The cache** (mime/cache.ts): at most 32 inputs and 16 MiB, counting each input's length, 4 kB and an estimate
+  of its size per message kept (its texts, and a constant per part, attachment, step and problem), and the
   plaintexts the kept options hold, and 4 option sets per input; the input just read is kept whatever its cost.
+  `mail.mime.clear()` drops every kept message and the plaintexts it holds, for an app's lock or logout.
   `mail.bytes` keeps the UTF-8 of the last string input it encoded.
 - **The walk** is iterative in the scan (an explicit stack); choosing what to show recurses once per level, which
   the scan bounds at 32.
-- **Size**: the reader with `mail.mime` is about 23 kB gzip (rolldown, minified), against the 12 kB budget of
-  section 8; `mail.bytes` and `mail.imageType` about 2 kB.
+- **Size** (rolldown, minified, gzip): the reader 22.0 kB, `mail.mime` with the reader 23.6 kB, against the 12 kB
+  budget of section 8; `mail.bytes` and `mail.imageType` 2.0 kB.
+- **Time bounds**: the lexical layer's heaviest hostile inputs (100,000 encoded words, parameter and address
+  fields of up to a megabyte) run under bounds of 4 seconds, far above the few hundred milliseconds they take under
+  load: a reading quadratic in them takes minutes, so it still fails, and a busy machine does not. The other timed
+  tests keep bounds of 2 seconds or less, and the corpus's hostile fixtures their own (`timeBoundMs`).
 - **Corpus**: Stalwart's `malformed/017.eml` reads as `text/plain` with `content-type-invalid`, as section 2's table
   has it, not as Stalwart's expected tree; `thirdparty/011.eml` (an empty body whose blank line is the delimiter's
   line break) is no problem.
@@ -114,7 +135,7 @@ mail.mime(bytes: Uint8Array | string, options?: {
   open?: string[];                             // step ids of encrypted parts the reader chose to open (section 5)
 }): Message
 
-mail.bytes(bytes: Uint8Array | string, ref: Ref, options?: { decrypted?: Record<string, Decrypted> }): Uint8Array
+mail.bytes(bytes: Uint8Array | string, ref: Ref, options?: { decrypted?: Record<string, Decrypted> }): Uint8Array<ArrayBuffer>
 mail.imageType(bytes: Uint8Array): 'png' | 'jpeg' | 'gif' | 'webp' | 'avif' | null   // by magic number
 ```
 
@@ -178,11 +199,13 @@ interface Message {
   sources: Sources;            // where each shown field came from (section 6)
   reply: Address[];            // whom a reply goes to (section 6)
   confidential: string[];      // header names the sender sent only encrypted (section 6), lowercase
+  hpOuter: [name: string, value: string][];   // the payload root's HP-Outer fields, name lowercased (section 6);
+                               // only with hp="cipher" in a done root decrypt, else empty
   parts: Part[];               // what to show, in reading order
   attachments: Attachment[];
   calendar: Calendar[];        // text/calendar parts (iMIP), as text
   steps: Step[];               // section 5; empty for plain mail
-  summary: Summary;            // section 7
+  summary: Summary;            // section 7; a nested message's is its own
   problems: Problem[];         // what was malformed, refused or repaired (below); never content
 }
 
@@ -249,16 +272,18 @@ interface Calendar { part: string; method: string | null; text: string; attachme
 
 interface Problem {
   code: ProblemCode;           // the table below
-  part: string | null;         // the entity or part it concerns
-  blocking: boolean;           // whether it stops steps (section 3)
+  part: string | null;         // the entity or part it concerns; null for the whole call
+  blocking: boolean;           // whether it stops steps (section 3; below for the app's results)
 }
 ```
 
 - **Ids** are paths. The root entity is `1`, its parts `1.1`, `1.2`, theirs `1.2.1`, as IMAP numbers them; a
   non-multipart root is `1` with no children. Ids continue through nested messages, as IMAP's do: a
   `message/rfc822` at `1.2` has its root's parts at `1.2.1`, `1.2.2`, so every id in a message, nested ones
-  included, is unique. Inside a decrypted payload the path continues after the decrypt
-  step's id and `/` (`1#3f…/1.2`). A text part split around cleartext-signed blocks (section 5) gives parts
+  included, is unique. A nested message's multipart root has no number of its own (it shares its
+  `message/rfc822` entity's id, as in IMAP, and its problems are listed under that id); shown whole (an encrypted
+  part, or one attachment of its bytes), it is `<id>.1`, as a nested non-multipart root is. Inside a decrypted
+  payload the path continues after the decrypt step's id and `/` (`1#3f…/1.2`). A text part split around cleartext-signed blocks (section 5) gives parts
   `<id>:1`, `<id>:2`, … in order. Step ids are in section 5. The same bytes and options give the same ids.
 - **No map is keyed by the sender's strings.** Content-IDs, header names and list headers are in arrays of
   pairs: an object keyed by `__proto__` stores nothing. (`Sources` has fixed keys.)
@@ -285,8 +310,10 @@ interface Problem {
   private). `origins` is reported either way, for the "show images" control.
 
 **Problems.** Each has a code; a blocking one stops every step in or below the entity it concerns, and in
-or below its descendants' cryptographic structures (section 3, "near crypto"). The list is closed: a new
-case gets a code and a row.
+or below its descendants' cryptographic structures (section 3, "near crypto"). Three are about the app's
+results, not the structure: `integrity`, a `limit` for a decrypted plaintext over 64 MiB, and a `limit` for a part
+opened past the step limit. They are listed as blocking and fail their step, but stop nothing around it. The list
+is closed: a new case gets a code and a row.
 
 | Code | Blocking | When |
 | --- | --- | --- |
@@ -302,9 +329,9 @@ case gets a code and a row.
 | `encoding-unknown` | yes | an unknown transfer encoding |
 | `crypto-shape` | yes | a `multipart/encrypted` or `multipart/signed` not of the shape section 5 requires |
 | `armor-headers` | no | an anchored cleartext-signed block with armor headers other than `Hash:`, or lines starting `-` not dash-escaped: no step for it |
-| `limit` | yes | a limit of section 4 reached |
+| `limit` | yes (a result over the limit, or a part opened past the step limit: its step only) | a limit of section 4 reached |
 | `control-in-structure` | yes | a NUL or other control byte in any field name, or in a raw Content-Type, Content-Transfer-Encoding, Content-Disposition or MIME-Version value (and so its boundary); a bare CR anywhere in an entity's header block (a parser that ends lines at CR sees another field) |
-| `integrity` | yes | a decrypt result without `integrity: true` |
+| `integrity` | yes (its step only) | a decrypt result without `integrity: true` |
 | `duplicate-header` | no | a repeated From, Sender, Subject or Date (From: `summary.from` is `'unknown'`) |
 | `canonicalized` | no | bare LF line ends converted to CRLF for a signature |
 | `exchange-shape` | no | Exchange's rewritten encrypted message, read as `multipart/encrypted` (section 5) |
@@ -475,9 +502,9 @@ type Step = { id: string; state: 'pending' | 'done' | 'failed' } & (
 interface Decrypted {
   status: 'ok' | 'failed' | 'no-key' | 'locked' | 'unsupported';
   plaintext?: Uint8Array;      // with 'ok'
-  integrity: boolean;          // the app checked an integrity-protected packet (SEIPD v1 with its MDC, or
+  integrity?: boolean;         // the app checked an integrity-protected packet (SEIPD v1 with its MDC, or
                                // v2/AEAD) decrypted completely, and that it was an encrypted message;
-                               // false refuses the plaintext
+                               // required with 'ok' (a TypeError without it); anything but true refuses the plaintext
   signatures?: Verdict[];      // signatures inside the ciphertext (OpenPGP's one-pass)
 }
 
@@ -508,7 +535,12 @@ What becomes a step, and nothing else:
     (rare, legal): a verify step for the root and a decrypt step for the first part. The outer signature covers
     the ciphertext, not what it decrypts to: anyone can wrap someone else's ciphertext in a signature of their
     own. Its verdict labels nothing in the payload (whose parts carry their inner signatures, or none), is no
-    signature over the payload's root, and counts for nothing in `summary` or From;
+    signature over the payload's root, and counts for nothing in `summary` or From. The same holds for any
+    signature outside a ciphertext (a `multipart/signed` around a part whose ciphertext the reader opened): its
+    step is offered, but what the ciphertext decrypts to carries only the signatures inside it, or `signed: null`.
+    Only signatures made inside the innermost root ciphertext count as signatures over the payload's root: not
+    one around armor in a signed text part, nor a one-pass signature of an outer layer around an inner
+    ciphertext encrypted again;
   - **Exchange's rewrite**: the root is `multipart/mixed` whose parts are, in order, an optional
     `text/plain` with only whitespace, `application/pgp-encrypted` containing `Version: 1`, and
     `application/octet-stream` (Exchange's form of a `multipart/encrypted`, which Thunderbird reads the same
@@ -523,7 +555,8 @@ What becomes a step, and nothing else:
   its headers are not applied, and it counts for nothing in `summary.from`. This is where Exchange variants not matched
   above, list-manager footers around encrypted mail, and inline armor with a footer end up.
 - **The app's result is checked.** A `Decrypted` without `integrity: true` shows nothing (`integrity`
-  problem, the step `failed`): a missing or failed MDC, a partial plaintext and a "ciphertext" that is only a
+  problem, the step `failed`; blocking, but a problem with the result, not the structure, so it stops nothing
+  around the part): a missing or failed MDC, a partial plaintext and a "ciphertext" that is only a
   signed or literal OpenPGP message are the app's to refuse (openpgp.js: `allowUnauthenticatedMessages:
   false`, and checking the message was encrypted). This is where EFAIL's CBC/CFB gadgets are stopped; never
   joining bodies stops its direct exfiltration.
@@ -664,7 +697,7 @@ interface Protection {
 }
 
 interface Summary {
-  encrypted: 'all' | 'some' | 'none';      // over parts and attachments; opened parts count as 'some'
+  encrypted: 'all' | 'some' | 'none';      // over parts and attachments, nested messages' included; opened parts count as 'some'
   signed: 'all' | 'some' | 'none';
   from: 'matches' | 'differs' | 'unknown' | null;
 }
@@ -685,8 +718,12 @@ interface Summary {
   | `headers.from` has not exactly one address, or a `null` one | `'unknown'` | outer |
   | a good signature over the payload's root has a `signer` including the From to show: the protected From when the payload has one, else the outer From | `'matches'` | that From |
   | protected headers carry a From whose address differs from the outer one | `'differs'` | outer |
-  | anything else (encrypted and unsigned, signed by another key, a signature over a part only) | `'unknown'` | outer |
+  | anything else (encrypted and unsigned, signed by another key, a signature over a part only, any part the reader opened) | `'unknown'` | outer |
 
+- **Nested messages** have a summary of their own, by the same rules over their own parts and attachments (nested
+  ones' included) with no steps: no ciphertext and no signature is their root's, so `encrypted` is never `'all'`
+  (`'some'` when anything in them is encrypted or opened) and `from` is `null` or `'unknown'`, never `'matches'`.
+  The root's summary counts their parts too: an opened part anywhere is never the root's.
 - `sources` with `'outer'` fields and `signed: 'all'` is a signed body under unsigned Subject, To and Date,
   which can be replayed in another context: an app shows the badge on the body, not on the headers.
 - An app shows a message-level badge only for `'all'`, and marks the parts otherwise. `'some'` is the case an
@@ -704,8 +741,13 @@ sinter/
   bytes.ts         mail.bytes, mail.imageType: imports no reader
   mime/            the reader, behind `@tiavision/sinter-mail/mime`: headers, addresses, dates, encodings,
                    structure, steps, SHA-256; mime/decode.ts the decoders and canonical line ends, which
-                   bytes.ts imports relatively
+                   bytes.ts imports relatively; mime/summary.ts section 7's summary, for the root message and
+                   nested ones; mime/cache.ts mail.mime's cache (bounded, frozen messages, `mail.mime.clear()`),
+                   which mime.ts imports relatively and which imports no reader
 ```
+
+- **The `./mime` entry exports only `read`, `ReadOptions` and the message's types**: the rest is the reader's
+  internals, imported by their own modules, never by apps.
 
 - **The import graph, as for `mail.parse`**: sinter's lazy rule is per declaring module. `mime.ts` imports the
   reader as `@tiavision/sinter-mail/mime` (a new `exports` entry, `./mime` → `./sinter/mime/index.ts`), never by
@@ -718,8 +760,8 @@ sinter/
 - `mail.parse` gains the `legacyDisplay`, `encrypted` and `consent` options (done): `legacyDisplay` in `optionsOf`,
   its `last()` comparison and its cache key; `encrypted` without `consent` folded into `images` as `'block'`, so it
   shares plain `'block'`'s tree and needs no key of its own.
-- Size, measured: the reader with `mail.mime` about 23 kB gzip (rolldown, minified), `mail.bytes` and
-  `mail.imageType` about 2 kB; the first budget, 12 kB, did not hold (no charset tables, since `TextDecoder` has
+- Size, measured (rolldown, minified, gzip): the reader 22.0 kB, `mail.mime` with it 23.6 kB, `mail.bytes` and
+  `mail.imageType` 2.0 kB; the first budget, 12 kB, did not hold (no charset tables, since `TextDecoder` has
   them, but the address, date and RFC 2231 grammars, the strict rules of the reviews, the crypto steps and
   SHA-256 are the reader's). It loads only with `lazy`, when a let first needs it. Pure: an `.eml` in a `file:` resource folds at build time, as text
   (section 1).
@@ -764,7 +806,7 @@ The decision does not rest on size; without the budget it is the same:
 - **The bugs are in what we must own anyway**: other parsers' advisories are in encoded-word joining,
   boundary matching, address parsing and recursion ([Pitfalls](#pitfalls-from-other-mime-parsers)), which
   the crypto steps depend on most.
-- **Size does not decide it**: the reader came to about 23 kB gzip, as large as the candidates that work (24 to
+- **Size does not decide it**: the reader came to about 22 kB gzip (24 with `mail.mime`), as large as the candidates that work (24 to
   30 kB) once it holds what they lack. The first budget, 12 kB, did not hold; the reasons above stand without it.
 
 Borrowed, with their licenses:
@@ -909,5 +951,5 @@ What an app with its own MIME and PGP handling changes to move over:
 - **Signed but not encrypted, with protected headers**: a good signature's inner Subject wins (section 6).
   Is a differing outer Subject worth a problem of its own?
 - **`prefer`**: whether an app needs more than `'html' | 'text'`.
-- **Size**: 23 kB gzip; whether parts of the reader (the crypto steps, protected headers) are worth a split of
+- **Size**: 22 kB gzip; whether parts of the reader (the crypto steps, protected headers) are worth a split of
   their own, for apps that read mail without OpenPGP.

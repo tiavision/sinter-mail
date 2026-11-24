@@ -112,7 +112,8 @@ HTML, with no JavaScript. See [the guide](docs/mail.md#three-places-one-function
 `msg.steps` with your OpenPGP library (decrypt with integrity required, verify returning only the addresses you
 trust), stores each result by step id, and the message is read again with them; `msg.summary` says what to badge.
 Attachments and inline images come out through `mail.bytes(raw, ref, results)`, an image only when
-`mail.imageType` knows its bytes. See [whole messages](docs/mail.md#whole-messages-mailmimebytes-options) and
+`mail.imageType` knows its bytes. On lock or logout, `mail.mime.clear()` drops the messages it keeps and the
+plaintexts they hold. See [whole messages](docs/mail.md#whole-messages-mailmimebytes-options) and
 [encrypted and signed mail](docs/mail.md#encrypted-and-signed-mail).
 
 **Previews and search snippets**
