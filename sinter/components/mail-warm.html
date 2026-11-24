@@ -1,6 +1,6 @@
 <!--
-  mail-warm (public, opt-in): <mail-warm></mail-warm> on a page that will parse an email in the browser: while the page waits
-  for its API, its script (mail-warm.ts) parses and builds a small sample email in idle time, so the browser has
-  compiled the parser before the real email arrives. Its root is an empty hidden element.
+  mail-warm (public, opt-in): <mail-warm></mail-warm> on a page that will parse an email in the browser: while the page
+  waits for its first email, its script (mail-warm.ts) parses and builds sample emails in idle time, so the browser has
+  compiled and optimised the parser before the real email arrives. Its root is an empty hidden element.
 -->
 <template data-sn-emits="{ sample: Body }"><i hidden></i></template>
