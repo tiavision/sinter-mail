@@ -166,3 +166,16 @@ export function canonicalize(bytes: Uint8Array): Bytes {
   }
   return out;
 }
+
+/**
+ * Whether `src[start, end)` may be cut out of a message (docs/mail.md, "Large attachments"): no line in it starts
+ * with `--` (a line starting at `start`, or after a CR or an LF in it, so no parser finds a delimiter there whatever
+ * it takes for a line end), and it does not end with a CR (which would join the line break of the delimiter after
+ * it). The reader allows a cut by structure; this is the half only the cut bytes can show.
+ */
+export function cuttable(src: Uint8Array, start: number, end: number): boolean {
+  for (let k = start; k < end - 1; k++) {
+    if (src[k] === 0x2d && src[k + 1] === 0x2d && (k === start || src[k - 1] === 0x0a || src[k - 1] === 0x0d)) return false;
+  }
+  return !(end > start && src[end - 1] === 0x0d);
+}

@@ -52,12 +52,12 @@ sinter/
   tree.ts                 mail.text, mail.links, mail.unquoted (mail.progressive, deprecated)
   build.ts                the script builder: a tree as elements, for <mail-view>
   warm.ts                 <mail-warm>'s sample emails
-  mime.ts                 mail.mime, mail.mime.clear and mail.forget: options, validation, the last message; imports the reader by
+  mime.ts                 mail.mime, mail.mime.clear, mail.forget and mail.cut: options, validation, the last message; imports the reader by
                           its specifier
   bytes.ts                mail.bytes, mail.imageType: imports mime/decode.ts and mime/magic.ts, never the reader
   mime/                   the MIME reader, behind `@tiavision/sinter-mail/mime`:
     index.ts              the entry: one call's read, the problems listed once each; exports only `read`,
-                          `ReadOptions` and the types
+                          `ReadOptions`, `cutMessage` and the types
     types.ts              the message's public types (Message, Part, Ref, Step, Decrypted, Verdict, …)
     scan.ts               the entity scan: boundaries, ids, Refs, limits, one budget per call, problems
     headers.ts            header blocks, encoded words, parameters (RFC 2047, 2231, 6532)
@@ -68,6 +68,7 @@ sinter/
     crypto.ts, steps.ts   OpenPGP shapes, the steps, the app's results checked, inline armor
     hp.ts, protect.ts     protected headers, reply, confidential, hpOuter, legacy display; the root message assembled
     summary.ts            section 7's summary, for the root message and for nested ones
+    holes.ts, cut.ts      cut messages: each hole checked against the reading, Refs given `missing`; mail.cut
     cache.ts              mail.mime's cache: bounded by inputs and cost, frozen messages, cleared by mail.mime.clear()
     sha256.ts             SHA-256 and step digests
   sinter.helpers.ts       the helpers, re-exported by the entry

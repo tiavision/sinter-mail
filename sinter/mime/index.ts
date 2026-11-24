@@ -4,13 +4,15 @@
 //
 // `read` is one call's work: the input scanned (scan.ts), what to show chosen and the message assembled (show.ts),
 // the steps and their results (crypto.ts, steps.ts), protected headers and the summary (hp.ts, protect.ts), the
-// problems listed once each. This entry exports `read`, its options and the message's types, nothing else: the rest
-// is the reader's internals, imported by their own modules.
-import type { Decrypted, Message, Problem, Verdict } from './types.js';
+// problems listed once each. This entry exports `read`, its options and the message's types, and the reference
+// cutter `cutMessage` (cut.ts, behind mail.cut), nothing else: the rest is the reader's internals, imported by their
+// own modules.
+import type { Decrypted, Hole, Message, Problem, Verdict } from './types.js';
 import { newBudget, scan, type Found } from './scan.js';
-import { reader } from './show.js';
+import { problem, reader } from './show.js';
 import { newState, type CryptoState } from './steps.js';
 import { rootMessage } from './protect.js';
+import { annotate, match, place } from './holes.js';
 
 /** mail.mime's options, validated and normalized by sinter/mime.ts */
 export interface ReadOptions {
@@ -18,16 +20,30 @@ export interface ReadOptions {
   decrypted: Map<string, Decrypted>;
   verdicts: Map<string, Verdict[]>;
   open: string[];
+  /** the input is a cut message: the bodies cut out of it, in the whole message's offsets */
+  holes: Hole[];
 }
 
 /** the message of `bytes` under `options`: not frozen (mail.mime freezes it) */
 export function read(bytes: Uint8Array, options: ReadOptions): Message {
   const budget = newBudget();
+  // a cut message's limits are the whole message's: the bytes cut count against the budget
+  const cuts = options.holes.length ? place(options.holes, bytes.length) : null;
+  if (cuts) for (const c of cuts) budget.bytes -= c.length;
   const s = scan(bytes, { source: 'input', prefix: '' }, budget);
   const r = reader(new Map([['input', bytes]]), s.problems, options.prefer);
+  let valid = true;
+  if (options.holes.length) {
+    valid = cuts !== null && match(bytes, s.root, cuts);
+    // a hole the reader does not allow: the input may not read as the whole message would, so no step is offered
+    if (!valid) problem(r, s.root, 'hole-mismatch', true);
+    if (cuts) r.cuts = cuts;
+  }
   const st = (r.crypto = newState(options, budget, s.root));
   const m = rootMessage(r, s.root);
   if (stale(st, options)) r.problems.push({ entity: null, code: 'stale-result', blocking: false });
+  if (r.cuts) annotate(m, r.cuts);
+  m.cut = options.holes.length ? (valid ? 'valid' : 'invalid') : null;
   m.problems = problemsOf(r.problems);
   return m;
 }
@@ -56,4 +72,5 @@ function problemsOf(found: readonly Found[]): Problem[] {
   return out;
 }
 
+export { cutMessage, type CutMessage, type CutOptions } from './cut.js';
 export type * from './types.js';

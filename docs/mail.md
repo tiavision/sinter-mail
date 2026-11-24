@@ -335,6 +335,7 @@ when the message is encrypted or signed. It runs in the browser, on a server (No
 | `hpOuter` | the payload root's `HP-Outer` fields, `[name, value]` with the name lowercase: what the outer header said, for [an unencrypted reply](#replies); only with `hp="cipher"` in a decrypted root, else empty |
 | `steps`, `summary` | what the app is asked to decrypt or verify, and what it proved ([below](#encrypted-and-signed-mail)); for plain mail no steps and `{ encrypted: 'none', signed: 'none', from: null }` |
 | `problems` | what was malformed, refused or repaired: `{ code, part, blocking }`, never content |
+| `cut` | for [a cut message](#large-attachments-cut-messages): `'valid'` or `'invalid'`; `null` for a whole message, and in a nested message |
 
 An address is `{ name, address }`: `address` is `null` when the address is ambiguous or malformed (never a guess),
 `group` names its group, and `suspicious: true` marks a display name that holds `@` or `<` and is not the address
@@ -357,7 +358,7 @@ problems still name the message part. The same bytes and options give the same i
 | `'text'` | `text`, `flowed`, `delsp` | `mail.plain(p.text, { flowed: p.flowed, delsp: p.delsp })` |
 | `'message'` | `message` (a `Message`, with its own `summary`), `ref` | a forwarded `message/rfc822` shown inline: render its parts as these |
 | `'report'` | `text` | a delivery or read report (`message/delivery-status` and the like): `mail.plain(p.text)` |
-| `'encrypted'` | `ref`, `step`, `reason` | what the reader cannot read yet: `'pending'`, `'failed'`, `'not-root'` (the reader may open it) or `'over-limit'` ([below](#encrypted-and-signed-mail)) |
+| `'encrypted'` | `ref`, `step`, `reason` | what the reader cannot read yet: `'pending'`, `'failed'`, `'not-root'` (the reader may open it), `'over-limit'` ([below](#encrypted-and-signed-mail)) or `'incomplete'` (its ciphertext was [cut out](#large-attachments-cut-messages)) |
 
 Every part also has `id`, `contentType` and `protection`. Your own options (`images`, `proxy`, `media`) go into
 `mail.parse` as for any email: `encrypted` overrides `images` for a decrypted body, and the rest are the part's own.
@@ -428,6 +429,88 @@ the same way, offer them as `application/octet-stream` under `filename`, never u
 one inline only by your own allowlist of types checked on the bytes. A server that serves the parts instead (a `cid`
 template, as before) applies the same rule.
 
+### Large attachments: cut messages
+
+The raw message carries its attachments, so a two-line mail with a 5 MB PDF is about 7 MB of base64 before
+anything renders. A server can send the message without its large bodies instead: it cuts the body bytes of large
+leaf parts out, keeping every header and delimiter, and says where they were. `mail.mime` reads the cut message with
+those `holes`, the text renders at once, and the app fetches a cut body by HTTP Range when the reader opens, saves
+or shows it.
+
+```ts
+// src/sinter.actions.ts: the cut message, and the holes from a response header
+export async function cutMessage(id: string, ctx: CallContext): Promise<{ raw: Uint8Array; holes: Hole[] }> {
+  const res = await fetch(`/api/messages/${encodeURIComponent(id)}/raw?omit=65536`, { signal: ctx.signal });
+  if (!res.ok) throw new Error(`the message: HTTP ${res.status}`);
+  return { raw: new Uint8Array(await res.arrayBuffer()), holes: JSON.parse(res.headers.get('Mail-Holes') ?? '[]') };
+}
+
+// a cut body: its range of the whole message, read by mail.bytes as if it had been there
+export async function partBytes(id: string, raw: Uint8Array, ref: Ref, results: MimeOptions): Promise<Uint8Array> {
+  if (!ref.missing) return mail.bytes(raw, ref, results);
+  const res = await fetch(`/api/messages/${encodeURIComponent(id)}/raw`, { headers: { Range: `bytes=${ref.missing.start}-${ref.missing.end - 1}` } });
+  if (res.status !== 206) throw new Error(`the part: HTTP ${res.status}`);
+  return mail.bytes(raw, ref, { ...results, fetched: new Uint8Array(await res.arrayBuffer()) });
+}
+```
+
+```html
+<article data-sn-let="{ msg: m ? mail.mime(m.raw, { ...results, holes: m.holes }) : null }">
+```
+
+A hole is `{ start, end, size }`: its range in the whole message and its size decoded. The input is the whole
+message without those ranges, so a hole is at `start` minus the lengths of the holes before it, where its body is
+now empty. `holes` is compared by value, so the object may be new at every read. The limits count the whole
+message: the bytes cut out count against the call's byte budget. Without `holes`, a cut input reads as a whole
+message with empty attachments, so keep the two together.
+
+**The reader decides what may be cut**, whatever the server's parser thought. Each hole must land on an empty leaf
+body in the reader's own reading of the input, just after the blank line that ends its headers: a leaf, not opaque, not
+`text/*`, `message/*` or `multipart/*`, not `application/pgp-encrypted` or `application/pgp-signature` (bodies the
+reader reads), and with a `size` its cut bytes can decode to (exactly their length for an identity encoding). A hole that does not is a blocking `hole-mismatch`: no step
+is offered, and the message's `cut` is `'invalid'`, which means read the whole message instead. Otherwise `cut` is
+`'valid'`.
+
+**Refs**: every Ref that touches a hole carries `missing: { start, end, gaps }`, its range in the whole message and
+where the cut bytes are in it: a cut attachment's own, a forwarded message's (its bytes include the PDF cut inside
+it), an encrypted part's, a step's. `mail.bytes` reads such a Ref only with `fetched`, the bytes of that range,
+and checks them: every byte outside the gaps must be the input's own, no line in a gap may start with `--`, and a
+gap may not end with a CR; that rule is what makes a cut unable to change the structure. Anything else throws a
+`TypeError`: read the whole message. For a cut attachment's own Ref the gap is the whole range, so nothing is
+compared there: that the server sent the right bytes rests on the `ETag` (below). A cut attachment's `size` is the hole's (the server's claim, no larger than its bytes allow); a
+Ref's `missing` says what to fetch.
+
+**Steps**: a verify step whose signed bytes include a hole, or a decrypt step whose ciphertext was cut, is offered
+with `incomplete: true` and an id with no digest (`1#cut`): it takes no result (one given is a `stale-result`).
+A signed message's parts show `signed: 'pending'` meanwhile; to verify, read the whole message (its step has the
+usual id, and every part the same id as before, so the reader's choices carry over). The pending label can become
+no label at all on the whole message, when a cut body turns out to be malformed under the signature. A cut
+ciphertext is an `'encrypted'` part with reason `'incomplete'`: fetch the whole message to decrypt it. An armored
+ciphertext (`-----BEGIN PGP MESSAGE-----`) is never cut, its lines starting with `--`, so in practice only base64
+ciphertexts are; bodies inside an encrypted payload are local once it is decrypted.
+
+**Until a cut body is fetched**, the reader cannot see its bytes, so it cannot rule out that they hide a delimiter
+and parts of their own (a sender's trick that `mail.bytes` refuses once they arrive). It never grants trust on
+what it cannot see: in a cut message, a cleartext-signed text is never the signature over the whole message (no
+`summary.from: 'matches'` from it), and an armored text is never the root's decrypt step (it is an `'encrypted'`
+part to open), however few parts are shown; and a signature whose signed bytes include a cut is an incomplete step,
+its parts pending. What the cut message shows can still differ from the whole message's parts until each cut body
+is fetched and passes `mail.bytes`.
+
+**Inline images** cut out are fetched like any attachment, in the `inlineImages` action above (`partBytes` in place
+of `mail.bytes`), in parallel: the body renders first, and each image as it arrives.
+
+**The server** provides:
+
+1. the message cut: `mail.cut(raw, { over, relatedOver, max })` in JavaScript returns `{ raw, holes }`, the
+   reference cutter (bodies over 64 KiB, 512 KiB in a `multipart/related`, at most 32, the largest first; nothing
+   in or around a malformed part). A server in another language may use its own MIME parser, since the reader
+   checks every hole: a hole it refuses costs a full download. Send the holes in a
+   response header (32 holes are about 1.5 kB of JSON) or in a body of your own design;
+2. Range requests on the whole message, with an `ETag` (and `If-Range`): the bytes the holes were cut from. A
+   message is immutable per UIDVALIDITY and UID. `mail.bytes` refuses fetched bytes that differ from the input where
+   both have them, but a cut body's own bytes are only as right as the range the server serves.
+
 ### Options
 
 | Option | Values | |
@@ -436,6 +519,7 @@ template, as before) applies the same rule.
 | `decrypted` | `{ [step id]: Decrypted }` | the app's results for decrypt steps |
 | `verdicts` | `{ [step id]: Verdict[] }` | the app's results for verify steps |
 | `open` | step ids | the encrypted parts the reader chose to open |
+| `holes` | `{ start, end, size }[]` | the input is [a cut message](#large-attachments-cut-messages): the bodies cut out of it |
 
 `decrypted` and `verdicts` are plain objects (not `Map`s). An invalid option throws a `TypeError` at each call
 (`mail.mime: \`prefer\` is 'html' or 'text', not "x"`), as does a result with an unknown `status`, an `'ok'` one
@@ -498,7 +582,8 @@ app's.
 | `'verify-cleartext'` | `block` (a Ref), `charset` | verifies the cleartext-signed block, decoded with `charset`, and stores `Verdict[]` |
 
 Every step has `id`, `part` and `state`: `'pending'` without a result, `'done'` with one accepted, `'failed'` with one
-refused. A step's id carries a digest of its bytes (`1#3fa2…`), so a result applies only to the bytes it is for. A
+refused. A step's id carries a digest of its bytes (`1#3fa2…`), so a result applies only to the bytes it is for
+(a step over [cut bytes](#large-attachments-cut-messages) has `incomplete: true` and no digest). A
 decrypted payload can ask for more steps (a signature inside, a second encryption): call again until none is pending.
 
 ```ts

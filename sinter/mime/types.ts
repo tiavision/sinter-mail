@@ -11,10 +11,30 @@ export interface MimeOptions {
   verdicts?: Record<string, Verdict[]>;
   /** step ids of encrypted parts the reader chose to open (section 5) */
   open?: string[];
+  /** the leaf bodies a server cut out of the input, in order: the input is then the message without them */
+  holes?: Hole[];
+}
+
+/** a leaf body cut out of the message: its range in the whole message, and its size decoded (the server's claim) */
+export interface Hole {
+  start: number;
+  end: number;
+  size: number;
+}
+
+/** where a Ref's bytes are in the whole message, when some of them were cut out of the input */
+export interface Missing {
+  /** the range to fetch from the whole message */
+  start: number;
+  end: number;
+  /** the cut bytes in that range: [offset in the range, length], in order */
+  gaps: [at: number, length: number][];
 }
 
 export interface BytesOptions {
   decrypted?: Record<string, Decrypted>;
+  /** for a Ref with `missing`: the bytes of the whole message's range `[missing.start, missing.end)` */
+  fetched?: Uint8Array;
 }
 
 export interface Message {
@@ -43,6 +63,10 @@ export interface Message {
   summary: Summary;
   /** what was malformed, refused or repaired; never content */
   problems: Problem[];
+  /** the input is a cut message (the `holes` option): 'valid' when every hole is a leaf body the reader allows to be
+   * cut (its Refs carry `missing`), 'invalid' when one is not (read the whole message instead); null for a whole
+   * input, and in a nested message */
+  cut: 'valid' | 'invalid' | null;
 }
 
 interface PartBase {
@@ -62,7 +86,7 @@ export type Part =
   | (PartBase & { type: 'encrypted'; ref: Ref; step: string; reason: EncryptedReason })
   | (PartBase & { type: 'report'; text: string });
 
-export type EncryptedReason = 'pending' | 'failed' | 'not-root' | 'over-limit';
+export type EncryptedReason = 'pending' | 'failed' | 'not-root' | 'over-limit' | 'incomplete';
 
 export interface Headers {
   subject: string | null;
@@ -111,6 +135,8 @@ export interface Ref {
   canonical?: true;
   /** offsets in the decoded bytes, applied after `encoding` is undone */
   slice?: [number, number];
+  /** some of its bytes were cut out of the input: fetch this range of the whole message, for mail.bytes' `fetched` */
+  missing?: Missing;
 }
 
 export type AttachmentKind = 'file' | 'related' | 'calendar' | 'message' | 'pgp-keys' | 'encrypted';
@@ -126,7 +152,7 @@ export interface Attachment {
   disposition: 'attachment' | 'inline' | null;
   kind: AttachmentKind;
   contentId: string | null;
-  /** decoded */
+  /** decoded; for a cut body, the hole's `size` (the server's claim, bounded by the bytes cut) */
   size: number;
   ref: Ref;
   protection: Protection;
@@ -141,7 +167,7 @@ export type ProblemCode =
   | 'boundary-missing-close' | 'boundary-invalid' | 'duplicate-field' | 'duplicate-parameter'
   | 'encoding-on-multipart' | 'encoding-unknown' | 'crypto-shape' | 'limit' | 'integrity'
   | 'control-in-structure' | 'parameter-conflict' | 'header-malformed' | 'content-type-invalid'
-  | 'parameter-malformed'
+  | 'parameter-malformed' | 'hole-mismatch'
   // informational
   | 'armor-headers' | 'no-header-end' | 'duplicate-header' | 'canonicalized' | 'exchange-shape' | 'charset-unknown'
   | 'charset-fallback' | 'base64-junk' | 'qp-invalid' | 'rfc2231-segments' | 'content-id-duplicate'
@@ -156,7 +182,13 @@ export interface Problem {
   blocking: boolean;
 }
 
-interface StepBase { id: string; state: 'pending' | 'done' | 'failed'; part: string }
+interface StepBase {
+  id: string;
+  state: 'pending' | 'done' | 'failed';
+  part: string;
+  /** its bytes include a hole: it has no digest and takes no result; read the whole message to run it */
+  incomplete?: true;
+}
 
 export type Step =
   | (StepBase & { kind: 'decrypt'; ciphertext: Ref; armored: boolean })
