@@ -593,9 +593,10 @@ describe('dates', () => {
     expect(parseDate('  Tue ,  24   Nov   2026   9:05:07   UT  ')).toBe('2026-11-24T09:05:07+00:00');
     expect(parseDate('Tue, 24 (comment (nested)) Nov 2026 09:30:00 +0100 (CET)')).toBe('2026-11-24T09:30:00+01:00');
     expect(parseDate('Tue, 24 Nov 2026 09:30:00 Z')).toBe('2026-11-24T09:30:00+00:00');
-    expect(parseDate('Tue, 24 Nov 2026 09:30:00 A')).toBe('2026-11-24T09:30:00+00:00');
-    expect(parseDate('Tue, 24 Nov 2026 09:30:00 CEST')).toBe('2026-11-24T09:30:00+00:00');
-    expect(parseDate('Tue, 24 Nov 2026 09:30:00')).toBe('2026-11-24T09:30:00+00:00');
+    expect(parseDate('Tue, 24 Nov 2026 09:30:00 A')).toBe('2026-11-24T09:30:00-00:00');
+    expect(parseDate('Tue, 24 Nov 2026 09:30:00 CEST')).toBe('2026-11-24T09:30:00-00:00');
+    expect(parseDate('Tue, 24 Nov 2026 09:30:00')).toBe('2026-11-24T09:30:00-00:00');
+    expect(parseDate('Tue, 24 Nov 2026 09:30:00 -0000')).toBe('2026-11-24T09:30:00-00:00');
     expect(parseDate('24-Nov-2026 09:30:00 +01:00')).toBe('2026-11-24T09:30:00+01:00');
     expect(parseDate('Tuesday, 24 November 2026 09:30 +0100')).toBe('2026-11-24T09:30:00+01:00');
     expect(parseDate('tue, 24 nov 2026 09:30:00 cst')).toBe('2026-11-24T09:30:00-06:00');
@@ -620,7 +621,7 @@ describe('dates', () => {
       '24 Nov 2026 09:30:61 +0000', '24 Nov 2026 09:30 +2400', '24 Nov 2026 09:30 +0160', '24 Nov 1899 09:30 +0000', '24 Nov 12026 09:30 +0000',
       '2026-11-24T09:30:00Z', 'Constructor, 24 Nov 2026 09:30 +0000', '24 Nov 2026 09:30 +', '24 Nov 2026 09:30 +12345'])
       expect(parseDate(s), s).toBe(null);
-    expect(parseDate('24 Nov 2026 09:30 constructor')).toBe('2026-11-24T09:30:00+00:00');
+    expect(parseDate('24 Nov 2026 09:30 constructor')).toBe('2026-11-24T09:30:00-00:00');
   });
 
   test('hostile dates in linear time', () => {
@@ -631,7 +632,7 @@ describe('dates', () => {
 });
 
 describe('filenames', () => {
-  const fn = (d: [string, string][], t: [string, string][] = []) => filename(d, t);
+  const fn = (d: [string, string][], t: [string, string][] = []) => { const r = filename(d, t); return { filename: r.filename, originalFilename: r.originalFilename }; };
 
   test('precedence: filename*, filename, name*, name', () => {
     expect(fn([['filename', 'b.txt'], ['filename*', 'a.txt']], [['name', 'c.txt']]).filename).toBe('a.txt');
@@ -835,7 +836,7 @@ describe('the second round of rules', () => {
     expect(addresses('=?utf8?q?=61=62=63?=<collab@psres.net>', () => {})).toEqual([{ name: 'abc', address: 'collab@psres.net' }]);
     expect(addresses('"=?utf-8?q?a?=""=?utf-8?q?b?=" <x@y>', () => {})[0]!.name).toBe('ab');
     expect(addresses('x=?utf-8?q?a?= <x@y>', () => {})[0]!.name).toBe('x=?utf-8?q?a?=');
-    expect(addresses('collab=?x?b?QA==?=psres.net <x@y>', () => {})[0]!.address).toBe(null);
+    expect(addresses('collab=?x?b?QA==?=psres.net <x@y>', () => {})).toEqual([{ name: 'collab=?x?b?QA==?=psres.net', address: 'x@y' }]);
   });
 
   test('inside encoded words: invalid UTF-8 falls back to windows-1252; spaces or ? in the text make no word', () => {
@@ -863,7 +864,10 @@ describe('the second round of rules', () => {
     expect(punycode('99999999999999999999')).toBe(null);
     expect(punycode('a-é')).toBe(null);
     expect(punycode('abc-')).toBe('abc');
-    expect(punycode('a')).toBe(null);
+    expect(punycode('a')).toBe('\u0080');
+    expect(punycode('-')).toBe(null);
+    expect(punycode('\u0010\u0011')).toBe(null);
+    expect(punycode('\u00e9')).toBe(null);
   });
 
   test('A-labels: invalid, ASCII-only, a special decoded, or not round-tripping give null; kept as transported', () => {

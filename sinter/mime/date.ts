@@ -56,7 +56,8 @@ const pad = (n: number, w = 2) => String(n).padStart(w, '0');
  * (`2026-11-24T09:30:00+01:00`), or null. Accepted besides: a missing or disagreeing day of the week (ignored),
  * comments and extra whitespace, `-` between day, month and year, full month names, two-digit years (below 50 is
  * 20xx) and three-digit ones (+1900), missing seconds, one-digit hours, a `+hh:mm` zone, and the obsolete zone
- * names (UT, GMT, EST to PDT); military letters, unknown names and a missing zone are -0000, written `+00:00`.
+ * names (UT, GMT, EST to PDT); military letters but Z, unknown names, a missing zone and `-0000` itself are -0000, an
+ * unknown offset (RFC 5322 3.3 and 4.3), written `-00:00` as RFC 3339 writes it.
  * Refused: a day the month does not have (leap years counted), a year before 1900, a time or offset out of range.
  */
 export function parseDate(raw: string): string | null {
@@ -93,7 +94,7 @@ export function parseDate(raw: string): string | null {
   if (minute === null) return null;
   let second = 0;
   if (punct(':')) { const s = num(1, 2); if (s === null) return null; second = s; }
-  let offset = 0;
+  let offset = 0, unknown = true;
   const z = t[i];
   if (z && z.k === 'punct' && (z.v === '+' || z.v === '-')) {
     i++;
@@ -106,9 +107,10 @@ export function parseDate(raw: string): string | null {
     else return null;
     if (hh > 23 || mm > 59) return null;
     offset = (z.v === '-' ? -1 : 1) * (hh * 60 + mm);
-  } else if (z && z.k === 'word') offset = ZONES.get(z.v) ?? 0;
+    unknown = offset === 0 && z.v === '-';
+  } else if (z && z.k === 'word' && ZONES.has(z.v)) { offset = ZONES.get(z.v)!; unknown = false; }
   const length = m === 1 && leap(year) ? 29 : LENGTHS[m]!;
   if (day < 1 || day > length || hour > 23 || minute > 59 || second > 60) return null;
   const a = Math.abs(offset);
-  return `${pad(year, 4)}-${pad(m + 1)}-${pad(day)}T${pad(hour)}:${pad(minute)}:${pad(second)}${offset < 0 ? '-' : '+'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
+  return `${pad(year, 4)}-${pad(m + 1)}-${pad(day)}T${pad(hour)}:${pad(minute)}:${pad(second)}${offset < 0 || unknown ? '-' : '+'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
 }

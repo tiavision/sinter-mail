@@ -477,10 +477,13 @@ function joinSegments(segs: Segment[], sink: Sink): string {
 /**
  * A Content-Type or Content-Disposition value: its type (`type/subtype`, CFWS allowed around the `/`) or token,
  * then its parameters, read before anything in them is decoded. RFC 2231's forms (`name*=charset'lang'%XX`,
- * `name*0*=`, `name*1=`) are joined in section order and come out as `name*`; `filename` and `name` have their
- * RFC 2047 words decoded (at most 64 each); decoded values are `clean`ed, others (a boundary) are as sent. A
- * repeated parameter: the first counts (`duplicate-parameter` for boundary, charset, protocol, filename, name). A
- * control character in the raw value is `control-in-structure` (and is kept in values not decoded, a boundary).
+ * `name*0*=`, `name*1=`) are joined in section order and come out as `name*`. An RFC 2047 word in a value is
+ * `encoded-word-in-parameter` and named in `encoded`: decoded in `filename` and `name` (at most 64 each), literal
+ * in any other. Decoded values are `clean`ed; others (a boundary) are as sent. A repeated parameter: the first
+ * counts (`duplicate-parameter` for boundary, charset, protocol, filename, name, start, type, micalg); forms of
+ * one parameter with different values are `parameter-conflict`, named in `conflicts`. A control character in the
+ * raw value is `control-in-structure`. The value is '' when it is not a token or `type/subtype` (see
+ * `contentType` for Content-Type's default).
  */
 export function parameterField(raw: string, sink: Sink): ParameterField {
   if (hasControl(raw)) sink('control-in-structure');

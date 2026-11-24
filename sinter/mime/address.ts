@@ -169,8 +169,8 @@ export function punycode(input: string): string | null {
     const old = i;
     for (let w = 1, k = BASE; ; k += BASE) {
       if (at >= input.length) return null;
-      const c = input.charCodeAt(at++) | 0x20;
-      const digit = c >= 0x61 && c <= 0x7a ? c - 0x61 : c >= 0x30 && c <= 0x39 && input.charCodeAt(at - 1) <= 0x39 ? c - 0x30 + 26 : -1;
+      const c = input.charCodeAt(at++);
+      const digit = c >= 0x61 && c <= 0x7a ? c - 0x61 : c >= 0x41 && c <= 0x5a ? c - 0x41 : c >= 0x30 && c <= 0x39 ? c - 0x30 + 26 : -1;
       if (digit < 0 || digit > Math.floor((MAXINT - i) / w)) return null;
       i += digit * w;
       const t = k <= bias ? TMIN : k >= bias + TMAX ? TMAX : k - bias;

@@ -1,6 +1,7 @@
 // An attachment's name, made safe to save (docs/proposals/sinter-mail-mime.md, section 4, "Filenames"): which
 // parameter names it, what is removed, Windows' reserved names, the length. The name as decoded stays beside it,
 // controls removed, for display only.
+import { ignore, type Sink } from './decode.js';
 import { clean, param } from './headers.js';
 
 type Params = readonly (readonly [string, string])[];
@@ -13,22 +14,26 @@ const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])$/i;
 
 export const MAX_FILENAME = 255;
 
-/** the name as sent: `filename*` then `filename` (Content-Disposition), then `name*` then `name` (Content-Type) */
-function chosen(disposition: Params, type: Params): string | null {
-  return param(disposition, 'filename*') ?? param(disposition, 'filename') ?? param(type, 'name*') ?? param(type, 'name');
-}
+/** the names in order of precedence: Content-Disposition's, then Content-Type's */
+const DISPOSITION = ['filename*', 'filename'], TYPE = ['name*', 'name'];
 
 /**
  * A name safe to save and the name as decoded, from the parameters of Content-Disposition and Content-Type (as
- * headers.parameterField returns them). Removed: path separators, `:`, controls, bidirectional controls, leading
- * dots and whitespace, trailing dots and whitespace. A Windows reserved name (`CON`, `nul.txt`, `COM1.tar.gz`) gets
- * a `_` prefix. Past 255 UTF-16 code units the stem is cut, keeping the extension (up to 32 units) and never
- * splitting a surrogate pair. Empty is `attachment`.
+ * headers.parameterField returns them): `filename*`, then `filename`, then `name*`, then `name`. When the ones
+ * present do not all agree, `conflicts` names them and the sink gets `parameter-conflict` (the caller decides
+ * whether that blocks). Removed: path separators, `:`, controls, bidirectional controls, leading dots and
+ * whitespace, trailing dots and whitespace. A Windows reserved name (`CON`, `nul.txt`, `COM1.tar.gz`) gets a `_`
+ * prefix. Past 255 UTF-16 code units the stem is cut, keeping the extension (up to 32 units) and never splitting a
+ * surrogate pair. Empty is `attachment`.
  */
-export function filename(disposition: Params, type: Params): { filename: string; originalFilename: string | null } {
-  const raw = chosen(disposition, type);
-  const originalFilename = raw === null ? null : clean(raw);
-  return { filename: safeName(originalFilename ?? ''), originalFilename };
+export function filename(disposition: Params, type: Params, sink: Sink = ignore): { filename: string; originalFilename: string | null; conflicts: string[] } {
+  const present: [string, string][] = [];
+  for (const n of DISPOSITION) { const v = param(disposition, n); if (v !== null) present.push([n, v]); }
+  for (const n of TYPE) { const v = param(type, n); if (v !== null) present.push([n, v]); }
+  const originalFilename = present.length ? clean(present[0]![1]) : null;
+  const agree = present.every(([, v]) => v === present[0]![1]);
+  if (!agree) sink('parameter-conflict');
+  return { filename: safeName(originalFilename ?? ''), originalFilename, conflicts: agree ? [] : present.map(([n]) => n) };
 }
 
 /** `name` made safe by the rules of `filename` */
