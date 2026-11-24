@@ -485,11 +485,20 @@ What becomes a step, and nothing else:
     with `-` is dash-escaped, and the body has at most 4 blocks. A quoted, unanchored or fifth block is plain
     text, with no problem (a reply that quotes a signed message is ordinary); an anchored block with other armor
     headers or a line starting `-` that is not dash-escaped is text and an `armor-headers` problem, which is
-    informational: the block makes no step, and nothing else changes. The rules make the reader's reading a strict subset of what OpenPGP implementations accept.
+    informational: the block makes no step, and nothing else changes. Also no step (text, `armor-headers`) when the
+    block holds a CR not followed by LF, a control byte other than TAB, CR and LF, or a line that reads as an armor
+    line (`-----…-----`) once CR and trailing whitespace are removed but is not one as sent; and none in a charset
+    that is not a stateless ASCII superset (ISO-2022-*, UTF-16, UTF-32, UTF-7): an implementation that removes CRs
+    or escapes would end the signed text elsewhere than the reader, and show text it did not sign as signed. The
+    rules make the reader's reading a strict subset of what OpenPGP implementations accept.
     `block` is the block's bytes as sent, with `charset`, so the app verifies what the sender signed, not a
     re-encoding. The signed part shown is the signed text with dash-escaping removed and each line's trailing
     whitespace removed (what text-mode hashing covers; RFC 9580), never read as `flowed`, so unsigned trailing
-    spaces cannot rejoin lines; the text before and after the block are text parts of their own, unsigned;
+    spaces cannot rejoin lines; the text before and after the block are text parts of their own, unsigned. A
+    cleartext signature covers its text only: never a header section. When the root's only shown part is exactly
+    one block (whitespace aside) and the payload has no protected headers, its good verdict counts for
+    `summary.signed` and `summary.from` against the outer From; it never makes a protected header apply, never
+    binds a protected From, and never changes `reply`;
   - armor inside HTML is never a step.
 - **Not steps**: separately encrypted attachments (`.pgp`, `.gpg`, `.asc` files, as Enigmail and GpgOL send
   them) are attachments of kind `encrypted`; the app may decrypt the file itself, outside the message.
@@ -512,7 +521,11 @@ none.
   `headers` are the outer ones and every source is `'outer'`. This is stricter than RFC 9788 §4.3.1, which takes
   the payload's values and marks them unprotected; deliberately, since an unverified signed part's headers are no
   better than the outer ones and showing them invites trust. Signatures inside the ciphertext (`Decrypted.signatures`) are signatures over the
-  payload's root, for `signed`, `summary` and From alike.
+  payload's root, for `signed`, `summary` and From alike, under the same rule as a `multipart/signed`: a blocking
+  problem anywhere in the payload (mid-stream base64 padding included) leaves its parts `signed: null`.
+- **A withdrawn or blocked step labels nothing**: a step not offered (blocked, over a limit, withdrawn after its
+  subtree was checked) leaves no `pending` label and accepts no result; an entity with a blocking problem above it
+  offers no step of any kind, decrypt included.
 
 - **When they apply**: the payload's root carries protected headers when its Content-Type has the `hp`
   parameter (RFC 9788, values `cipher` and `clear`; ignored anywhere but the payload's root, §4.1) or
@@ -536,7 +549,8 @@ none.
 - **`reply`**: whom a reply goes to. With protected headers in an encrypted payload, the protected Reply-To,
   else the protected From, even when the shown From is the outer one: RFC 9788 has replies use only the
   protected fields for recipients (§4.4.4, §6.2), which also sends a reply to a re-sent ciphertext to its
-  author, not to whoever re-sent it. Otherwise the shown Reply-To, else the shown From.
+  author, not to whoever re-sent it. When such a payload has neither, `reply` is empty: the app asks (the outer
+  sender may only have re-sent it). Otherwise the shown Reply-To, else the shown From.
 - **`sources`** records, for every field, whether the shown value came from the payload or from outside.
   Fields that exist only outside (`list`, `autocrypt`, `raw`) are never protected: an app must not let them
   change what it does with encrypted content (the Delta Chat group-membership attack used such a header).
@@ -735,8 +749,11 @@ Choices the third review left to the implementation, recorded so that every part
 - **A sub-range of a decoded body**: `Ref` has an optional `slice: [start, end]`, offsets in the decoded bytes,
   applied after `encoding` is undone (a cleartext block inside a base64 `text/plain`).
 - **Digests**: SHA-256 over the step's bytes as `mail.bytes` returns them; for `verify`, over the signed bytes'
-  length as 4 bytes big-endian, then the signed bytes, then the signature. Digests are kept per input (by
-  identity) and per decrypted payload, so a cache miss of `mail.mime` hashes nothing twice.
+  length as 4 bytes big-endian, then the signed bytes, then the signature; for `verify-cleartext`, over the
+  normalized charset label's length and bytes, then the block, since the charset decides the text shown.
+  Digests are computed per call, never kept across calls by input identity: an input changed in place must not
+  keep an old result's digest. (`mail.mime`'s result cache is by identity too; the guide says inputs and results
+  are not to be changed in place.)
 - **`mail.bytes`** throws a `TypeError` for a `Ref` outside its source, or whose `source` step has no `ok`
   plaintext in `decrypted`.
 - **`summary.from`**, row 3: the signer must include the From to show; a protected From with a signer that
