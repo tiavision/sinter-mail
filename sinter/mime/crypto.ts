@@ -16,13 +16,14 @@
 // A blocking problem near crypto (in the entity, an ancestor or a descendant) makes no step: the part is shown
 // unlabelled.
 import type { Entity } from './scan.js';
-import type { Part, Protection, Ref, Verdict } from './types.js';
+import type { Part, Protection, Ref, Step, Verdict } from './types.js';
+import { within } from './holes.js';
 import { all, paramOf, scan } from './scan.js';
 import { attach, body, problem, shownId, textPart, textQuiet, walk, type Ctx, type Mode, type Reader, type Scope } from './show.js';
 import { asciiLower, asciiSuperset, decodeAsApp, decodeText, normalizeLabel } from './charset.js';
 import { base64Result, hasBareLF, ignore } from './decode.js';
 import {
-  accept, armored, canOffer, cleartextDigestOf, cleartextSafe, combine, digestOf, findBlocks, offer, refBytes, shownSigned,
+  accept, armored, canOffer, offerIncomplete, cleartextDigestOf, cleartextSafe, combine, digestOf, findBlocks, offer, refBytes, shownSigned,
   signedBy, stateOf, verifyDigestOf, whitespace, withdraw, type CryptoState, type Sig,
 } from './steps.js';
 import { legacyText, protectionForm, v1Display } from './hp.js';
@@ -155,10 +156,20 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
   if (!data) problem(r, e, 'crypto-shape', true);
   if (!data || mode !== 'show' || e.above || e.below) { attach(r, e, scope, 'encrypted', ctx); return; }
   const ciphertext: Ref = { source: data.source, start: data.bodyStart, end: data.end, encoding: data.encoding };
-  const bytes = refBytes(r, ciphertext);
-  const id = `${e.id}#${digestOf(r, ciphertext, bytes)}`;
   const ref: Ref = { source: e.source, start: e.start, end: e.end, encoding: 'identity' };
   const root = st.rootDecrypt.has(e) && e.nested === 0 && st.root.decrypts < 2;
+  if (within(r.cuts, ciphertext).length) {
+    // the ciphertext was cut out of the input: a root step is offered without a digest, and takes no result
+    const id = `${e.id}#cut`;
+    if (root && canOffer(st)) {
+      st.root.decrypts++;
+      offerIncomplete(st, { id, state: 'pending', part: e.id, kind: 'decrypt', ciphertext, armored: false, incomplete: true });
+    }
+    scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, 'incomplete', ctx));
+    return;
+  }
+  const bytes = refBytes(r, ciphertext);
+  const id = `${e.id}#${digestOf(r, ciphertext, bytes)}`;
   st.known.add(id);
   if (!root && !st.open.has(id)) { scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, 'not-root', ctx)); return; }
   if (!canOffer(st)) {
@@ -267,11 +278,18 @@ export function showSigned(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: 
   const signedRef: Ref = { source: e.source, start: signed.start, end: signed.end, encoding: 'identity' };
   if (hasBareLF(r.sources.get(e.source)!, signed.start, signed.end)) signedRef.canonical = true;
   const signature: Ref = { source: sig.source, start: sig.bodyStart, end: sig.end, encoding: sig.encoding };
-  const id = `${e.id}#${verifyDigestOf(r, signedRef, signature)}`;
-  const vs = st.verdicts.get(id);
+  // signed bytes cut out of the input: the step is offered without a digest and takes no result, its parts pending
+  const incomplete = within(r.cuts, signedRef).length > 0 || within(r.cuts, signature).length > 0;
+  const id = incomplete ? `${e.id}#cut` : `${e.id}#${verifyDigestOf(r, signedRef, signature)}`;
+  const vs = incomplete ? undefined : st.verdicts.get(id);
   const c = vs ? combine(vs) : { status: 'pending' as const, signer: [] };
   const micalg = paramOf(e.params, 'micalg');
-  offer(st, { id, state: vs ? 'done' : 'pending', part: e.id, kind: 'verify', signed: signedRef, signature, micalg: micalg === null ? null : asciiLower(micalg) });
+  // a bare LF in the cut bytes cannot be seen: canonicalizing is idempotent, so an incomplete step's signed bytes are
+  // always read canonical
+  if (incomplete) signedRef.canonical = true;
+  const step: Step = { id, state: vs ? 'done' : 'pending', part: e.id, kind: 'verify', signed: signedRef, signature, micalg: micalg === null ? null : asciiLower(micalg) };
+  if (incomplete) offerIncomplete(st, { ...step, incomplete: true });
+  else offer(st, step);
   // sign over encrypt: the signature covers the ciphertext, not the payload. Its step is offered (an app may say who
   // sent it), but its verdict labels nothing and is no signature over the payload's root (summary, From)
   const sealed = signed.boundary !== null && (cryptoShape(r, signed) === 'encrypted' || cryptoShape(r, signed) === 'exchange');
@@ -284,7 +302,7 @@ export function showSigned(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: 
     relabel(scope, parts, attachments, id, ctx.protection);
     return;
   }
-  if (signedRef.canonical) problem(r, e, 'canonicalized');
+  if (signedRef.canonical && !incomplete) problem(r, e, 'canonicalized');
   if (isRoot && !sealed) st.root.sigs.push({ step: id, ...c });
 }
 
@@ -448,7 +466,8 @@ export function resolveCandidates(r: Reader, scope: Scope): void {
       c.scope.parts.splice(at, 1, textPart(r, c.entity, ctx));
       continue;
     }
-    const root = c.scope === scope && scope.parts.length === 1 && st.root.decrypts === 0 && !st.root.encrypted;
+    // in a cut message "the only part shown" is not known (a cut body may hide parts): no armored text is the root
+    const root = c.scope === scope && scope.parts.length === 1 && st.root.decrypts === 0 && !st.root.encrypted && !r.cuts?.length;
     if (!root && !st.open.has(c.part.step)) continue;
     const sub: Scope = { parts: [], attachments: [], calendar: [], html: [], of: new Map() };
     const cleartexts = st.cleartexts.length;

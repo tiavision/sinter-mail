@@ -9,9 +9,10 @@
 //   helpers either way: they render early and fold at build time.
 // - mime.ts imports the MIME reader (`@tiavision/sinter-mail/mime`): `mail.mime` is lazy as `mail.parse` is.
 //   `mail.forget()` drops what mail.mime keeps (on lock or logout), as `mail.mime.clear()` does, reachable from an
-//   action when the package is lazy. bytes.ts imports no reader, so `mail.bytes` and `mail.imageType` stay ordinary helpers.
+//   action when the package is lazy. `mail.cut` is the reference cutter for cut messages, for a server in
+//   JavaScript and for tests. bytes.ts imports no reader, so `mail.bytes` and `mail.imageType` stay ordinary helpers.
 export { parse } from './parse.js';
 export { plain } from './plain.js';
 export { text, links, progressive, unquoted } from './tree.js';
-export { mime, forget } from './mime.js';
+export { mime, forget, cut } from './mime.js';
 export { bytes, imageType } from './bytes.js';

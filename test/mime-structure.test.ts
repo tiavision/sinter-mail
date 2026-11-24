@@ -667,10 +667,10 @@ describe('purity and laziness', () => {
     expect(pkg.exports['./mime']).toBe('./sinter/mime/index.ts');
   });
 
-  test('`./mime` exports `read` only (and types); the package exports neither the reader\'s internals nor the cache', async () => {
-    expect(Object.keys(await import('../sinter/mime/index.js'))).toEqual(['read']);
+  test('`./mime` exports `read` and `cutMessage` only (and types); the package exports neither the reader\'s internals nor the cache', async () => {
+    expect(Object.keys(await import('../sinter/mime/index.js')).sort()).toEqual(['cutMessage', 'read']);
     const pkg = await import('../sinter/index.js');
-    expect(Object.keys(pkg).sort()).toEqual(['bytes', 'forget', 'imageType', 'links', 'mime', 'parse', 'plain', 'progressive', 'text', 'unquoted']);
+    expect(Object.keys(pkg).sort()).toEqual(['bytes', 'cut', 'forget', 'imageType', 'links', 'mime', 'parse', 'plain', 'progressive', 'text', 'unquoted']);
     expect(Object.keys(pkg.mime)).toEqual(['clear']);
   });
 

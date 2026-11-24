@@ -81,6 +81,13 @@ export function offer(st: CryptoState, step: Step): void {
   (step.kind === 'decrypt' ? st.decryptIds : st.verifyIds).add(step.id);
 }
 
+/** offers a step whose bytes include a hole (the caller checked canOffer): its id has no digest, so no result is
+ * accepted for it (one given is a `stale-result`) */
+export function offerIncomplete(st: CryptoState, step: Step): void {
+  st.budget.steps--;
+  st.steps.push(step);
+}
+
 /** withdraws the last-offered step with this id (its subtree turned out to have a blocking problem) */
 export function withdraw(st: CryptoState, id: string): void {
   const i = st.steps.findIndex((s) => s.id === id);

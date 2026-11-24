@@ -17,6 +17,7 @@ import type { CryptoState } from './steps.js';
 import type { Shape } from './crypto.js';
 import { NO_ROOT, protections, summarize } from './summary.js';
 import { OUTER } from './hp.js';
+import type { Cut } from './holes.js';
 
 /** what a walk reads from and reports to: one call's sources and problems */
 export interface Reader {
@@ -32,6 +33,8 @@ export interface Reader {
   shapes?: Map<Entity, Shape | null>;
   /** each entity's flavor (flavor), once per call: alternatives nested in alternatives ask for it again; made on first use */
   flavors?: Map<Entity, Flavor>;
+  /** a cut input's holes, placed (holes.ts) */
+  cuts?: Cut[];
 }
 
 export function reader(sources: Map<string, Uint8Array>, problems: Found[], prefer: 'html' | 'text'): Reader {
@@ -122,7 +125,7 @@ export function message(r: Reader, root: Entity, protection: Protection = unprot
   return {
     type: 'message', headers, outer: headers, sources: OUTER(), reply: headers.replyTo.length ? headers.replyTo : headers.from,
     confidential: [], hpOuter: [], parts: scope.parts, attachments: scope.attachments, calendar: scope.calendar, steps: [],
-    summary, problems: [],
+    summary, problems: [], cut: null,
   };
 }
 

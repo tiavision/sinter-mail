@@ -28,7 +28,7 @@ export function rootMessage(r: Reader, root: Entity): Message {
   else { headers.from = outer.from; sources.from = 'outer'; }
   return {
     type: 'message', headers, outer, sources, reply: applied.reply, confidential: applied.confidential, hpOuter: applied.hpOuter, parts: scope.parts,
-    attachments: scope.attachments, calendar: scope.calendar, steps: st.steps, summary, problems: [],
+    attachments: scope.attachments, calendar: scope.calendar, steps: st.steps, summary, problems: [], cut: null,
   };
 }
 
@@ -43,6 +43,9 @@ export function rootMessage(r: Reader, root: Entity): Message {
  */
 function cleartextRoot(r: Reader, scope: Scope): void {
   const st = stateOf(r);
+  // a cut message: a cut body may hide a delimiter and parts the reader cannot see until it is fetched, so "the only
+  // part shown" is not known, and no cleartext block is over the payload's root
+  if (r.cuts?.length) st.cleartexts.length = 0;
   for (const c of st.cleartexts) {
     if (c.scope !== scope || scope.parts.length !== 1 || scope.parts[0] !== c.part) continue;
     if (c.entity.above || c.part.protection.step !== c.sig.step || protectionForm(st.root.payload) !== null) continue;

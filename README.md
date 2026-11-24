@@ -33,6 +33,9 @@ tree, and generated components render each element, with every attribute and sty
 - **Whole messages and OpenPGP.** `mail.mime` reads a raw message into its bodies (never joined), attachments and
   inline images, and lists what your app must decrypt or verify; it checks the structure strictly, reads the
   decrypted payload, applies protected headers and labels each part. Keys and crypto stay in your app.
+- **Large attachments on demand.** A server can send the message with its large bodies cut out; `mail.mime`
+  checks every cut against its own reading, the text renders at once, and the app fetches a cut body by range
+  when it is needed.
 
 ## Install
 

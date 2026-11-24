@@ -6,8 +6,8 @@
 //
 // Pure: the same bytes and options give the same frozen, JSON-shaped message, with no globals beyond the language's
 // and TextEncoder.
-import { read } from '@tiavision/sinter-mail/mime';
-import type { Decrypted, Message, MimeOptions, Verdict } from './mime/types.js';
+import { cutMessage, read, type CutMessage, type CutOptions } from '@tiavision/sinter-mail/mime';
+import type { Decrypted, Hole, Message, MimeOptions, Verdict } from './mime/types.js';
 import { cached, clearCache, sameOptions, type Options } from './mime/cache.js';
 
 /**
@@ -18,6 +18,24 @@ import { cached, clearCache, sameOptions, type Options } from './mime/cache.js';
 export function mime(bytes: Uint8Array | string, options?: MimeOptions): Message {
   if (!(bytes instanceof Uint8Array) && typeof bytes !== 'string') fail(`the message is a Uint8Array or a string, not ${describe(bytes)}`);
   return last.get(bytes, optionsOf(options));
+}
+
+/**
+ * `raw` with the bodies of its large leaf parts cut out, and the holes that say where, for `mail.mime(cut.raw, {
+ * holes: cut.holes })`: the reference cutter, for a server in JavaScript and for tests (docs/mail.md, "Large
+ * attachments"). A string is read as UTF-8. Invalid options throw a TypeError.
+ */
+export function cut(raw: Uint8Array | string, options?: CutOptions): CutMessage {
+  if (!(raw instanceof Uint8Array) && typeof raw !== 'string') throw new TypeError(`mail.cut: the message is a Uint8Array or a string, not ${describe(raw)}`);
+  if (options != null && !isRecord(options)) throw new TypeError(`mail.cut: the options are an object, not ${describe(options)}`);
+  const o = options ?? {};
+  const n = (name: 'over' | 'relatedOver' | 'max', d: number) => {
+    const v = o[name] ?? d;
+    if (!offset(v)) throw new TypeError(`mail.cut: \`${name}\` is a non-negative integer, not ${describe(v)}`);
+    return v;
+  };
+  const bytes = typeof raw === 'string' ? new TextEncoder().encode(raw) : raw;
+  return cutMessage(bytes, { over: n('over', 64 * 1024), relatedOver: n('relatedOver', 512 * 1024), max: n('max', 32) });
 }
 
 /** drops every message kept, and the plaintexts of the results they were read with (on lock or logout), as a
@@ -39,6 +57,8 @@ const fail = (msg: string): never => {
 const describe = (v: unknown) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'string' ? JSON.stringify(v) : typeof v);
 
 const describeObject = (v: unknown) => (v instanceof Map ? 'a Map' : typeof v === 'object' && v !== null && !Array.isArray(v) ? 'an instance of a class' : describe(v));
+
+const offset = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 
 const DECRYPTED = new Set(['ok', 'failed', 'no-key', 'locked', 'unsupported']);
 const VERDICT = new Set(['good', 'bad', 'no-key', 'expired', 'revoked', 'unsupported']);
@@ -105,7 +125,17 @@ function optionsOf(options: MimeOptions | undefined): Options {
     // copied, never spread: a long array would overflow the call's arguments
     open = (o.open as string[]).slice();
   }
-  return { prefer: prefer as 'html' | 'text', decrypted, verdicts, open };
+  const holes: Hole[] = [];
+  if (o.holes != null) {
+    if (!Array.isArray(o.holes)) fail(`\`holes\` is an array of { start, end, size }, not ${describe(o.holes)}`);
+    (o.holes as unknown[]).forEach((h, i) => {
+      const x = isRecord(h) ? h : null;
+      if (!x || !offset(x.start) || !offset(x.end) || !offset(x.size)) fail(`\`holes[${i}]\` is { start, end, size }, offsets and a size, not ${describe(h)}`);
+      // copied: an array changed in place after the call must not change the message kept
+      holes.push({ start: x!.start as number, end: x!.end as number, size: x!.size as number });
+    });
+  }
+  return { prefer: prefer as 'html' | 'text', decrypted, verdicts, open, holes };
 }
 
 /**

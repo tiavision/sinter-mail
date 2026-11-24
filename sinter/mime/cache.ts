@@ -2,21 +2,24 @@
 // options, bounded by count and by cost. Internal: sinter/mime.ts keeps its messages here, and the tests read its
 // size; it is no export of the package (sinter.helpers.ts and the `./mime` entry do not re-export it). It imports no
 // reader: the read function is mail.mime's, passed in, so this module goes wherever sinter/mime.ts goes.
-import type { Decrypted, Message, Part, Verdict } from './types.js';
+import type { Decrypted, Hole, Message, Part, Verdict } from './types.js';
 import type { ReadOptions } from './index.js';
 
-/** the options as compared and read: `prefer` by value, the results entry by entry (key, and value by identity) */
+/** the options as compared and read: `prefer` and `holes` by value, the results entry by entry (key, and value by
+ * identity) */
 export interface Options {
   prefer: 'html' | 'text';
   decrypted: [string, Decrypted][];
   verdicts: [string, Verdict[]][];
   open: string[];
+  holes: Hole[];
 }
 
 const sameEntries = <T>(a: [string, T][], b: [string, T][]) => a.length === b.length && a.every(([k, v], i) => k === b[i]![0] && v === b[i]![1]);
 
 export const sameOptions = (a: Options, b: Options) => a.prefer === b.prefer && sameEntries(a.decrypted, b.decrypted)
-  && sameEntries(a.verdicts, b.verdicts) && a.open.length === b.open.length && a.open.every((s, i) => s === b.open[i]);
+  && sameEntries(a.verdicts, b.verdicts) && a.open.length === b.open.length && a.open.every((s, i) => s === b.open[i])
+  && a.holes.length === b.holes.length && a.holes.every((h, i) => h.start === b.holes[i]!.start && h.end === b.holes[i]!.end && h.size === b.holes[i]!.size);
 
 /** the cache's bounds: inputs kept, their total cost, option sets per input, and the cost of one entry beyond its
  * bytes, the message read from it and the options */
@@ -44,7 +47,7 @@ function messageCost(m: Message): number {
 
 /** what one option set holds alive: the plaintexts of its results */
 const optionsCost = (o: Options) => {
-  let n = ENTRY;
+  let n = ENTRY + 32 * o.holes.length;
   for (const [, d] of o.decrypted) if (d.plaintext instanceof Uint8Array) n += d.plaintext.byteLength;
   return n;
 };
@@ -69,7 +72,7 @@ const cache = (() => {
     const hit = of.find((x) => sameOptions(x.o, o));
     if (hit) return hit.v;
     const src = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes;
-    const ro: ReadOptions = { prefer: o.prefer, decrypted: new Map(o.decrypted), verdicts: new Map(o.verdicts), open: o.open.slice() };
+    const ro: ReadOptions = { prefer: o.prefer, decrypted: new Map(o.decrypted), verdicts: new Map(o.verdicts), open: o.open.slice(), holes: o.holes };
     const v = frozen(read(src, ro));
     const kept: Kept = { o, v, cost: optionsCost(o) + messageCost(v) };
     of.unshift(kept);
