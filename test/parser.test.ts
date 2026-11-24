@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { characterEntities } from 'character-entities';
 import { characterEntitiesLegacy } from 'character-entities-legacy';
 import { describe, expect, test } from 'vitest';
-import { ENTITIES, LEGACY } from '../sinter/parser/entities.js';
+import { entities, entity, LEGACY } from '../sinter/parser/entities.js';
 import { parseHTML } from '../sinter/parser/index.js';
 import type { RawElement, RawNode } from '../sinter/raw.js';
 import { plainOf, reference } from './reference.js';
@@ -276,8 +276,11 @@ describe('the entity table', () => {
     execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/build-entities.mjs', import.meta.url)), '--check']);
   });
   test('unpacks to character-entities and character-entities-legacy', () => {
-    expect(Object.fromEntries(ENTITIES)).toEqual(characterEntities);
+    expect(Object.fromEntries(entities())).toEqual(characterEntities);
     expect([...LEGACY].sort()).toEqual([...characterEntitiesLegacy].sort());
+  });
+  test('the small table the parser starts with agrees with it', () => {
+    for (const [name, value] of Object.entries(characterEntities)) expect(entity(name), name).toBe(value);
   });
 });
 

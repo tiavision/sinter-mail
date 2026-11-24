@@ -7,34 +7,35 @@
 // the thorough list, `</tbody>` in a row closes it when a `tr` is in scope, and `<![CDATA[` is a section only
 // where the current node is foreign and not an integration point.
 //
+// The tree it builds is the raw tree (sinter/raw.ts): each element's raw element is made with it and put
+// in its parent's children as the standard inserts it, and text goes into the raw texts there, adjacent ones
+// joined. What the standard's algorithms need besides is in a Node beside each element.
+//
 // Foreign content (`<svg>`, `<math>`) is parsed as the standard says, so that what follows it lands where
-// it should; the raw tree leaves it out with its subtree (index.ts). A `<template>`'s content goes to a
-// fragment of its own, which the raw tree leaves out too.
+// it should, but a foreign element is never put in its parent's children, so the raw tree leaves it out with
+// its subtree. A `<template>`'s content goes to a fragment of its own, which the raw tree leaves out too.
 //
 // Bounded: the stack holds at most `maxDepth` elements. An element that would open deeper closes the
 // current node first and opens beside it (as Blink flattens deep trees), so every search of the stack is
 // bounded and the parse stays linear; below the bound nothing changes.
+import type { RawElement } from '../raw.js';
 import { tokenize, DATA, PLAINTEXT, RAWTEXT, RCDATA, SCRIPT, type Attrs, type Sink } from './tokenizer.js';
 
 export const HTML = 0, SVG = 1, MATH = 2;
 
 export interface Node {
+  /** the element in the raw tree: its tag, attributes, children and parent */
+  el: RawElement;
   tag: string;
   ns: number;
-  attrs: Attrs;
-  /** elements and texts (strings, adjacent ones joined) */
-  kids: (Node | string)[];
-  parent: Node | null;
   /** on the stack of open elements */
   open: boolean;
   /** in the list of active formatting elements */
   listed: boolean;
-  /** a template's content */
-  content: Node | null;
+  /** a template's content, a fragment outside the tree */
+  content: RawElement | null;
   /** what the element is to the stack's searches: the bits below */
   bits: number;
-  /** a formatting element's key (keyOf) */
-  key?: string;
 }
 
 // the scopes an element bounds, and whether it is special (other than HTML `address`, `div` and `p`, which
@@ -94,27 +95,46 @@ function quirky(name: string | null, publicId: string | null, systemId: string |
     (systemId === null && (id.startsWith('-//w3c//dtd html 4.01 frameset//') || id.startsWith('-//w3c//dtd html 4.01 transitional//')));
 }
 
+// the bits of the HTML elements that have any
+const BITS = new Map<string, number>();
+for (const tag of SPECIAL) BITS.set(tag, tag === 'address' || tag === 'div' || tag === 'p' ? SPECIAL_BIT : SPECIAL_BIT | LIST_ITEM_STOP);
+for (const tag of SCOPE) BITS.set(tag, BITS.get(tag)! | SCOPE_BOUND);
+BITS.set('ol', BITS.get('ol')! | LIST_BOUND).set('ul', BITS.get('ul')! | LIST_BOUND).set('button', BITS.get('button')! | BUTTON_BOUND);
+BITS.set('html', BITS.get('html')! | TABLE_BOUND).set('table', BITS.get('table')! | TABLE_BOUND);
+
+const element = (tag: string, attrs: Attrs): RawElement => ({ type: 'element', tag, attrs, children: [], parent: null });
 const create = (tag: string, attrs: Attrs, ns: number): Node => ({
-  tag, ns, attrs, kids: [], parent: null, open: false, listed: false,
-  content: ns === HTML && tag === 'template' ? create('#content', [], HTML) : null,
-  bits: ns === HTML
-    ? (SCOPE.has(tag) ? SCOPE_BOUND : 0) | (tag === 'ol' || tag === 'ul' ? LIST_BOUND : 0) | (tag === 'button' ? BUTTON_BOUND : 0) |
-      (tag === 'html' || tag === 'table' ? TABLE_BOUND : 0) | (SPECIAL.has(tag) ? (tag === 'address' || tag === 'div' || tag === 'p' ? SPECIAL_BIT : SPECIAL_BIT | LIST_ITEM_STOP) : 0)
-    : (ns === MATH ? MATH_SCOPE : SVG_HTML).has(tag) ? SCOPE_BOUND | SPECIAL_BIT | LIST_ITEM_STOP : 0,
+  el: element(tag, attrs), tag, ns, open: false, listed: false,
+  content: ns === HTML && tag === 'template' ? element('#content', []) : null,
+  bits: ns === HTML ? BITS.get(tag) ?? 0 : (ns === MATH ? MATH_SCOPE : SVG_HTML).has(tag) ? SCOPE_BOUND | SPECIAL_BIT | LIST_ITEM_STOP : 0,
 });
 
 const isWhitespace = (s: string): boolean => !/[^\t\n\f\r ]/.test(s);
 const leading = (s: string): number => /^[\t\n\f\r ]*/.exec(s)![0].length;
 const noNul = (s: string): string => (s.includes('\0') ? s.replace(/\0/g, '') : s);
 
-/**
- * A formatting element's tag and attributes, in any order, as one string (Noah's Ark compares them): NUL
- * separates the parts, as the tokenizer leaves none in names and values.
- */
-const keyOf = (n: Node): string => (n.key ??= n.tag + n.attrs.map(([a, v]) => `\0${a}\0${v}`).sort().join(''));
+/** whether two formatting elements have the same tag and attributes, in any order (Noah's Ark compares them) */
+const same = (a: Node, b: Node): boolean => {
+  if (a.tag !== b.tag) return false;
+  const x = a.el.attrs, y = b.el.attrs;
+  if (x === y) return true;
+  if (x.length !== y.length) return false;
+  // names are unique in each (the tokenizer keeps the first of duplicates)
+  for (let k = 0; k < x.length; k++) {
+    const name = x[k][0];
+    let i = y.length;
+    while (--i >= 0 && y[i][0] !== name);
+    if (i < 0 || y[i][1] !== x[k][1]) return false;
+  }
+  return true;
+};
 
-/** `html` parsed into its `<html>` element, with foreign elements and template contents still in it */
-export function build(html: string, maxDepth: number): Node {
+/**
+ * `html` parsed into its `<html>` element. `deep`: what can put elements deeper than `maxDepth` happened (the
+ * adoption agency moved elements, an element was taken off the stack from below its top, a void element
+ * went in at the bound), and index.ts bounds the tree.
+ */
+export function build(html: string, maxDepth: number): { root: RawElement; deep: boolean } {
   maxDepth = Math.max(maxDepth, 3); // html, body and one element; the bound never closes the body
   const stack: Node[] = [];
   /** the list of active formatting elements; null is a marker */
@@ -122,6 +142,7 @@ export function build(html: string, maxDepth: number): Node {
   const templateModes: number[] = [];
   let mode = INITIAL, original = INITIAL, quirks = false, framesetOk = true, foster = false, skipNewline = false;
   let root: Node | null = null, head: Node | null = null, form: Node | null = null, templates = 0, raw = DATA, pending = '';
+  let deep = false;
 
   // the stack of open elements
 
@@ -145,6 +166,8 @@ export function build(html: string, maxDepth: number): Node {
   const popTo = (length: number): void => { while (stack.length > Math.max(length, 1)) pop(); };
   const removeAt = (i: number): void => {
     if (i < 1) return;
+    // the elements above it stay as deep in the tree, which is deeper than the stack then
+    if (i < stack.length - 1) deep = true;
     closed(stack[i]);
     stack.splice(i, 1);
   };
@@ -190,7 +213,7 @@ export function build(html: string, maxDepth: number): Node {
   // integration points: where foreign content holds HTML (or MathML text)
   const htmlPoint = (n: Node): boolean =>
     n.ns === SVG ? SVG_HTML.has(n.tag)
-      : n.ns === MATH && n.tag === 'annotation-xml' && n.attrs.some(([a, v]) => a === 'encoding' && /^(?:text\/html|application\/xhtml\+xml)$/i.test(v));
+      : n.ns === MATH && n.tag === 'annotation-xml' && n.el.attrs.some(([a, v]) => a === 'encoding' && /^(?:text\/html|application\/xhtml\+xml)$/i.test(v));
   const point = (n: Node): boolean => htmlPoint(n) || (n.ns === MATH && MATH_TEXT.has(n.tag));
   /** the current node is foreign and no integration point: text and start tags are foreign content */
   const inForeign = (): boolean => {
@@ -200,34 +223,50 @@ export function build(html: string, maxDepth: number): Node {
 
   // inserting
 
-  /** where a node goes: [parent, the node it goes before] */
-  const place = (): [Node, Node | null] => {
+  /** the element place() or fosterPlace() last returned a place in goes before, or null */
+  let before: RawElement | null = null;
+  /** the element a node goes in (and the one it goes before, in `before`) */
+  const place = (): RawElement => {
     const c = cur();
-    return foster && TABLE_STRUCTURE.has(c.tag) ? fosterPlace() : [c.content ?? c, null];
+    if (foster && TABLE_STRUCTURE.has(c.tag)) return fosterPlace();
+    before = null;
+    return c.content ?? c.el;
   };
   /** foster parenting: before the last table, or in the template opened after it */
-  const fosterPlace = (): [Node, Node | null] => {
+  const fosterPlace = (): RawElement => {
     const t = top('table'), tp = top('template');
-    if (tp > t) return [stack[tp].content!, null];
-    if (t < 0) return [stack[0], null];
-    const table = stack[t];
-    return table.parent ? [table.parent, table] : [stack[t - 1], null];
+    before = null;
+    if (tp > t) return stack[tp].content!;
+    if (t < 0) return stack[0].el;
+    const table = stack[t].el;
+    if (!table.parent) return stack[t - 1].el;
+    before = table;
+    return table.parent;
   };
-  const attach = (n: Node, [parent, before]: [Node, Node | null]): void => {
-    n.parent = parent;
-    if (before) parent.kids.splice(parent.kids.lastIndexOf(before), 0, n);
-    else parent.kids.push(n);
+  const attach = (n: Node, parent: RawElement, at: RawElement | null): void => {
+    const el = n.el;
+    el.parent = parent;
+    if (n.ns !== HTML) return; // a foreign element is not in the raw tree: its parent is all it needs
+    const k = parent.children;
+    if (at) k.splice(k.lastIndexOf(at), 0, el);
+    else k.push(el);
   };
   const detach = (n: Node): void => {
-    const p = n.parent;
-    if (p) p.kids.splice(p.kids.lastIndexOf(n), 1);
-    n.parent = null;
+    const el = n.el, p = el.parent;
+    el.parent = null;
+    if (!p || n.ns !== HTML) return;
+    const k = p.children, i = k.lastIndexOf(el), a = k[i - 1], b = k[i + 1];
+    // the texts on either side join, as no two texts are side by side
+    if (a !== undefined && b !== undefined && a.type === 'text' && b.type === 'text') {
+      a.value += b.value;
+      k.splice(i, 2);
+    } else k.splice(i, 1);
   };
   const insertText = (s: string): void => {
-    const [parent, before] = place();
-    const k = parent.kids, i = before ? k.lastIndexOf(before) : k.length;
-    if (typeof k[i - 1] === 'string') k[i - 1] += s;
-    else k.splice(i, 0, s);
+    const parent = place(), k = parent.children, i = before ? k.lastIndexOf(before) : k.length, last = k[i - 1];
+    if (last !== undefined && last.type === 'text') last.value += s;
+    else if (i === k.length) k.push({ type: 'text', value: s });
+    else k.splice(i, 0, { type: 'text', value: s });
   };
   /** inserts an element and opens it; at the bound, the current node closes first */
   const insert = (tag: string, attrs: Attrs = [], ns = HTML): Node => {
@@ -238,15 +277,18 @@ export function build(html: string, maxDepth: number): Node {
       if (is(n, 'template')) templateModes.pop();
     }
     const n = create(tag, attrs, ns);
-    attach(n, place());
+    attach(n, place(), before);
     push(n);
     return n;
   };
-  /** inserts an element that does not open (a void element, a self-closing foreign one) */
-  const append = (tag: string, attrs: Attrs, ns = HTML): void => attach(create(tag, attrs, ns), place());
+  /** inserts an element that does not open (a void element, a self-closing foreign one); at the bound, below it */
+  const append = (tag: string, attrs: Attrs, ns = HTML): void => {
+    if (stack.length >= maxDepth) deep = true;
+    attach(create(tag, attrs, ns), place(), before);
+  };
   const mergeAttrs = (n: Node, attrs: Attrs): void => {
-    const names = new Set(n.attrs.map((a) => a[0]));
-    for (const a of attrs) if (!names.has(a[0])) n.attrs.push(a);
+    const to = n.el.attrs, names = new Set(to.map((a) => a[0]));
+    for (const a of attrs) if (!names.has(a[0])) to.push(a);
   };
 
   // the list of active formatting elements
@@ -262,11 +304,10 @@ export function build(html: string, maxDepth: number): Node {
   const listPush = (n: Node): void => {
     // Noah's Ark: at most three entries with the same tag and attributes after the last marker
     let count = 0, earliest: Node | null = null;
-    const key = keyOf(n);
     for (let i = list.length - 1; i >= 0; i--) {
       const e = list[i];
       if (!e) break;
-      if (keyOf(e) === key) { count++; earliest = e; }
+      if (same(e, n)) { count++; earliest = e; }
     }
     if (count >= 3) unlist(earliest!);
     list.push(n);
@@ -283,7 +324,7 @@ export function build(html: string, maxDepth: number): Node {
     while (i > 0 && list[i - 1] && !list[i - 1]!.open) i--;
     // not past the bound: what is left is reconstructed once the stack is shallower
     for (; i < list.length && stack.length < maxDepth; i++) {
-      const e = list[i]!, n = insert(e.tag, e.attrs, e.ns);
+      const e = list[i]!, n = insert(e.tag, e.el.attrs, e.ns);
       e.listed = false;
       n.listed = true;
       list[i] = n;
@@ -316,7 +357,7 @@ export function build(html: string, maxDepth: number): Node {
           removeAt(k);
           continue;
         }
-        const clone = create(n.tag, n.attrs, n.ns);
+        const clone = create(n.tag, n.el.attrs, n.ns);
         list[list.lastIndexOf(n)] = clone;
         n.listed = false;
         clone.listed = true;
@@ -325,18 +366,20 @@ export function build(html: string, maxDepth: number): Node {
         clone.open = true;
         if (last === block) bookmark = clone;
         detach(last);
-        attach(last, [clone, null]);
+        attach(last, clone.el, null);
         last = clone;
       }
       detach(last);
       if (common) {
-        attach(last, TABLE_STRUCTURE.has(common.tag) ? fosterPlace() : [common.content ?? common, null]);
+        if (TABLE_STRUCTURE.has(common.tag)) attach(last, fosterPlace(), before);
+        else attach(last, common.content ?? common.el, null);
       }
-      const n = create(fe.tag, fe.attrs, fe.ns);
-      n.kids = block.kids;
-      for (const k of n.kids) if (typeof k !== 'string') k.parent = n;
-      block.kids = [];
-      attach(n, [block, null]);
+      const n = create(fe.tag, fe.el.attrs, fe.ns), kids = block.el.children;
+      n.el.children = kids;
+      for (const k of kids) if (k.type === 'element') k.parent = n.el;
+      block.el.children = [];
+      attach(n, block.el, null);
+      deep = true;
       list.splice(list.lastIndexOf(bookmark) + 1, 0, n);
       n.listed = true;
       unlist(fe);
@@ -395,10 +438,10 @@ export function build(html: string, maxDepth: number): Node {
     mode = IN_ROW;
   };
   /** a token in a table that does not belong there: processed in body, with foster parenting */
-  const fostered = (f: () => void): void => {
+  const fostered = <T>(f: (x: T) => void, x: T): void => {
     const was = foster;
     foster = true;
-    f();
+    f(x);
     foster = was;
   };
 
@@ -415,7 +458,7 @@ export function build(html: string, maxDepth: number): Node {
     const s = pending;
     pending = '';
     mode = original;
-    if (!isWhitespace(s)) fostered(() => bodyText(s));
+    if (!isWhitespace(s)) fostered(bodyText, s);
     else if (s) insertText(s);
   };
   const text = (s: string): void => {
@@ -450,7 +493,7 @@ export function build(html: string, maxDepth: number): Node {
             mode = IN_TABLE_TEXT;
             continue;
           }
-          return fostered(() => bodyText(s));
+          return fostered(bodyText, s);
         }
         case IN_TABLE_TEXT: pending += noNul(s); return;
         case IN_SELECT:
@@ -540,7 +583,10 @@ export function build(html: string, maxDepth: number): Node {
         if (IN_HEAD_TAGS.has(name)) {
           push(head!);
           startInHead(t);
-          removeAt(stack.lastIndexOf(head!));
+          // not removeAt: what can be above the head is raw text, which closes before anything goes in it, or a
+          // template, whose content is not in the tree, so the tree stays as deep as the stack
+          closed(head!);
+          stack.splice(stack.lastIndexOf(head!), 1);
           return;
         }
         anythingElse();
@@ -851,7 +897,7 @@ export function build(html: string, maxDepth: number): Node {
         mode = IN_COLUMN_GROUP;
         return;
     }
-    fostered(() => startInBody(t));
+    fostered(startInBody, t);
   };
 
   const startInColumnGroup = (t: Tag): void => {
@@ -1142,7 +1188,7 @@ export function build(html: string, maxDepth: number): Node {
         resetMode();
       }
     } else if (name === 'template') endTemplate();
-    else if (!TABLE_PARTS.has(name) && name !== 'body' && name !== 'html') fostered(() => endInBody(name));
+    else if (!TABLE_PARTS.has(name) && name !== 'body' && name !== 'html') fostered(endInBody, name);
   };
 
   const endInTableBody = (name: string): void => {
@@ -1222,6 +1268,8 @@ export function build(html: string, maxDepth: number): Node {
     }
   };
 
+  // the start tag being processed: one object, rewritten for each
+  const token: Tag = { name: '', attrs: [], selfClosing: false };
   const sink: Sink = {
     text(s) {
       if (skipNewline) {
@@ -1237,7 +1285,10 @@ export function build(html: string, maxDepth: number): Node {
     start(name, attrs, selfClosing) {
       skipNewline = false;
       raw = DATA;
-      startTag({ name, attrs, selfClosing });
+      token.name = name;
+      token.attrs = attrs;
+      token.selfClosing = selfClosing;
+      startTag(token);
       return raw;
     },
     end(name) {
@@ -1259,7 +1310,7 @@ export function build(html: string, maxDepth: number): Node {
     eof,
   };
   tokenize(html, sink);
-  return root!;
+  return { root: root!.el, deep };
 }
 
 const hidden = (attrs: Attrs): boolean => attrs.some(([n, v]) => n === 'type' && v.toLowerCase() === 'hidden');
