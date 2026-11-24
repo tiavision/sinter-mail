@@ -22,11 +22,6 @@
   all: revert;
 }
 
-/* an image no wider than the reader */
-.mail :where(img) {
-  max-inline-size: 100%;
-}
-
 /* the spacing a reset takes away; an email's own margins are inline and replace it */
 .mail :where(p, ul, ol, h1, h2, h3, h4, h5, h6) {
   margin-block: 1em;
