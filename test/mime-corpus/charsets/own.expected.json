@@ -1,0 +1,140 @@
+{
+  "file": "own.eml",
+  "generatedBy": "build.mjs",
+  "environment": {
+    "node": "v22.23.5",
+    "icu": "78.3",
+    "fullIcu": true
+  },
+  "basis": "docs/proposals/sinter-mail-mime.md section 3, Charsets: WHATWG labels through TextDecoder; no charset is UTF-8; invalid UTF-8 falls back to windows-1252; other labels (UTF-7 included) decode as UTF-8 with a problem; replacement labels give U+FFFD",
+  "subject": "Grüßeпривет日本✓",
+  "subjectNote": "four encoded words in four charsets, folded; adjacent words join without the whitespace between them",
+  "parts": [
+    {
+      "part": "1.1",
+      "charset": "ISO-8859-1",
+      "transferEncoding": "quoted-printable",
+      "text": "Grüße aus Köln, ça va? Ñandú, Ærø.",
+      "problems": []
+    },
+    {
+      "part": "1.2",
+      "charset": "iso-8859-1",
+      "transferEncoding": "quoted-printable",
+      "text": "Price: €5 – “ok”",
+      "problems": [],
+      "note": "ISO-8859-1 is windows-1252 in WHATWG: 0x80 0x93 0x94 0x96 are € “ ” –"
+    },
+    {
+      "part": "1.3",
+      "charset": "ISO-8859-2",
+      "transferEncoding": "quoted-printable",
+      "text": "Zażółć gęślą jaźń. Příliš žluťoučký kůň úpěl ďábelské ódy.",
+      "problems": []
+    },
+    {
+      "part": "1.4",
+      "charset": "ISO-8859-15",
+      "transferEncoding": "quoted-printable",
+      "text": "Le cœur déçu mais l'âme plutôt naïve, Louÿs rêva; Œuvre, Ÿ, € 5, Šž.",
+      "problems": []
+    },
+    {
+      "part": "1.5",
+      "charset": "windows-1252",
+      "transferEncoding": "8bit",
+      "text": "“Smart quotes” – en dash … ‰ Œ ž • ™",
+      "problems": []
+    },
+    {
+      "part": "1.6",
+      "charset": "KOI8-R",
+      "transferEncoding": "base64",
+      "text": "Съешь же ещё этих мягких французских булок, да выпей чаю.",
+      "problems": []
+    },
+    {
+      "part": "1.7",
+      "charset": "Shift_JIS",
+      "transferEncoding": "base64",
+      "text": "いろはにほへと ちりぬるを 日本語のテキスト、カタカナ。",
+      "problems": []
+    },
+    {
+      "part": "1.8",
+      "charset": "ISO-2022-JP",
+      "transferEncoding": "7bit",
+      "text": "こんにちは、世界。Mixed ASCII and 日本語.",
+      "problems": []
+    },
+    {
+      "part": "1.9",
+      "charset": "GB18030",
+      "transferEncoding": "base64",
+      "text": "你好，世界！简体中文测试 💩",
+      "problems": []
+    },
+    {
+      "part": "1.10",
+      "charset": "Big5",
+      "transferEncoding": "base64",
+      "text": "繁體中文測試，你好世界。",
+      "problems": []
+    },
+    {
+      "part": "1.11",
+      "charset": "utf-8",
+      "transferEncoding": "8bit",
+      "text": "UTF-8: Ünïcödé ✓ 日本 😀",
+      "problems": []
+    },
+    {
+      "part": "1.12",
+      "charset": "utf-8",
+      "transferEncoding": "base64",
+      "text": "cafÃ© ÿþ naïve",
+      "problems": [
+        "charset-fallback"
+      ],
+      "note": "invalid UTF-8: the whole part falls back to windows-1252 (section 3), charset-fallback"
+    },
+    {
+      "part": "1.13",
+      "charset": null,
+      "transferEncoding": "8bit",
+      "text": "no charset, Latin-1 bytes: Grüße",
+      "problems": [
+        "charset-fallback"
+      ],
+      "note": "no charset: UTF-8, invalid, so windows-1252 (charset-fallback)"
+    },
+    {
+      "part": "1.14",
+      "charset": "UTF-7",
+      "transferEncoding": "7bit",
+      "text": "Hi Mom -+Jjo--! A+ImIDkQ.",
+      "problems": [
+        "charset-unknown"
+      ],
+      "note": "UTF-7 is never decoded: read as UTF-8 with charset-unknown (section 3); RFC 2152 examples"
+    },
+    {
+      "part": "1.15",
+      "charset": "x-no-such-charset",
+      "transferEncoding": "7bit",
+      "text": "plain ASCII under an unknown label",
+      "problems": [
+        "charset-unknown"
+      ],
+      "note": "unknown label: UTF-8 and charset-unknown"
+    },
+    {
+      "part": "1.16",
+      "charset": "ISO-2022-KR",
+      "transferEncoding": "7bit",
+      "text": "�",
+      "problems": [],
+      "note": "a WHATWG replacement label: one U+FFFD (section 3)"
+    }
+  ]
+}

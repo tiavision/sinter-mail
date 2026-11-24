@@ -1,0 +1,18 @@
+From: Mallory <mallory@evil.example>
+To: reader@example.test
+Subject: fwd
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+
+From: CEO <ceo@bank.example>
+Subject: Approved: wire the money
+
+Please wire it today.
+-----BEGIN PGP SIGNATURE-----
+
+iHUEARYKAB0WIQplaceholder
+=AAAA
+-----END PGP SIGNATURE-----

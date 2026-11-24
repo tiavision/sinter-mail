@@ -1,0 +1,307 @@
+{
+  "source": "jsmime test/test_header.js, suite decodeRFC2047Words (MIT, Copyright (c) 2013 Joshua Cranmer)",
+  "generatedBy": "build.mjs",
+  "environment": {
+    "node": "v22.23.5",
+    "icu": "78.3",
+    "fullIcu": true
+  },
+  "format": {
+    "input": "an unstructured field value (Subject), folded with LF as in jsmime",
+    "jsmime": "jsmime's expected decoded string",
+    "proposal": "the decoded string by docs/proposals/sinter-mail-mime.md section 3 (encoded words joined per charset run, the body charset table with its windows-1252 fallback, controls removed); null where the proposal does not settle it",
+    "problems": "problem codes the proposal adds for this value",
+    "differs": "true where the proposal deliberately reads it differently from jsmime"
+  },
+  "cases": [
+    {
+      "input": "Test",
+      "jsmime": "Test",
+      "proposal": "Test",
+      "problems": []
+    },
+    {
+      "input": "Test 2",
+      "jsmime": "Test 2",
+      "proposal": "Test 2",
+      "problems": []
+    },
+    {
+      "input": "Basic  words",
+      "jsmime": "Basic  words",
+      "proposal": "Basic  words",
+      "problems": []
+    },
+    {
+      "input": "Not a =? word",
+      "jsmime": "Not a =? word",
+      "proposal": "Not a =? word",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?Q?Encoded?=",
+      "jsmime": "Encoded",
+      "proposal": "Encoded",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?q?Encoded?=",
+      "jsmime": "Encoded",
+      "proposal": "Encoded",
+      "problems": []
+    },
+    {
+      "input": "=?ISO-8859-1?Q?oxyg=e8ne?=",
+      "jsmime": "oxygène",
+      "proposal": "oxygène",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?B?QmFzZTY0?=",
+      "jsmime": "Base64",
+      "proposal": "Base64",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?b?QmFzZTY0?=",
+      "jsmime": "Base64",
+      "proposal": "Base64",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?Q?A_space?=",
+      "jsmime": "A space",
+      "proposal": "A space",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?Q?A space?=",
+      "jsmime": "A space",
+      "proposal": null,
+      "note": "a space inside an encoded word (not a token by RFC 2047); jsmime decodes it"
+    },
+    {
+      "input": "A =?UTF-8?Q?B?= C",
+      "jsmime": "A B C",
+      "proposal": "A B C",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?Q?A?= =?UTF-8?Q?B?=",
+      "jsmime": "AB",
+      "proposal": "AB",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?Q?oxyg=c3=a8ne?=",
+      "jsmime": "oxygène",
+      "proposal": "oxygène",
+      "problems": []
+    },
+    {
+      "input": "=?utf-8?Q?oxyg=C3=A8ne?=",
+      "jsmime": "oxygène",
+      "proposal": "oxygène",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?B?b3h5Z8OobmU=?=",
+      "jsmime": "oxygène",
+      "proposal": "oxygène",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8*fr?B?b3h5Z8OobmU=?=",
+      "jsmime": "oxygène",
+      "proposal": null,
+      "note": "RFC 2231 section 5 language suffix; the proposal does not mention it"
+    },
+    {
+      "input": "=?BIG5?Q?=B9=CF=AE=D1=C0]SSCI=A4=CEJCR=B8=EA=AE=C6=AEw=C1=BF=B2=DF=A1A=A8=F3=A7U=B1z=A1u=B4=A3=A4=C9=AC=E3=A8s=AF=C0=BD=E8=BBP=AE=C4=B2v=A5H=A4=CE=A7=EB=BDZ=B5=A6=B2=A4=AA=BA=B9B=A5=CE=A1v=A1A=C5w=AA=EF=B3=F8=A6W=B0=D1=A5[=A1C?=",
+      "jsmime": "圖書館SSCI及JCR資料庫講習，協助您「提升研究素質與效率以及投稿策略的運用」，歡迎報名參加。",
+      "proposal": "圖書館SSCI及JCR資料庫講習，協助您「提升研究素質與效率以及投稿策略的運用」，歡迎報名參加。",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?Q?=f0ab?=",
+      "jsmime": "�ab",
+      "proposal": "ðab",
+      "problems": [
+        "charset-fallback"
+      ],
+      "differs": true
+    },
+    {
+      "input": "=?UTF-8?Q?=f0?= ab",
+      "jsmime": "� ab",
+      "proposal": "ð ab",
+      "problems": [
+        "charset-fallback"
+      ],
+      "differs": true
+    },
+    {
+      "input": "=?UTF-8?Q?=ed=a0=bd=ed=b2=a9?=",
+      "jsmime": "������",
+      "proposal": "í ½í²©",
+      "problems": [
+        "charset-fallback"
+      ],
+      "differs": true
+    },
+    {
+      "input": "=?NoSuchCharset?Q?ab?=",
+      "jsmime": "=?NoSuchCharset?Q?ab?=",
+      "proposal": "ab",
+      "problems": [
+        "charset-unknown"
+      ],
+      "differs": true
+    },
+    {
+      "input": "=?UTF-8?U?Encoded?=",
+      "jsmime": "=?UTF-8?U?Encoded?=",
+      "proposal": "=?UTF-8?U?Encoded?=",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?Q?Almost",
+      "jsmime": "=?UTF-8?Q?Almost",
+      "proposal": "=?UTF-8?Q?Almost",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?B?8J+SqQ==?=",
+      "jsmime": "💩",
+      "proposal": "💩",
+      "problems": []
+    },
+    {
+      "input": "=?GB18030?B?lDnaMw==?=",
+      "jsmime": "💩",
+      "proposal": "💩",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?Q?=f0=9f?= =?UTF-8?Q?=92=a9?=",
+      "jsmime": "💩",
+      "proposal": "💩",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?B?8J+S?= =?UTF-8?B?qQ==?=",
+      "jsmime": "💩",
+      "proposal": "💩",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?B?8J+S?= =?UTF-8?Q?=a9?=",
+      "jsmime": "💩",
+      "proposal": "💩",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?B?8J+S?= =?ISO-8859-1?B?qQ==?=",
+      "jsmime": "�©",
+      "proposal": "ðŸ’©",
+      "problems": [
+        "charset-fallback"
+      ],
+      "differs": true
+    },
+    {
+      "input": "=?UTF-8?Q?=f0?= =?UTF-8?Q?ab?=",
+      "jsmime": "�ab",
+      "proposal": "ðab",
+      "problems": [
+        "charset-fallback"
+      ],
+      "differs": true
+    },
+    {
+      "input": "=?UTF-8?B?YfCfkqnwn5Kp8J+SqfCfkqnwn5Kp8J+SqfCfkqnvv70=?= =?UTF-8?B?77+9?=",
+      "jsmime": "a💩💩💩💩💩💩💩��",
+      "proposal": "a💩💩💩💩💩💩💩��",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?Q?Invalid token?=",
+      "jsmime": "Invalid token",
+      "proposal": null,
+      "note": "a space inside an encoded word; jsmime decodes it"
+    },
+    {
+      "input": "AAA =?UTF-8?Q?bbb?= CCC =?UTF-8?Q?ddd?= EEE =?UTF-8?Q?fff?= GGG",
+      "jsmime": "AAA bbb CCC ddd EEE fff GGG",
+      "proposal": "AAA bbb CCC ddd EEE fff GGG",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?B?4oiAICDiiIEgIOKIgiAg4oiDICDiiIQgIOKIhSAg4oiGICDiiIcgIOKIiCAg?=\n =?UTF-8?B?4oiJICDiiIogIOKIiyAg4oiMICDiiI0gIOKIjiAg4oiP?=",
+      "jsmime": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "proposal": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "problems": []
+    },
+    {
+      "input": "=?utf-8?Q?=E2=88=80__=E2=88=81__=E2=88=82__=E2=88=83__=E2=88=84__=E2?=\n =?utf-8?Q?=88=85__=E2=88=86__=E2=88=87__=E2=88=88__=E2=88=89__=E2=88?=\n =?utf-8?Q?=8A__=E2=88=8B__=E2=88=8C__=E2=88=8D__=E2=88=8E__=E2=88=8F?=",
+      "jsmime": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "proposal": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?B?4oiAICDiiIEgIOKIgiAg4oiDICDiiIQgIOKIhSAg4oiGICDiiIcgIOKIiA==?=\n =?UTF-8?B?ICDiiIkgIOKIiiAg4oiLICDiiIwgIOKIjSAg4oiOICDiiI8=?=",
+      "jsmime": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "proposal": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?b?4oiAICDiiIEgIOKIgiAg4oiDICDiiIQgIOKIhSAg4oiGICDiiIcgIOKIiA==?=\n =?UTF-8?b?ICDiiIkgIOKIiiAg4oiLICDiiIwgIOKIjSAg4oiOICDiiI8=?=",
+      "jsmime": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "proposal": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "problems": []
+    },
+    {
+      "input": "=?utf-8?Q?=E2=88=80__=E2=88=81__=E2=88=82__=E2=88=83__=E2=88=84__?=\n =?utf-8?Q?=E2=88=85__=E2=88=86__=E2=88=87__=E2=88=88__=E2=88=89__?=\n =?utf-8?Q?=E2=88=8A__=E2=88=8B__=E2=88=8C__=E2=88=8D__=E2=88=8E__?=\n =?utf-8?Q?=E2=88=8F?=",
+      "jsmime": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "proposal": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "problems": []
+    },
+    {
+      "input": "=?utf-8?q?=E2=88=80__=E2=88=81__=E2=88=82__=E2=88=83__=E2=88=84__?=\n =?utf-8?q?=E2=88=85__=E2=88=86__=E2=88=87__=E2=88=88__=E2=88=89__?=\n =?utf-8?q?=E2=88=8A__=E2=88=8B__=E2=88=8C__=E2=88=8D__=E2=88=8E__?=\n =?utf-8?q?=E2=88=8F?=",
+      "jsmime": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "proposal": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "problems": []
+    },
+    {
+      "input": "=?UTF-8?B?4oiAICDiiIEgIOKIgiAg4oiDICDiiIQgIOKIhSAg4oiGICDiiIcgIOKIiA===?=\n =?UTF-8?B?ICDiiIkgIOKIiiAg4oiLICDiiIwgIOKIjSAg4oiOICDiiI8=?=",
+      "jsmime": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "proposal": "∀  ∁  ∂  ∃  ∄  ∅  ∆  ∇  ∈  ∉  ∊  ∋  ∌  ∍  ∎  ∏",
+      "problems": []
+    },
+    {
+      "input": "Re: [Kitchen Nightmares] Meow! Gordon Ramsay Is =?ISO-8859-1?B?UEgR lqZ VuIEhlYWQgVH rbGeOIFNob BJc RP2JzZXNzZW?= With My =?ISO-8859-1?B?SHVzYmFuZ JzX0JhbGxzL JfU2F5c19BbXiScw==?= Baking Company Owner",
+      "jsmime": "Re: [Kitchen Nightmares] Meow! Gordon Ramsay Is =?ISO-8859-1?B?UEgR lqZ VuIEhlYWQgVH rbGeOIFNob BJc RP2JzZXNzZW?= With My =?ISO-8859-1?B?SHVzYmFuZ JzX0JhbGxzL JfU2F5c19BbXiScw==?= Baking Company Owner",
+      "proposal": "Re: [Kitchen Nightmares] Meow! Gordon Ramsay Is =?ISO-8859-1?B?UEgR lqZ VuIEhlYWQgVH rbGeOIFNob BJc RP2JzZXNzZW?= With My =?ISO-8859-1?B?SHVzYmFuZ JzX0JhbGxzL JfU2F5c19BbXiScw==?= Baking Company Owner",
+      "problems": []
+    },
+    {
+      "input": "=?us-ascii?Q?=09Edward_Rosten?=",
+      "jsmime": "\tEdward Rosten",
+      "proposal": "Edward Rosten",
+      "problems": [],
+      "differs": true
+    },
+    {
+      "input": "=?us-ascii?Q?=3D=3FUTF-8=3FQ=3Ff=3DC3=3DBCr=3F=3D?=",
+      "jsmime": "=?UTF-8?Q?f=C3=BCr?=",
+      "proposal": "=?UTF-8?Q?f=C3=BCr?=",
+      "problems": []
+    },
+    {
+      "input": "=??B?Sy4gSC4gdm9uIFLDvGRlbg==?=",
+      "jsmime": "=??B?Sy4gSC4gdm9uIFLDvGRlbg==?=",
+      "proposal": "=??B?Sy4gSC4gdm9uIFLDvGRlbg==?=",
+      "problems": []
+    }
+  ]
+}

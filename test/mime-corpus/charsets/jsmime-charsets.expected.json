@@ -1,0 +1,95 @@
+{
+  "file": "jsmime-charsets.eml",
+  "source": "jsmime test/data/charsets; jsmime test_mime_tree.js \"Charset conversion\" asserts parts 1+2, 3+4, … 11+12 decode equal",
+  "environment": {
+    "node": "v22.23.5",
+    "icu": "78.3",
+    "fullIcu": true
+  },
+  "parts": [
+    {
+      "part": "1.1",
+      "charset": "ISO-8859-6",
+      "transferEncoding": "quoted-printable",
+      "text": "أهلا بالعالم",
+      "problems": []
+    },
+    {
+      "part": "1.2",
+      "charset": "UTF-8",
+      "transferEncoding": "quoted-printable",
+      "text": "أهلا بالعالم",
+      "problems": []
+    },
+    {
+      "part": "1.3",
+      "charset": "shift_jis",
+      "transferEncoding": "quoted-printable",
+      "text": "こんにちは、世界",
+      "problems": []
+    },
+    {
+      "part": "1.4",
+      "charset": "UTF-8",
+      "transferEncoding": "base64",
+      "text": "こんにちは、世界",
+      "problems": []
+    },
+    {
+      "part": "1.5",
+      "charset": "gb18030",
+      "transferEncoding": "base64",
+      "text": "ハロー・ワールド",
+      "problems": []
+    },
+    {
+      "part": "1.6",
+      "charset": "utf-16le",
+      "transferEncoding": "base64",
+      "text": "ハロー・ワールド",
+      "problems": []
+    },
+    {
+      "part": "1.7",
+      "charset": "euc-kr",
+      "transferEncoding": "quoted-printable",
+      "text": "안녕하세요 세계",
+      "problems": []
+    },
+    {
+      "part": "1.8",
+      "charset": "utf-8",
+      "transferEncoding": "8bit",
+      "text": "안녕하세요 세계",
+      "problems": []
+    },
+    {
+      "part": "1.9",
+      "charset": "big5",
+      "transferEncoding": "8bit",
+      "text": "你好世界",
+      "problems": []
+    },
+    {
+      "part": "1.10",
+      "charset": "utf-8",
+      "transferEncoding": "quoted-printable",
+      "text": "你好世界",
+      "problems": []
+    },
+    {
+      "part": "1.11",
+      "charset": null,
+      "transferEncoding": "7bit",
+      "text": "Bonjour le monde",
+      "problems": []
+    },
+    {
+      "part": "1.12",
+      "charset": "utf-16be",
+      "transferEncoding": "binary",
+      "text": "Bonjour le monde",
+      "problems": []
+    }
+  ]
+}

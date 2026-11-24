@@ -1,0 +1,95 @@
+From: Charset Test <charsets@example.test>
+To: reader@example.test
+Subject: =?ISO-8859-1?Q?Gr=FC=DFe?=
+ =?KOI8-R?B?0NLJ18XU?=
+ =?Shift_JIS?B?k/qWew==?=
+ =?UTF-8?Q?=E2=9C=93?=
+Date: Tue, 24 Nov 2026 09:30:00 +0100
+Message-ID: <charsets.own@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="charsets-boundary-7f3a"
+
+Parts in many charsets, one per part.
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=ISO-8859-1
+Content-Transfer-Encoding: quoted-printable
+
+Gr=FC=DFe aus K=F6ln, =E7a va? =D1and=FA, =C6r=F8.
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=iso-8859-1
+Content-Transfer-Encoding: quoted-printable
+
+Price: =805 =96 =93ok=94
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=ISO-8859-2
+Content-Transfer-Encoding: quoted-printable
+
+Za=BF=F3=B3=E6 g=EA=B6l=B1 ja=BC=F1. P=F8=EDli=B9 =BElu=BBou=E8k=FD k=F9=F2=
+ =FAp=ECl =EF=E1belsk=E9 =F3dy.
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=ISO-8859-15
+Content-Transfer-Encoding: quoted-printable
+
+Le c=BDur d=E9=E7u mais l'=E2me plut=F4t na=EFve, Lou=FFs r=EAva; =BCuvre, =
+=BE, =A4 5, =A6=B8.
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=windows-1252
+Content-Transfer-Encoding: 8bit
+
+“Smart quotes” – en dash … ‰ Œ ž • ™
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=KOI8-R
+Content-Transfer-Encoding: base64
+
+89/F29gg1sUgxd2jINzUycggzdHHy8nIIMbSwc7D1drTy8nIIMLVzM/LLCDEwSDX2dDFyiDewcAu
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=Shift_JIS
+Content-Transfer-Encoding: base64
+
+gqKC64LNgsmC2YLWgsYggr+C6ILKgumC8CCT+pZ7jOqCzINlg0yDWINngUGDSoNeg0qDaYFC
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=ISO-2022-JP
+Content-Transfer-Encoding: 7bit
+
+$B$3$s$K$A$O!"@$3&!#(BMixed ASCII and $BF|K\8l(B.
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=GB18030
+Content-Transfer-Encoding: base64
+
+xOO6w6OsysC956OhvPLM5dbQzsSy4srUIJQ52jM=
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=Big5
+Content-Transfer-Encoding: base64
+
+wWPF6aSkpOW0+rjVoUGnQaZupUCsyaFD
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+UTF-8: ÃœnÃ¯cÃ¶dÃ© âœ“ æ—¥æœ¬ ðŸ˜€
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+Y2Fmw6kg//4gbmHvdmU=
+--charsets-boundary-7f3a
+Content-Type: text/plain
+Content-Transfer-Encoding: 8bit
+
+no charset, Latin-1 bytes: Grüße
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=UTF-7
+Content-Transfer-Encoding: 7bit
+
+Hi Mom -+Jjo--! A+ImIDkQ.
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=x-no-such-charset
+Content-Transfer-Encoding: 7bit
+
+plain ASCII under an unknown label
+--charsets-boundary-7f3a
+Content-Type: text/plain; charset=ISO-2022-KR
+Content-Transfer-Encoding: 7bit
+
+$)C>H
+--charsets-boundary-7f3a--

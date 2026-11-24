@@ -1,0 +1,19 @@
+From: sender@example.test
+To: reader@example.test
+Subject: two boundaries
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="aaa"
+Content-Type: multipart/mixed; boundary="bbb"
+
+--aaa
+Content-Type: text/plain
+
+harmless text, the reading by the first boundary
+--bbb
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="payload.exe"
+Content-Transfer-Encoding: base64
+
+TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAA==
+--bbb--
+--aaa--
