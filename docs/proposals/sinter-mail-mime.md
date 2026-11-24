@@ -505,7 +505,10 @@ What becomes a step, and nothing else:
   protocol="application/pgp-encrypted"` with exactly two parts, the first `application/pgp-encrypted`
   containing `Version: 1`, the second `application/octet-stream`. Also:
   - **sign over encrypt**: the root is `multipart/signed` and its first part is that `multipart/encrypted`
-    (rare, legal): a verify step for the root and a decrypt step for the first part;
+    (rare, legal): a verify step for the root and a decrypt step for the first part. The outer signature covers
+    the ciphertext, not what it decrypts to: anyone can wrap someone else's ciphertext in a signature of their
+    own. Its verdict labels nothing in the payload (whose parts carry their inner signatures, or none), is no
+    signature over the payload's root, and counts for nothing in `summary` or From;
   - **Exchange's rewrite**: the root is `multipart/mixed` whose parts are, in order, an optional
     `text/plain` with only whitespace, `application/pgp-encrypted` containing `Version: 1`, and
     `application/octet-stream` (Exchange's form of a `multipart/encrypted`, which Thunderbird reads the same
@@ -629,7 +632,8 @@ none.
   - with `protected-headers="v1"` on an encrypted payload (no `HP-Outer` exists there), a protected field whose
     outer value differs or is absent is confidential, so the usual `...` subject is covered;
   - each entry of `confidential` is the field name; an app writing an unencrypted reply uses the `HP-Outer`
-    value for it (in `raw` of the payload, or the outer value under v1), or leaves the field out (§6.1.2).
+    value for it (`hpOuter`, the payload root's `HP-Outer` fields, name lowercased; under v1, the outer value),
+    or leaves the field out (§6.1.2).
 - **Legacy display**, honoured only in the payload of a `done` decrypt step (RFC 9788 §4.5.3.1; a signed-only
   message has none, §4.5.1):
   - RFC 9788, when the payload's root has `hp`: the parameter `hp-legacy-display="1"` is on the leaf
@@ -714,8 +718,10 @@ sinter/
 - `mail.parse` gains the `legacyDisplay`, `encrypted` and `consent` options (done): `legacyDisplay` in `optionsOf`,
   its `last()` comparison and its cache key; `encrypted` without `consent` folded into `images` as `'block'`, so it
   shares plain `'block'`'s tree and needs no key of its own.
-- Budget: 12 kB gzip, to be measured (no charset tables: `TextDecoder` has them; the address and date
-  grammars and SHA-256 are the reader's). Pure: an `.eml` in a `file:` resource folds at build time, as text
+- Size, measured: the reader with `mail.mime` about 23 kB gzip (rolldown, minified), `mail.bytes` and
+  `mail.imageType` about 2 kB; the first budget, 12 kB, did not hold (no charset tables, since `TextDecoder` has
+  them, but the address, date and RFC 2231 grammars, the strict rules of the reviews, the crypto steps and
+  SHA-256 are the reader's). It loads only with `lazy`, when a let first needs it. Pure: an `.eml` in a `file:` resource folds at build time, as text
   (section 1).
 
 ## Our own reader or a dependency
@@ -758,8 +764,8 @@ The decision does not rest on size; without the budget it is the same:
 - **The bugs are in what we must own anyway**: other parsers' advisories are in encoded-word joining,
   boundary matching, address parsing and recursion ([Pitfalls](#pitfalls-from-other-mime-parsers)), which
   the crypto steps depend on most.
-- **Size settles it further**: every candidate that works is 24 kB or more, against a budget of 12 kB;
-  `TextDecoder` already holds the charsets.
+- **Size does not decide it**: the reader came to about 23 kB gzip, as large as the candidates that work (24 to
+  30 kB) once it holds what they lack. The first budget, 12 kB, did not hold; the reasons above stand without it.
 
 Borrowed, with their licenses:
 
@@ -903,4 +909,5 @@ What an app with its own MIME and PGP handling changes to move over:
 - **Signed but not encrypted, with protected headers**: a good signature's inner Subject wins (section 6).
   Is a differing outer Subject worth a problem of its own?
 - **`prefer`**: whether an app needs more than `'html' | 'text'`.
-- **Size**: whether 12 kB holds with the address and date grammars and SHA-256.
+- **Size**: 23 kB gzip; whether parts of the reader (the crypto steps, protected headers) are worth a split of
+  their own, for apps that read mail without OpenPGP.
