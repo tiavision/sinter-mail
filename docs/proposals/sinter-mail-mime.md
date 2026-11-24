@@ -1,6 +1,6 @@
 # Proposal: MIME and OpenPGP structure in sinter-mail
 
-Status: proposed, revised after review (revision 2). Follows [Later](sinter-mail.md#later) of the first
+Status: proposed, revision 3 (after a review, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
 proposal. Why the structure belongs in the library is in [The case](#the-case).
 
 ## Goals
@@ -405,9 +405,46 @@ without MIME pays nothing. `mail.parse` gains the `legacyDisplay` and `encrypted
 
 ## Our own reader or a dependency
 
-Being surveyed (the existing JavaScript MIME parsers against the needs of sections 1 to 5: bytes in, the part
-tree, exact byte ranges, strict structure, bounded work, browser and Node without builtins, size); the
-result and the decision will be here.
+Our own. The existing parsers were measured against what sections 1 to 5 need: (1) bytes in, a charset per
+part; (2) the part tree, bodies not joined; (3) exact byte ranges, for `multipart/signed`; (4) the strict
+structure visible; (5) bounded work, past a limit a problem rather than a throw; (6) browser and Node without
+builtins, ESM, small, maintained; (7) RFC 2047, 2231, addresses, dates. Sizes are minified and gzipped, bundled
+with esbuild for the browser; behaviour was probed on the bundled code.
+
+| Package | Last release | Size | Meets | Fails |
+| --- | --- | --- | --- | --- |
+| postal-mime 4.2.1 | 2026-11 | 30.0 kB | 1, 6, 7; 5 partly | 2 (joins bodies with `\n`), 3 (the tree is internal, no offsets), 4; a limit rejects the whole message; recursive |
+| mailparser 3.15 | 2026-11 | Node only (422 kB) | 1, 3 (through mailsplit), 7 | 2, 6 (`stream`, `buffer`, `crypto`, iconv); in maintenance, pointing to postal-mime |
+| @protontech/jsmimeparser 3.0.2 | 2025-08, deprecated | 8.5 kB | 1, 4 (raw API), 7 | 2 (joins with `<br>`), 3, 5 (no limits; recursion overflows on 20,000 parts), 6 (archived) |
+| typescript-email-parser 1.0 (a port of Stalwart's Rust mail-parser) | 2026-08 | 24.4 kB for the MIME layer alone | 1, 2, 3 (exact RFC 3156 range), 4, 7; walks without recursion | 5 (no part, depth or header limits), 6 (CommonJS, charset tables, one maintainer) |
+| emailjs-mime-parser 2.0.7 | 2019 | 226 kB | — | 1, 3, 5 (`fromCharCode.apply` overflows on 2 MB), 6 |
+| letterparser 0.1.8 | 2024 | 3.5 kB | size | 1 (strings only), 3, 5, 7 (no RFC 2231) |
+| eml-parse-js 1.2 beta | 2025 | 204 kB | — | 1, 3, 5, 6 |
+| eml-format, mailparser-mit | 2019 | Node only | — | 6 |
+| mail-parser-wasm 0.2.3 | 2026-10 | 223 kB of wasm | — | 1 to 4, 6: a flattened HTML and text |
+
+- **No candidate meets 2 to 5 together**, and those are the requirements the crypto steps rest on.
+- **Wrapping costs about as much as writing.** postal-mime would need its core forked to expose the tree and
+  byte ranges, and its advisories (three in a month: quadratic RFC 2047 decoding, boundary matching, address
+  spoofing) would become merges into the fork. typescript-email-parser would need conversion to ESM, limits
+  added, its charset tables and strict PEG layer removed, and a single maintainer's code adopted.
+- **Size**: every candidate that works is 24 to 30 kB, against a budget of 12 kB; `TextDecoder` already
+  holds the charsets.
+- **The bugs are in what we must own anyway**: other parsers' advisories are in encoded-word joining,
+  boundary matching, address parsing and recursion ([Pitfalls](#pitfalls-from-other-mime-parsers)), which
+  the crypto steps depend on most.
+
+Borrowed, with their licenses:
+
+- **Stalwart mail-parser** (Apache-2.0 or MIT): its `resources/eml/` corpus with expected results, its fuzz
+  targets (parse, limits, fields, charsets), its offset model (header, body and end offsets per part) and its
+  explicit-stack walk, as designs.
+- **postal-mime** (MIT-0): the notes in its boundary stack (ancestor boundaries, whitespace on delimiter
+  lines) and its address parser (quadratic and greedy-search pitfalls), and each advisory's input, as hostile
+  fixtures.
+- **jsmime** (MIT): Mozilla's mixed-charset test set.
+- **What to avoid**, as hostile tests: one 2 MB part, 20,000 parts, nesting 300 deep, an oversized header
+  block.
 
 ## Pitfalls from other MIME parsers
 
@@ -439,7 +476,8 @@ Memory-safety bugs in C parsers (mutt, PHP's mailparse) do not carry over to Typ
 
 ## Decisions
 
-1. **Our own MIME reader, pending the survey** ([Our own reader or a dependency](#our-own-reader-or-a-dependency)).
+1. **Our own MIME reader**, after measuring the existing ones; their corpora and fixtures are borrowed
+   ([Our own reader or a dependency](#our-own-reader-or-a-dependency)).
 2. **No cryptography in the library.** Keys, decryption, verification and trust are the app's (openpgp.js
    in a `data-sn-call` action, a server, a hardware key); the library lists steps and reads results.
 3. **One pure call, no bytes in the result.** Results go in as options; bytes come out through `mail.bytes`.
@@ -460,9 +498,11 @@ Memory-safety bugs in C parsers (mutt, PHP's mailparse) do not carry over to Typ
 
 ## Plan
 
-1. The reader: headers, addresses, dates, encodings, structure, limits; a corpus of real messages (with
-   consent, anonymized) and hostile ones (nesting, boundaries, encodings), and the known attacks
-   ([Pitfalls](#pitfalls-from-other-mime-parsers)) as tests.
+1. The reader: headers, addresses, dates, encodings, structure, limits. Tests: Stalwart's corpus and
+   jsmime's charset set (licenses permitting, with attribution), real messages (with consent, anonymized),
+   hostile ones (nesting, boundaries, encodings, the inputs of other parsers' advisories), and the known
+   attacks ([Pitfalls](#pitfalls-from-other-mime-parsers)); a fuzzer comparing our reader with Stalwart's on
+   structure, as the HTML parser is compared with parse5.
 2. What to show: alternatives, related, mixed, digests, reports, attachments, inline, calendar, nested
    messages; the `mail.parse` and `mail.plain` hand-off.
 3. Steps and results, tested with openpgp.js in the tests only (a dev dependency): messages from Thunderbird,
