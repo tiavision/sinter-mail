@@ -1,6 +1,6 @@
 # Proposal: MIME and OpenPGP structure in sinter-mail
 
-Status: accepted for implementation, revision 6 (RFC 9788 read in full, after three reviews, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
+Status: accepted for implementation, revision 7 (RFC 9788, the MIME ambiguity draft and Heyes's paper read in full, after three reviews, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
 proposal. Why the structure belongs in the library is in [The case](#the-case).
 
 ## Goals
@@ -232,22 +232,26 @@ case gets a code and a row.
 | Code | Blocking | When |
 | --- | --- | --- |
 | `boundary-missing-close` | yes | a multipart ends without its closing delimiter |
-| `boundary-invalid` | yes | a boundary empty, longer than 70 characters, or starting with an ancestor's |
+| `boundary-invalid` | yes | a `multipart/*` without a boundary, or one empty, longer than 70 characters, outside RFC 2046's `bchars` (a trailing space included), holding an encoded word, or starting with an ancestor's: the entity is one attachment of its bytes |
 | `duplicate-field` | yes | a repeated Content-Type, Content-Transfer-Encoding or Content-Disposition |
-| `duplicate-parameter` | yes | a repeated `boundary`, `charset`, `protocol`, `filename` or `name` |
+| `duplicate-parameter` | yes | a repeated `boundary`, `charset`, `protocol`, `micalg`, `start`, `type`, `filename` or `name` |
+| `parameter-conflict` | yes for `boundary`, `protocol`, `micalg`, `start`, `type`; no for filenames | two forms of one parameter with different values (`x`, `x*`, `x*0…`; spellings differing in case; `filename*`, `filename`, `name`): the RFC 2231 form wins, then section 4's filename order |
+| `header-malformed` | yes | a header line without a colon (skipped), whitespace before the colon (name trimmed), a first line that is a continuation (dropped), a whitespace-only line inside the headers (a continuation, not the end) |
+| `content-type-invalid` | yes | a Content-Type that does not parse: read as `text/plain; charset=us-ascii` (RFC 2045) |
 | `encoding-on-multipart` | yes | a transfer encoding other than 7bit, 8bit or binary on `multipart/*` or `message/*` |
 | `encoding-unknown` | yes | an unknown transfer encoding |
 | `no-header-end` | yes | a part whose headers run to its end |
 | `crypto-shape` | yes | a `multipart/encrypted` or `multipart/signed` not of the shape section 5 requires |
 | `armor-headers` | no | an anchored cleartext-signed block with armor headers other than `Hash:`, or lines starting `-` not dash-escaped: no step for it |
 | `limit` | yes | a limit of section 4 reached |
-| `control-in-structure` | yes | a NUL or other control byte in a raw Content-Type, Content-Transfer-Encoding or Content-Disposition (and so its boundary) |
+| `control-in-structure` | yes | a NUL or other control byte in any field name, or in a raw Content-Type, Content-Transfer-Encoding, Content-Disposition or MIME-Version value (and so its boundary) |
 | `integrity` | yes | a decrypt result without `integrity: true` |
 | `duplicate-header` | no | a repeated From, Sender, Subject or Date (From: `summary.from` is `'unknown'`) |
 | `canonicalized` | no | bare LF line ends converted to CRLF for a signature |
 | `exchange-shape` | no | Exchange's rewritten encrypted message, read as `multipart/encrypted` (section 5) |
 | `charset-unknown`, `charset-fallback` | no | an unknown label read as UTF-8; invalid UTF-8 read as windows-1252 |
-| `base64-junk`, `qp-invalid` | no | characters outside the alphabet, padding mid-stream, a partial quantum; `=` not followed by two hex digits |
+| `base64-junk`, `qp-invalid` | no; padding mid-stream under a signature step, yes | characters outside the alphabet, padding mid-stream (other decoders stop there, so a signed part would read differently), a partial quantum; `=` not followed by two hex digits or by a line end, `=` as the last byte |
+| `encoded-word-in-parameter` | no | an encoded word in a parameter: decoded in `filename`/`name` (Outlook, Gmail), literal elsewhere |
 | `rfc2231-segments` | no | continuation segments out of order, repeated or missing |
 | `content-id-duplicate` | no | a Content-ID twice in one scope |
 | `field-dropped` | no | a header field past a field limit |
@@ -271,21 +275,30 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
     encoded words decoded after**, and only in phrases (a display name, quoted or not: Outlook encodes inside
     quotes), comments and unstructured text, never in an addr-spec, a parameter name or a token, so a decoded
     `<`, `>`, `,`, `@`, quote or line break is text, never structure (Mailsploit, "Splitting the email atom");
-  - an encoded word counts only as a whole whitespace-delimited word (or a quoted string's whole content); one
-    glued inside a word (`collab=?x?b?QA==?=psres.net`) is literal text. One with an unknown charset, or one
+  - an encoded word counts only as a whole atom after tokenizing (bounded by whitespace, a special or the field's
+    ends, so `=?utf8?q?=61=62=63?=<x@y>` decodes its name), or a quoted string's whole content; one glued inside
+    an atom (`collab=?x?b?QA==?=psres.net`) is literal text. One with an unknown charset, or one
     `TextDecoder` rejects, is left as written (RFC 2047 §6.2), with `charset-unknown`;
   - every decoded value, `Headers` fields and filenames alike, has NUL, C0 controls, CR, LF and bidirectional
     controls removed; an app that reuses a value in a reply cannot inject a header with it. In a raw structural
     field (Content-Type, Content-Transfer-Encoding, Content-Disposition) a control byte is also the blocking
-    `control-in-structure`: parsers disagree on it (the IETF MIME ambiguity draft makes NUL fatal);
+    `control-in-structure`: parsers disagree on it (the MIME ambiguity Internet-Draft makes NUL fatal);
   - an address list is read by the RFC 5322 grammar with its obsolete forms, iteratively (comments nested at
     most 8 deep, at most 1,000 addresses per field); an addr-spec the grammar cannot read one way only is
     `address: null`, which makes `summary.from` `'unknown'`, never a guess;
   - `suspicious`: the display name, after decoding, contains `@` or `<`, unless it is the address itself
     (ASCII case-insensitive, quotes aside); or the address uses a form other software reads differently: an
-    encoded word in the local part, the percent hack (`%`), a UUCP path (`!`), a quoted `@`, a domain literal
-    (`[…]`), or a source route (`@a,@b:x@y`, whose route is dropped);
-  - a domain's `xn--` labels must be valid and round-trip; otherwise `address: null`;
+    encoded word anywhere in the addr-spec, `!`, `%` or `@` in the local part (quoted or not: a UUCP path, the
+    percent hack), a domain literal (`[…]`), or a source route (`@a,@b:x@y`, whose route is dropped); or the
+    display name holds a character NFKC turns into `@` or `<` (`＠`, `﹫`, `＜`);
+  - `address: null` also for an encoded word in the domain, an unterminated comment or quote, a backslash outside
+    a quoted string, and an `xn--` label a strict RFC 3492 decoder rejects (letters, digits and hyphens only;
+    overflow-checked), that decodes to an ASCII special or to nothing non-ASCII, or fails UTS 46 (`address` keeps
+    the A-label as sent);
+  - strings are never narrowed to bytes (`& 0xff`, latin1): code points such as U+0140 that end in `0x40` stay
+    what they are (Heyes's "Unicode overflows");
+  - `MIME-Ambiguity-Results` and `Authentication-Results` are forgeable and never read to add or suppress a
+    problem;
   - encoded words (RFC 2047) decoded, adjacent ones joined without the space between them, consecutive words
     of one charset joined into one buffer and decoded once (linear, and a multi-byte character split across
     two words comes out whole); UTF-8 headers (RFC 6532);
@@ -318,7 +331,7 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
   is); any other label, UTF-7 included, decodes as UTF-8 and adds a problem. UTF-7 is not decoded because its
   escapes can hide text from whatever reads the message before the reader, and browsers dropped it for that
   reason. WHATWG's `replacement` labels (ISO-2022-KR and others) decode to one replacement character, as
-  browsers do. Encoded words use the same table. An HTML part's `<meta charset>` is ignored: the MIME charset
+  browsers do. Encoded words use the same labels, but one with an unknown label is left as written (above). An HTML part's `<meta charset>` is ignored: the MIME charset
   decides. Node without full ICU lacks some labels: those parts add a problem, and the guide says so.
 - **Choosing what to show**:
   - `multipart/alternative`: the last part that can be shown (the standard's order is plainest first);
@@ -683,18 +696,18 @@ Borrowed, with their licenses:
 ## Pitfalls from other MIME parsers
 
 Published vulnerabilities of MIME parsers and mail clients, and the research on encrypted mail, each mapped to
-where this design answers it. Surveyed for this revision; a few sources (PortSwigger's paper, the IETF's MIME
-ambiguity draft) were read only through summaries, and are to be read in full before step 1.
+where this design answers it. Surveyed for this revision; PortSwigger's paper and the MIME ambiguity
+Internet-Draft (an individual submission, draft-chen-email-mime-ambiguity-defense-00) were later read in full.
 
 | Class | Seen in | This design |
 | --- | --- | --- |
 | Address parse differentials, sender spoofing | Python [CVE-2023-27043](https://access.redhat.com/articles/7051467); postal-mime before 4.2.1 ([domain truncation](https://www.vulncheck.com/advisories/postal-mime-before-4.2.1-sender-spoofing-via-address-parser-domain-truncation)); Nodemailer [GHSA-mm7p-fcc7-pg87](https://github.com/advisories/GHSA-mm7p-fcc7-pg87) (quoted local part); Thunderbird (malformed From) | the grammar, `address: null` rather than a guess, `'unknown'` (section 3) |
 | Encoded words smuggled into structure | Mailsploit (2017, Thunderbird and others: an encoded NUL and `@`); Gareth Heyes, [Splitting the email atom](https://portswigger.net/kb/papers/rclapqr/splitting-the-email-atom.pdf) (2024: encoded `@ , < >`); Python (an encoded comma when folding) | tokenize first, decode only in phrases and comments; controls removed; `suspicious` (section 3) |
 | Header injection through decoded values | Python [CVE-2024-6923](https://openwall.com/lists/oss-security/2024/08/01/3); MimeKit (CRLF in a quoted local part) | CR, LF, NUL removed from every decoded value (section 3) |
-| Duplicate or conflicting fields and parameters | Amavis [CVE-2024-28054](https://gitlab.com/amavis/amavis/-/work_items/112) (two `boundary` parameters); "Composition Kills" (USENIX Security 2020, several From); [Inbox Invasion](https://citation.thinkst.com/talk/96163) (Black Hat Asia 2025: evasions across detectors and clients) | first counts, a problem, no step near crypto (section 3) |
+| Duplicate or conflicting fields and parameters | Amavis [CVE-2024-28054](https://gitlab.com/amavis/amavis/-/work_items/112) (two `boundary` parameters); "Composition Kills" (USENIX Security 2020, several From); Inbox Invasion ([CCS 2024](https://www.jianjunchen.com/p/inbox-invasion.CCS24.pdf); [Black Hat Asia 2025](https://citation.thinkst.com/talk/96163): evasions across detectors and clients) | first counts, a problem, no step near crypto (section 3) |
 | Boundary ambiguity | Inbox Invasion; contradictory or prefixed boundaries | exact delimiter rule; prefixes a problem (section 3) |
 | Line-end ambiguity | SMTP smuggling (Postfix, Sendmail, Exim, 2023: bare LF) | one rule for line ends; CRLF canonical form for signatures (sections 3, 5) |
-| Transfer-encoding edge cases | Inbox Invasion; the IETF MIME ambiguity draft | fixed decoder rules; encodings on multiparts ignored (section 3) |
+| Transfer-encoding edge cases | Inbox Invasion; the MIME ambiguity Internet-Draft | fixed decoder rules; encodings on multiparts ignored (section 3) |
 | Charset tricks | UTF-7 and ISO-2022 escapes hiding text from filters | WHATWG labels only; no UTF-7 (section 3) |
 | Quadratic work, recursion, ReDoS | postal-mime (quadratic encoded-word join; nested multipart); Nodemailer's address parser (backtracking, recursion); Go `net/mail` and `mime/multipart` (quadratic concatenation, part counts); Perl Email-MIME | scanners without backtracking, iterative walks, one budget per call (section 4) |
 | Filename spoofing and traversal | the U+202E trick; Thunderbird (a malformed filename attached a directory listing to a forward) | the filename rules (section 4) |
@@ -802,8 +815,8 @@ What an app with its own MIME and PGP handling changes to move over:
 
 ## Open questions
 
-- **The IETF MIME ambiguity draft** (draft-chen-email-mime-ambiguity-defense-00) could be read only through
-  summaries: its full text is behind hosts this environment blocks. To read before release.
+- **Inbox Invasion** (CCS 2024), the measurement paper behind the MIME ambiguity draft, could not be fetched;
+  its classes are known from the draft's summary.
 - **Signed but not encrypted, with protected headers**: a good signature's inner Subject wins (section 6).
   Is a differing outer Subject worth a problem of its own?
 - **`prefer`**: whether an app needs more than `'html' | 'text'`.
