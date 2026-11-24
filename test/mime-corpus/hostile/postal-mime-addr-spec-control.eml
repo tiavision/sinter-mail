@@ -1,0 +1,10 @@
+From: CEO <ceo@victim.example>
+To: reader@example.test
+Cc: ceo@victim.example.evil.example, x <a@b.example>, ceo@victim.example, y <c@d.example>
+Subject: hostile fixture
+Date: Tue, 24 Nov 2026 09:30:00 +0100
+Message-ID: <hostile@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+body

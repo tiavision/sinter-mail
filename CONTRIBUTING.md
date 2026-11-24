@@ -31,7 +31,7 @@ Publishing needs, once:
 ## The package
 
 ```
-package.json              "sinter": "./sinter", exports ".", "./parser" (the lazy part)
+package.json              "sinter": "./sinter", exports ".", "./parser" and "./mime" (the lazy parts), "./mail.css"
 sinter/
   components/
     mail-body.html        public: one body, and the slots an app fills (`link`, `image`)
@@ -51,12 +51,30 @@ sinter/
   tree.ts                 mail.text, mail.links, mail.unquoted (mail.progressive, deprecated)
   build.ts                the script builder: a tree as elements, for <mail-view>
   warm.ts                 <mail-warm>'s sample emails
+  mime.ts                 mail.mime, mail.mime.clear and mail.forget: options, validation, the last message; imports the reader by
+                          its specifier
+  bytes.ts                mail.bytes, mail.imageType: imports mime/decode.ts and mime/magic.ts, never the reader
+  mime/                   the MIME reader, behind `@tiavision/sinter-mail/mime`:
+    index.ts              the entry: one call's read, the problems listed once each; exports only `read`,
+                          `ReadOptions` and the types
+    types.ts              the message's public types (Message, Part, Ref, Step, Decrypted, Verdict, …)
+    scan.ts               the entity scan: boundaries, ids, Refs, limits, one budget per call, problems
+    headers.ts            header blocks, encoded words, parameters (RFC 2047, 2231, 6532)
+    address.ts, date.ts   RFC 5322 addresses (with A-label comparison) and dates
+    decode.ts, charset.ts transfer decoders and canonical line ends; charsets through TextDecoder
+    filename.ts, magic.ts safe filenames; image types by magic number
+    show.ts               choosing what to show: parts, attachments, inline sets, calendar, nested messages
+    crypto.ts, steps.ts   OpenPGP shapes, the steps, the app's results checked, inline armor
+    hp.ts, protect.ts     protected headers, reply, confidential, hpOuter, legacy display; the root message assembled
+    summary.ts            section 7's summary, for the root message and for nested ones
+    cache.ts              mail.mime's cache: bounded by inputs and cost, frozen messages, cleared by mail.mime.clear()
+    sha256.ts             SHA-256 and step digests
   sinter.helpers.ts       the helpers, re-exported by the entry
   index.ts                the entry
 scripts/
   build-components.mjs    writes sinter/components/internal/ from tags.ts; --check
   build-entities.mjs      writes sinter/parser/entities.ts; --check
-fixtures/                 pages for `sinter check`, and trees as JSON
+fixtures/                 pages for `sinter check`, and trees as JSON; mime.html reads mails/notes.eml (7-bit) with mail.mime
 test/                     the tests (vitest), test/corpus/ the emails they read
 bench/                    the benches: html.mjs (an email's HTML from an API, against an iframe with DOMPurify),
                           its emails (corpus/) and Caley's old reader (caley/), profile.mjs, and those of the
@@ -111,7 +129,7 @@ docs/                     the guide and the proposals
 npm ci
 npx sinter check          # the fixture pages: compiled, type-checked, the library's rules
 npm run typecheck
-npm test                  # vitest: 256 tests, Chromium included
+npm test                  # vitest: 773 tests, Chromium included
 ```
 
 | Test | What it covers |
@@ -125,7 +143,23 @@ npm test                  # vitest: 256 tests, Chromium included
 | `test/components.test.ts` | the tag table, the types, the dispatch and the files agree; the generated files are current |
 | `test/check.test.ts` | `sinter check --strict` over the fixtures: no error, no warning |
 | `test/static.test.ts` | an email folded at build time: no JavaScript, the HTML is the tree |
+| `test/mime-lexical.test.ts` | the reader's lexical layer: decoders, charsets, headers, encoded words, parameters, addresses, dates, filenames, SHA-256, magic numbers; hostile inputs under a time bound, purity |
+| `test/mime-structure.test.ts` | the entity scan, ids, boundaries, limits, problems and their blocking flags, choosing what to show, headers and attachments, mail.mime's options and cache, mail.bytes and mail.imageType |
+| `test/mime-corpus-structure.test.ts` | the reader against the corpus: Stalwart's messages against `structure.json`, the charset fixtures, every hostile fixture and generator within its time bound |
+| `test/mime-structure-edges.test.ts` | the structure layer's edge cases: bare CR in headers, the cache's bounds and `mail.mime.clear()`, opaque Refs, shared inline sets, problems and ids of a nested root, a seeded structural fuzz of the scan |
+| `test/mime-crypto.test.ts` | OpenPGP steps, results, protected headers and `hpOuter`, protection and the summary (sign over encrypt, nested messages' summaries), with real openpgp.js keys and messages through the action recipe (`test/mime-crypto-kit.ts`) |
+| `test/mime-crypto-attacks.test.ts` | the published attacks: EFAIL, re-sent and re-wrapped ciphertexts, partial signing, stale results, armor that is not a step, Content-IDs across protection |
+| `test/mime-crypto-hardening.test.ts` | the crypto layer's hardening: cleartext blocks read differently, one-pass signatures under the blocking rule, withdrawn steps, digests per call, `reply` |
+| `test/mime-corpus.test.ts` | the corpus loads and is well-formed; the generators are deterministic |
+| `test/mime-app.test.ts` | `fixtures/mime.html` built as an app builds it: the message folded at build time; with the package lazy, the reader a chunk of its own and `mail.bytes` without it |
 | `test/browser.test.ts` | Chromium under `script-src 'self'; style-src 'self'; require-trusted-types-for 'script'`: no violation, the styles applied; the CSP a folded email needs; render time and size |
+
+### The MIME corpus
+
+`test/mime-corpus/` holds the reader's inputs; its [README](test/mime-corpus/README.md) says where each came from
+and how to regenerate them. Their licenses: Stalwart mail-parser's messages (Apache-2.0 OR MIT; Dovecot's suites
+MIT), jsmime's charset tests (MIT, `charsets/LICENSE-jsmime.txt`), the inputs of postal-mime's and Nodemailer's
+tests among the hostile fixtures (MIT-0), and the rest this package's (MIT).
 
 ## Measuring
 

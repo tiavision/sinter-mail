@@ -1,0 +1,24 @@
+From: Mallory <mallory@evil.example>
+To: reader@example.test
+Subject: fwd
+MIME-Version: 1.0
+Content-Type: multipart/signed; micalg=pgp-sha256; protocol="application/pgp-signature"; boundary="s"
+
+--s
+Content-Type: text/plain; charset=utf-8
+
+From: CEO <ceo@bank.example>
+Subject: Approved: wire the money
+Date: Tue, 24 Nov 2026 09:00:00 +0100
+
+Please wire it today.
+--s
+Content-Type: application/pgp-signature; name="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEARYKAB0WIQplaceholder
+=AAAA
+-----END PGP SIGNATURE-----
+
+--s--

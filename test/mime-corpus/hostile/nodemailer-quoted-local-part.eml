@@ -1,0 +1,10 @@
+From: "xclow3n@gmail.com x"@internal.domain
+To: reader@example.test
+Cc: "user@attacker.com"@legitimate.com, "a@b@c"@example.com
+Subject: hostile fixture
+Date: Tue, 24 Nov 2026 09:30:00 +0100
+Message-ID: <hostile@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+body

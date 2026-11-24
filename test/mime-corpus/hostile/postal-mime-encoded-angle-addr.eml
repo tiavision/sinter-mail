@@ -1,0 +1,11 @@
+From: =?utf-8?B?TmFtZSA8YUBiLmM+?=
+To: reader@example.test
+Cc: (=?utf-8?B?PGV2aWxAZXZpbC5jb20+?=), <(=?utf-8?B?PGV2aWxAZXZpbC5jb20+?=)>
+Reply-To: =?UTF-8?Q?John_Smith_(?= <ceo@company.example> =?UTF-8?Q?)?= <a@evil.example>
+Subject: hostile fixture
+Date: Tue, 24 Nov 2026 09:30:00 +0100
+Message-ID: <hostile@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+body

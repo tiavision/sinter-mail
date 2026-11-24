@@ -182,6 +182,53 @@ describe('quoted history and signatures, as mail clients mark them', () => {
   });
 });
 
+describe('legacy display (RFC 9788)', () => {
+  const LD = '<div class="header-protection-legacy-display"><pre>Subject: s</pre></div>';
+  const drop = (html: string) => shape(parse(html, { legacyDisplay: true }));
+  test('every div in the body with the class is left out with its content (RFC 9788 §4.5.3.3)', () => {
+    expect(drop(`${LD}<p>a</p>`)).toEqual([['p', 'a']]);
+    expect(drop(`<body>\n  <div class="x header-protection-legacy-display  y">h</div><p>a</p></body>`)).toEqual(['\n  ', ['p', 'a']]);
+    expect(drop(`${LD}<div class="header-protection-legacy-display">b</div>`)).toEqual([]);
+    expect(drop(`<p>a</p>${LD}`)).toEqual([['p', 'a']]);
+    expect(drop(`text${LD}`)).toEqual(['text']);
+    expect(drop(`<div>${LD}<p>b</p></div>`)).toEqual([['div', ['p', 'b']]]);
+  });
+  test('kept on another tag, or without the option: a class alone drops nothing', () => {
+    expect(drop('<p class="header-protection-legacy-display">a</p>')).toEqual([['p', 'a']]);
+    expect(drop('<div class="header-protection-legacy-displayx">a</div>')).toEqual([['div', 'a']]);
+    expect(shape(parse(`${LD}<p>a</p>`))).toEqual([['div', ['pre', 'Subject: s']], ['p', 'a']]);
+    expect(shape(parse(`${LD}<p>a</p>`, { legacyDisplay: false }))).toEqual([['div', ['pre', 'Subject: s']], ['p', 'a']]);
+  });
+  test('its images are not counted, its rules still apply', () => {
+    const b = parse('<style>p { color: red }</style><div class="header-protection-legacy-display"><img src="https://t.example/a.png"></div><p>a</p>', { legacyDisplay: true });
+    expect(b.images.origins).toEqual([]);
+    expect(first(b, 'p').style.color).toBe('red');
+  });
+});
+
+describe('encrypted', () => {
+  const HTML = '<img src="https://img.example/a.png"><img src="cid:logo@x"><img src="data:image/png;base64,iVBORw0KGgo=">';
+  const srcs = (b: Body) => els(b).filter((e) => e.tag === 'img').map((e) => e.attrs.src);
+  const cid = { 'logo@x': '/logo.png' };
+  test('remote images are blocked under allow and proxy; cid: and data: are not; origins are listed', () => {
+    for (const o of [{ images: 'allow' as const }, { images: 'proxy' as const, proxy: '/img?url={url}' }, {}]) {
+      const b = parse(HTML, { ...o, cid, encrypted: true });
+      expect(srcs(b)).toEqual([undefined, '/logo.png', 'data:image/png;base64,iVBORw0KGgo=']);
+      expect(b.images.origins).toEqual(['https://img.example']);
+    }
+  });
+  test('consent loads them as `images` says', () => {
+    expect(srcs(parse(HTML, { images: 'allow', encrypted: true, consent: true }))[0]).toBe('https://img.example/a.png');
+    expect(srcs(parse(HTML, { images: 'proxy', proxy: '/img?url={url}', encrypted: true, consent: true }))[0]).toBe('/img?url=https%3A%2F%2Fimg.example%2Fa.png');
+    expect(srcs(parse(HTML, { encrypted: true, consent: true }))[0]).toBeUndefined();
+    // consent without encrypted changes nothing
+    expect(parse(HTML, { images: 'allow', consent: true })).toBe(parse(HTML, { images: 'allow' }));
+  });
+  test('the proxy template is checked even when nothing loads', () => {
+    expect(() => parse('', { images: 'proxy', encrypted: true })).toThrow(/proxy/);
+  });
+});
+
 describe('options', () => {
   test('invalid options throw', () => {
     expect(() => parse('', { images: 'maybe' as 'allow' })).toThrow(/images/);
@@ -192,6 +239,10 @@ describe('options', () => {
     expect(() => parse('', { cid: '/x' })).toThrow(/cid/);
     expect(() => parse('', { media: 'tv' as 'wide' })).toThrow(/media/);
     expect(() => parse('', { dataImages: -1 })).toThrow(/dataImages/);
+    expect(() => parse('', { legacyDisplay: 'yes' as unknown as boolean })).toThrow(/mail\.parse: `legacyDisplay` is a boolean/);
+    expect(() => parse('', { encrypted: 1 as unknown as boolean })).toThrow(/mail\.parse: `encrypted` is a boolean/);
+    expect(() => parse('', { consent: null as unknown as boolean })).not.toThrow();
+    expect(() => parse('', { consent: 'true' as unknown as boolean })).toThrow(/mail\.parse: `consent` is a boolean/);
   });
   test('the same source and options give the same frozen tree', () => {
     const a = parse('<p>x</p>', { cid: { b: '/1', a: '/2' } });
@@ -199,6 +250,27 @@ describe('options', () => {
     expect(Object.isFrozen(a.children[0])).toBe(true);
     expect(parse('<p>x</p>')).not.toBe(a);
     expect(parse(null)).toEqual({ type: 'body', style: {}, children: [], images: { origins: [] } });
+  });
+  test('legacyDisplay, encrypted and consent: different outputs, different trees; equal ones, one tree', () => {
+    const html = '<div class="header-protection-legacy-display">h</div><img src="https://i.example/a.png">';
+    const ld = parse(html, { legacyDisplay: true });
+    expect(parse(html, { legacyDisplay: true })).toBe(ld);
+    expect(Object.isFrozen(ld.children)).toBe(true);
+    expect(parse(html)).not.toBe(ld);
+    expect(parse(html).children).toHaveLength(2);
+    const allowed = parse(html, { images: 'allow' });
+    const sealed = parse(html, { images: 'allow', encrypted: true });
+    expect(sealed).not.toBe(allowed);
+    expect(sealed).toBe(parse(html, { images: 'allow', encrypted: true }));
+    // blocked by `encrypted` is the tree plain 'block' gives
+    expect(sealed).toBe(parse(html));
+    expect(parse(html, { images: 'proxy', proxy: '/p?u={url}', encrypted: true })).toBe(parse(html));
+    expect(parse(html, { images: 'allow', encrypted: true, consent: true })).toBe(allowed);
+    // the cache, not only the last call: interleaved calls keep their trees apart
+    expect(parse(html, { legacyDisplay: true })).toBe(ld);
+    expect(parse(html, { images: 'allow', encrypted: true, legacyDisplay: true })).toBe(ld);
+    expect(parse(html, { images: 'allow', legacyDisplay: true })).not.toBe(ld);
+    expect(parse(html, { images: 'allow', legacyDisplay: true })).not.toBe(allowed);
   });
 });
 

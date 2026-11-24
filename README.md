@@ -30,6 +30,9 @@ tree, and generated components render each element, with every attribute and sty
   An email from an API is rendered by a script builder. Parse in the browser, lazily, or on your server.
 - **Plain text too.** `mail.plain` handles `text/plain` bodies: links, quotes, signatures and
   `format=flowed`.
+- **Whole messages and OpenPGP.** `mail.mime` reads a raw message into its bodies (never joined), attachments and
+  inline images, and lists what your app must decrypt or verify; it checks the structure strictly, reads the
+  decrypted payload, applies protected headers and labels each part. Keys and crypto stay in your app.
 
 ## Install
 
@@ -88,6 +91,31 @@ mail.plain(text, { flowed: true })
 **An email from a file, folded at build time** (`src="file:./welcome.html"`): the page ships it as plain
 HTML, with no JavaScript. See [the guide](docs/mail.md#three-places-one-function).
 
+**Whole messages and OpenPGP**
+
+```html
+<article data-sn-let="{ msg: raw ? mail.mime(raw, results) : null }">
+  <template data-sn-if="msg">
+    <template data-sn-for="p in msg.parts">
+      <template data-sn-if="p.type === 'html'">
+        <mail-body data-sn-with="{ body: mail.parse(p.html, { legacyDisplay: p.legacyDisplay, encrypted: p.protection.encrypted }) }"></mail-body>
+      </template>
+      <template data-sn-else data-sn-if="p.type === 'text'">
+        <mail-body data-sn-with="{ body: mail.plain(p.text, { flowed: p.flowed, delsp: p.delsp }) }"></mail-body>
+      </template>
+    </template>
+  </template>
+</article>
+```
+
+`raw` is the message's bytes (a `Uint8Array`) and `results` the results of its steps, in state. An action runs
+`msg.steps` with your OpenPGP library (decrypt with integrity required, verify returning only the addresses you
+trust), stores each result by step id, and the message is read again with them; `msg.summary` says what to badge.
+Attachments and inline images come out through `mail.bytes(raw, ref, results)`, an image only when
+`mail.imageType` knows its bytes. On lock or logout, `await mail.forget()` drops the messages it keeps and the
+plaintexts they hold. See [whole messages](docs/mail.md#whole-messages-mailmimebytes-options) and
+[encrypted and signed mail](docs/mail.md#encrypted-and-signed-mail).
+
 **Previews and search snippets**
 
 ```js
@@ -112,14 +140,14 @@ what they count on, and a light canvas in dark mode to an email written for a wh
 
 ## Documentation
 
-- **[The guide](docs/mail.md)**: all options, what is kept and dropped, styling, proxies, slots, CSP, and the security guarantees.
-- **[Design notes](docs/proposals/sinter-mail.md)**: why it is built the way it is.
+- **[The guide](docs/mail.md)**: all options, what is kept and dropped, styling, proxies, slots, whole messages and OpenPGP, CSP, and the security guarantees.
+- **[Design notes](docs/proposals/sinter-mail.md)**: why it is built the way it is; [MIME and OpenPGP](docs/proposals/sinter-mail-mime.md).
 - **[Contributing](CONTRIBUTING.md)**: layout, tests and the release process.
 
 ## Limits
 
 Only the email's own styles apply (no `:hover`, animation or web fonts), `@media` is decided once at parse
-time (but for the colour scheme: colours set by `prefers-color-scheme: dark` rules follow the page's), and the library is tested in Chromium so far. [The guide](docs/mail.md#limits) has the full list.
+time (but for the colour scheme: colours set by `prefers-color-scheme: dark` rules follow the page's), the library is tested in Chromium so far, and `mail.mime` reads OpenPGP but not yet S/MIME. [The guide](docs/mail.md#limits) has the full list.
 
 ## License
 

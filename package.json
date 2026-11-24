@@ -28,6 +28,7 @@
   "exports": {
     ".": "./sinter/index.ts",
     "./parser": "./sinter/engine.ts",
+    "./mime": "./sinter/mime/index.ts",
     "./mail.css": "./sinter/mail.css",
     "./package.json": "./package.json"
   },
@@ -62,6 +63,7 @@
     "character-entities-legacy": "3.0.0",
     "dompurify": "3.4.17",
     "jsdom": "31.0.1",
+    "openpgp": "6.3.3",
     "parse5": "8.1.1",
     "playwright": "1.63.0",
     "typescript": "7.0.2",

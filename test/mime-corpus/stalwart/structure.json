@@ -1,0 +1,2209 @@
+{
+  "source": {
+    "repository": "https://github.com/stalwartlabs/mail-parser",
+    "commit": "267239755e5a7a60c2a0c6eecb18c71dffbe7e95",
+    "derivedBy": "derive.mjs"
+  },
+  "format": {
+    "tree": "type: lowercased type/subtype as declared (text/plain, or message/rfc822 in a multipart/digest, when absent); parts: children of a multipart in order; message: the root entity of a message/rfc822 or message/global",
+    "charset": "text/* only: the charset parameter, lowercased, or null when absent",
+    "encoding": "text/* only: the WHATWG encoding name TextDecoder gives for the label (utf-8 when absent), or null when the label is not a WHATWG one",
+    "text": "text/* only: the first 40 code points of the decoded text (line ends as in the file), present only when Stalwart and an independent decoding agree; textOmitted says why one is missing",
+    "problems": "problem codes the delimiter and header scan expects somewhere in the message (at least these)"
+  },
+  "messages": {
+    "rfc/000.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "... Some text appears here ...\n\n[Note th"
+          },
+          {
+            "type": "text/plain",
+            "charset": "us-ascii",
+            "encoding": "windows-1252",
+            "text": "This could have been part of the previou"
+          },
+          {
+            "type": "multipart/parallel",
+            "parts": [
+              {
+                "type": "audio/basic"
+              },
+              {
+                "type": "image/jpeg"
+              }
+            ]
+          },
+          {
+            "type": "text/enriched",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "This is <bold><italic>enriched.</italic>"
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": "iso-8859-1",
+              "encoding": "windows-1252",
+              "text": "... Additional text in ISO-8859-1 goes h"
+            }
+          }
+        ]
+      }
+    },
+    "rfc/001.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "message/external-body"
+          },
+          {
+            "type": "message/external-body"
+          },
+          {
+            "type": "message/external-body"
+          }
+        ]
+      }
+    },
+    "rfc/002.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "us-ascii",
+            "encoding": "windows-1252",
+            "text": "Fred,\n\nFire up Air Force One!  We're goi"
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "multipart/mixed",
+              "parts": [
+                {
+                  "type": "text/plain",
+                  "charset": "us-ascii",
+                  "encoding": "windows-1252",
+                  "text": "Hi A1,\n\nI finally figured out this MIME "
+                },
+                {
+                  "type": "image/gif"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "rfc/003.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "us-ascii",
+            "encoding": "windows-1252",
+            "text": "... plain text version of message goes h"
+          },
+          {
+            "type": "text/enriched",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "... RFC 1896 text/enriched version of sa"
+          },
+          {
+            "type": "application/x-whatever"
+          }
+        ]
+      }
+    },
+    "rfc/004.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "...Introductory text or table of content"
+          },
+          {
+            "type": "multipart/digest",
+            "parts": [
+              {
+                "type": "message/rfc822",
+                "message": {
+                  "type": "text/plain",
+                  "charset": null,
+                  "encoding": "utf-8",
+                  "text": "...body goes here ...\n"
+                }
+              },
+              {
+                "type": "message/rfc822",
+                "message": {
+                  "type": "text/plain",
+                  "charset": null,
+                  "encoding": "utf-8",
+                  "text": "... another body goes here ...\n"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "rfc/005.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "This is implicitly typed plain US-ASCII "
+          },
+          {
+            "type": "text/plain",
+            "charset": "us-ascii",
+            "encoding": "windows-1252",
+            "text": "This is explicitly typed plain US-ASCII "
+          }
+        ]
+      }
+    },
+    "rfc/006.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "text": "Plain text email goes here!\nThis is the "
+          },
+          {
+            "type": "text/html",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "text": "<h1>This is the HTML Section!</h1>\n<p>Th"
+          }
+        ]
+      }
+    },
+    "rfc/007.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "A"
+          },
+          {
+            "type": "multipart/mixed",
+            "parts": [
+              {
+                "type": "multipart/alternative",
+                "parts": [
+                  {
+                    "type": "multipart/mixed",
+                    "parts": [
+                      {
+                        "type": "text/plain",
+                        "charset": null,
+                        "encoding": "utf-8",
+                        "text": "B"
+                      },
+                      {
+                        "type": "image/jpeg"
+                      },
+                      {
+                        "type": "text/plain",
+                        "charset": null,
+                        "encoding": "utf-8",
+                        "text": "D"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "multipart/related",
+                    "parts": [
+                      {
+                        "type": "text/html",
+                        "charset": null,
+                        "encoding": "utf-8",
+                        "text": "<html>E</html>"
+                      },
+                      {
+                        "type": "image/jpeg"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "image/jpeg"
+              },
+              {
+                "type": "application/x-excel"
+              },
+              {
+                "type": "message/rfc822",
+                "message": {
+                  "type": "text/plain",
+                  "charset": null,
+                  "encoding": "utf-8",
+                  "text": "J"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "K"
+          }
+        ]
+      }
+    },
+    "rfc/009.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/alternative",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": "us-ascii",
+                "encoding": "windows-1252",
+                "text": "Hello\n"
+              },
+              {
+                "type": "text/html",
+                "charset": "us-ascii",
+                "encoding": "windows-1252",
+                "text": "<html><body>Hello</body></html>\n"
+              }
+            ]
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": null,
+              "encoding": "utf-8",
+              "text": "Please say Hello\n"
+            }
+          }
+        ]
+      }
+    },
+    "malformed/008.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "boundary-missing-close"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/mixed",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "body"
+              }
+            ]
+          },
+          {
+            "type": "text/html",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "body2\n"
+          }
+        ]
+      }
+    },
+    "malformed/009.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "boundary-missing-close"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/mixed",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "1"
+              },
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "22"
+              }
+            ]
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "333\n"
+          }
+        ]
+      }
+    },
+    "malformed/010.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "message/rfc822",
+        "message": {
+          "type": "message/rfc822",
+          "message": {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "1\n"
+          }
+        }
+      }
+    },
+    "malformed/011.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "boundary-missing-close"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/mixed",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "1"
+              },
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "22"
+              }
+            ]
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "333\n"
+          }
+        ]
+      }
+    },
+    "malformed/012.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "boundary-missing-close"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/mixed",
+            "parts": [
+              {
+                "type": "message/rfc822",
+                "message": {
+                  "type": "text/plain",
+                  "charset": null,
+                  "encoding": "utf-8",
+                  "text": "1"
+                }
+              },
+              {
+                "type": "message/rfc822",
+                "message": {
+                  "type": "text/plain",
+                  "charset": null,
+                  "encoding": "utf-8",
+                  "text": "22"
+                }
+              }
+            ]
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": null,
+              "encoding": "utf-8",
+              "text": "333\n"
+            }
+          }
+        ]
+      }
+    },
+    "malformed/015.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/signed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "There was a day \na happy day\n"
+          },
+          {
+            "type": "application/pgp-signature"
+          }
+        ]
+      }
+    },
+    "malformed/017.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "thirdparty/000.eml": {
+      "lineEnds": "crlf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "we have\ra lot \nof \u0000binary stuff in here\n"
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "eh"
+          }
+        ]
+      }
+    },
+    "thirdparty/002.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "text": "päivää\n"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported malformed_charset"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported malformed_transfer_encoding, malformed_charset"
+          }
+        ]
+      }
+    },
+    "thirdparty/004.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported unknown_transfer_encoding"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported unknown_transfer_encoding"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported unknown_transfer_encoding"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported unknown_transfer_encoding"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported unknown_transfer_encoding"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported unknown_transfer_encoding"
+          }
+        ]
+      }
+    },
+    "thirdparty/006.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/signed",
+            "parts": [
+              {
+                "type": "multipart/alternative",
+                "parts": [
+                  {
+                    "type": "text/html",
+                    "charset": "us-ascii",
+                    "encoding": "windows-1252",
+                    "text": "<html><head><title>Search me</title></he"
+                  },
+                  {
+                    "type": "text/plain",
+                    "charset": null,
+                    "encoding": "utf-8",
+                    "text": "Search me, and Find me here"
+                  }
+                ]
+              },
+              {
+                "type": "signature/plain"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "thirdparty/007.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/digest",
+        "parts": [
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": null,
+              "encoding": "utf-8",
+              "text": "This is my opinion"
+            }
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": null,
+              "encoding": "utf-8",
+              "text": "Not agreeing one bit!"
+            }
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "multipart/mixed",
+              "parts": [
+                {
+                  "type": "text/plain",
+                  "charset": null,
+                  "encoding": "utf-8",
+                  "text": "Lovely attachment for you"
+                },
+                {
+                  "type": "application/octet-stream"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "thirdparty/008.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/x-myown",
+            "charset": "us-ascii",
+            "encoding": "windows-1252",
+            "text": "hello\n"
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "multipart/alternative",
+              "parts": [
+                {
+                  "type": "text/html",
+                  "charset": null,
+                  "encoding": "utf-8",
+                  "text": "<p>Hello world</p>\n"
+                },
+                {
+                  "type": "multipart/alternative",
+                  "parts": [
+                    {
+                      "type": "multipart/alternative",
+                      "parts": [
+                        {
+                          "type": "text/plain",
+                          "charset": null,
+                          "encoding": "utf-8",
+                          "text": "sub3 text"
+                        },
+                        {
+                          "type": "text/plain",
+                          "charset": null,
+                          "encoding": "utf-8",
+                          "text": "sub3 text2"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text/plain",
+                      "charset": null,
+                      "encoding": "utf-8",
+                      "text": "sub2 text2"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "Another part"
+          }
+        ]
+      }
+    },
+    "thirdparty/009.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "Hi, this is the fancy thing I was talkin"
+          },
+          {
+            "type": "message/partial"
+          }
+        ]
+      }
+    },
+    "thirdparty/010.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "人権の無視及"
+          }
+        ]
+      }
+    },
+    "thirdparty/011.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "note": "headers end at the delimiter's line break (empty body; no-header-end per the proposal, legal per RFC 2046)",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "text": ""
+          },
+          {
+            "type": "multipart/related",
+            "parts": [
+              {
+                "type": "text/html",
+                "charset": "utf-8",
+                "encoding": "utf-8",
+                "text": "<html>\n  <head>\n\n    <meta http-equiv=\"c"
+              },
+              {
+                "type": "image/png"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "thirdparty/012.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/x-myown",
+            "charset": "us-ascii",
+            "encoding": "windows-1252",
+            "text": "hello\n"
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "multipart/alternative",
+              "parts": [
+                {
+                  "type": "text/html",
+                  "charset": null,
+                  "encoding": "utf-8",
+                  "text": "<p>Hello world</p>\n"
+                },
+                {
+                  "type": "text/plain",
+                  "charset": null,
+                  "encoding": "utf-8",
+                  "text": "Hello another world\n"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "thirdparty/013.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/alternative",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "a"
+              },
+              {
+                "type": "text/html",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "b"
+              }
+            ]
+          },
+          {
+            "type": "image/jpeg"
+          },
+          {
+            "type": "audio/mp3"
+          },
+          {
+            "type": "video/avi"
+          }
+        ]
+      }
+    },
+    "thirdparty/014.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "text": "Dear all,\n\nI am writting my first C appl"
+          },
+          {
+            "type": "text/html",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "text": "<html><head><style type=\"text/css\"><!-- "
+          }
+        ]
+      }
+    },
+    "thirdparty/016.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/related",
+        "parts": [
+          {
+            "type": "text/html",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported malformed_transfer_encoding"
+          },
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "thirdparty/017.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "text": "Search for hähä\n\n"
+          },
+          {
+            "type": "multipart/related",
+            "parts": [
+              {
+                "type": "text/html",
+                "charset": "utf-8",
+                "encoding": "utf-8",
+                "textOmitted": "Stalwart reported malformed_transfer_encoding"
+              },
+              {
+                "type": "image/png"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "thirdparty/018.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/related",
+            "parts": [
+              {
+                "type": "text/html",
+                "charset": "utf-8",
+                "encoding": "utf-8",
+                "textOmitted": "Stalwart reported malformed_transfer_encoding"
+              },
+              {
+                "type": "image/png"
+              }
+            ]
+          },
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "thirdparty/019.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/alternative",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": "windows-1252",
+                "encoding": "windows-1252",
+                "text": "Search for hähä\n\n"
+              },
+              {
+                "type": "multipart/related",
+                "parts": [
+                  {
+                    "type": "text/html",
+                    "charset": "windows-1252",
+                    "encoding": "windows-1252",
+                    "textOmitted": "Stalwart reported malformed_transfer_encoding"
+                  },
+                  {
+                    "type": "image/png"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "regressions/alternative-attachment-disposition.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "plain"
+          },
+          {
+            "type": "text/html",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "<p>html</p>"
+          }
+        ]
+      }
+    },
+    "regressions/alternative-dropped-footer.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "plain"
+          },
+          {
+            "type": "multipart/mixed",
+            "parts": [
+              {
+                "type": "text/html",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "<p>html</p>"
+              },
+              {
+                "type": "image/png"
+              },
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "footer"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "regressions/alternative-named-html.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "plain"
+          },
+          {
+            "type": "text/html",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "<p>html</p>"
+          }
+        ]
+      }
+    },
+    "regressions/alternative-nested-dropped.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "multipart/mixed",
+            "parts": [
+              {
+                "type": "text/html",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "<p>first</p>"
+              },
+              {
+                "type": "multipart/alternative",
+                "parts": [
+                  {
+                    "type": "text/plain",
+                    "charset": null,
+                    "encoding": "utf-8",
+                    "text": "second"
+                  },
+                  {
+                    "type": "text/html",
+                    "charset": null,
+                    "encoding": "utf-8",
+                    "text": "<p>second</p>"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "regressions/alternative-related-image.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "plain"
+          },
+          {
+            "type": "multipart/related",
+            "parts": [
+              {
+                "type": "text/html",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "<p>html</p>"
+              },
+              {
+                "type": "image/png"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "regressions/blank-continuation-in-header-block.eml": {
+      "lineEnds": "crlf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body"
+      }
+    },
+    "regressions/close-delimiter-first.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": []
+      }
+    },
+    "regressions/close-delimiter-mid-line.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": []
+      }
+    },
+    "regressions/date-without-final-newline.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "no-header-end"
+      ],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": ""
+      }
+    },
+    "regressions/date-zone-est.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "b\n"
+      }
+    },
+    "regressions/date-zone-military.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/date-zone-ut.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "From: x@y\n"
+      }
+    },
+    "regressions/date-zone-z.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "From: x@y\n"
+      }
+    },
+    "regressions/decode-problems.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "text": "café"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported malformed_transfer_encoding"
+          },
+          {
+            "type": "text/plain",
+            "charset": "iso-8859-1",
+            "encoding": "windows-1252",
+            "textOmitted": "Stalwart reported malformed_transfer_encoding"
+          },
+          {
+            "type": "text/plain",
+            "charset": "x-unknown",
+            "encoding": null,
+            "textOmitted": "Stalwart reported unknown_charset"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-8",
+            "encoding": "utf-8",
+            "textOmitted": "Stalwart reported malformed_charset"
+          },
+          {
+            "type": "application/octet-stream"
+          },
+          {
+            "type": "text/plain",
+            "charset": "iso-8859-3",
+            "encoding": "iso-8859-3",
+            "textOmitted": "Stalwart reported malformed_charset"
+          },
+          {
+            "type": "text/plain",
+            "charset": "shift_jis",
+            "encoding": "shift_jis",
+            "text": "ハ"
+          }
+        ]
+      }
+    },
+    "regressions/decoding-accessors.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "iso-8859-1",
+            "encoding": "windows-1252",
+            "text": "café soft break"
+          },
+          {
+            "type": "application/octet-stream"
+          }
+        ]
+      }
+    },
+    "regressions/delimiter-rule.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "visit --BND for details\n--BNDX not a del"
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "second"
+          }
+        ]
+      }
+    },
+    "regressions/empty-part-then-cut-part.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "no-header-end"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": ""
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": ""
+          }
+        ]
+      }
+    },
+    "regressions/empty-structured-fields.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/empty-subject-blanks.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/empty-subject-folded.eml": {
+      "lineEnds": "crlf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\r\n"
+      }
+    },
+    "regressions/empty-subject.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/fold-after-parameter-equals.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "regressions/garbage-line-before-fold.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body"
+      }
+    },
+    "regressions/header-block-edge-cases.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body"
+      }
+    },
+    "regressions/header-name-blanks-before-colon.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/header-name-colons-and-blanks.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/header-name-form-feed.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/header-name-leading-colon.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/header-name-nul.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/header-name-smuggled-subject.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/header-name-space.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/header-only-no-line-break.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "no-header-end"
+      ],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": ""
+      }
+    },
+    "regressions/header-views.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body"
+      }
+    },
+    "regressions/inline-text-with-filename.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "body"
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "notes"
+          }
+        ]
+      }
+    },
+    "regressions/inner-headers-cut-by-outer-delimiter.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "boundary-missing-close",
+        "no-header-end"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/mixed",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": ""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "regressions/inner-multipart-closed-by-outer.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "boundary-missing-close"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/alternative",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "a"
+              }
+            ]
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "b"
+          }
+        ]
+      }
+    },
+    "regressions/missing-close-delimiter.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "boundary-missing-close"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "no end\n"
+          }
+        ]
+      }
+    },
+    "regressions/mixed-calendar.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "text"
+          },
+          {
+            "type": "text/calendar",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "BEGIN:VCALENDAR"
+          }
+        ]
+      }
+    },
+    "regressions/mixed-disposition.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "hello"
+          },
+          {
+            "type": "image/png"
+          },
+          {
+            "type": "application/pdf"
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": null,
+              "encoding": "utf-8",
+              "text": "y"
+            }
+          }
+        ]
+      }
+    },
+    "regressions/mixed-image-attachment.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "text"
+          },
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "regressions/mixed-image-inline.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "text"
+          },
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "regressions/mixed-image.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "text"
+          },
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "regressions/mixed-message-inline.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "text"
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": null,
+              "encoding": "utf-8",
+              "text": "inner body"
+            }
+          }
+        ]
+      }
+    },
+    "regressions/mixed-message.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "text"
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": null,
+              "encoding": "utf-8",
+              "text": "inner body"
+            }
+          }
+        ]
+      }
+    },
+    "regressions/mixed-pdf-inline.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "text"
+          },
+          {
+            "type": "application/pdf"
+          }
+        ]
+      }
+    },
+    "regressions/mixed-pdf.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "text"
+          },
+          {
+            "type": "application/pdf"
+          }
+        ]
+      }
+    },
+    "regressions/mixed-text-image-html.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "first"
+          },
+          {
+            "type": "image/png"
+          },
+          {
+            "type": "text/html",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "<p>third</p>"
+          }
+        ]
+      }
+    },
+    "regressions/multipart-basic.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "hello"
+          },
+          {
+            "type": "text/html",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "<p>x</p>"
+          }
+        ]
+      }
+    },
+    "regressions/nested-headers-cut-by-delimiter.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "no-header-end"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": null,
+              "encoding": "utf-8",
+              "text": ""
+            }
+          }
+        ]
+      }
+    },
+    "regressions/nested-inline-message.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "intro"
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "text/plain",
+              "charset": null,
+              "encoding": "utf-8",
+              "text": "nested body"
+            }
+          }
+        ]
+      }
+    },
+    "regressions/nested-multipart-depth.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "multipart/mixed",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "deep"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "regressions/part-without-blank-line.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "no-header-end"
+      ],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": ""
+          },
+          {
+            "type": "text/plain",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "ok"
+          }
+        ]
+      }
+    },
+    "regressions/readme-example.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/html",
+            "charset": "us-ascii",
+            "encoding": "windows-1252",
+            "text": "<html><p>I was thinking about quitting t"
+          },
+          {
+            "type": "message/rfc822",
+            "message": {
+              "type": "multipart/mixed",
+              "parts": [
+                {
+                  "type": "text/plain",
+                  "charset": "utf-16",
+                  "encoding": "utf-16le",
+                  "text": "ℌ𝔢𝔩𝔭 𝔪𝔢 𝔢𝔵𝔭𝔬𝔯𝔱 𝔪𝔶 𝔟𝔬𝔬𝔨 𝔭𝔩𝔢𝔞𝔰𝔢!"
+                },
+                {
+                  "type": "image/gif"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "regressions/related-cid-image-no-disposition.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/related",
+        "parts": [
+          {
+            "type": "text/html",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "<p>Newsletter</p><img src=\"cid:logo\">"
+          },
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "regressions/related-cid-inline-image.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/related",
+        "parts": [
+          {
+            "type": "multipart/alternative",
+            "parts": [
+              {
+                "type": "text/plain",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "See the chart below."
+              },
+              {
+                "type": "text/html",
+                "charset": null,
+                "encoding": "utf-8",
+                "text": "<p>See the chart below.</p><img src=\"cid"
+              }
+            ]
+          },
+          {
+            "type": "image/png"
+          }
+        ]
+      }
+    },
+    "regressions/related-disposition.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/related",
+        "parts": [
+          {
+            "type": "text/html",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "<img src=\"cid:a\"><img src=\"cid:b\">"
+          },
+          {
+            "type": "image/png"
+          },
+          {
+            "type": "image/png"
+          },
+          {
+            "type": "image/gif"
+          }
+        ]
+      }
+    },
+    "regressions/root-attachment-disposition.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "no-header-end"
+      ],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": ""
+      }
+    },
+    "regressions/single-part-offsets.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\n"
+      }
+    },
+    "regressions/single-text.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "hello\n"
+      }
+    },
+    "regressions/subject-and-body.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body"
+      }
+    },
+    "regressions/unstructured-fields.eml": {
+      "lineEnds": "crlf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body\r\n"
+      }
+    },
+    "regressions/unterminated-alternative.eml": {
+      "lineEnds": "lf",
+      "problems": [
+        "boundary-missing-close"
+      ],
+      "tree": {
+        "type": "multipart/alternative",
+        "parts": [
+          {
+            "type": "text/html",
+            "charset": null,
+            "encoding": "utf-8",
+            "text": "<p>html</p>\n"
+          }
+        ]
+      }
+    },
+    "regressions/utf16-dangling-byte.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "utf-16le",
+            "encoding": "utf-16le",
+            "textOmitted": "Stalwart reported malformed_charset"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-16le",
+            "encoding": "utf-16le",
+            "textOmitted": "Stalwart reported malformed_charset"
+          }
+        ]
+      }
+    },
+    "regressions/utf7-terminators.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "multipart/mixed",
+        "parts": [
+          {
+            "type": "text/plain",
+            "charset": "utf-7",
+            "encoding": null,
+            "textOmitted": "not a WHATWG label"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-7",
+            "encoding": null,
+            "textOmitted": "not a WHATWG label"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-7",
+            "encoding": null,
+            "textOmitted": "not a WHATWG label"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-7",
+            "encoding": null,
+            "textOmitted": "not a WHATWG label"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-7",
+            "encoding": null,
+            "textOmitted": "not a WHATWG label"
+          },
+          {
+            "type": "text/plain",
+            "charset": "utf-7",
+            "encoding": null,
+            "textOmitted": "not a WHATWG label"
+          }
+        ]
+      }
+    },
+    "regressions/vendor-encoded-words.eml": {
+      "lineEnds": "lf",
+      "problems": [],
+      "tree": {
+        "type": "text/plain",
+        "charset": null,
+        "encoding": "utf-8",
+        "text": "body"
+      }
+    }
+  },
+  "skipped": {
+    "rfc/008.eml": "part 2: transfer encoding on a message",
+    "malformed/000.eml": "mixed line ends: Stalwart parsed only LF and CRLF normalizations of it",
+    "malformed/001.eml": "part 1: multipart/mixed read by Stalwart as text",
+    "malformed/002.eml": "part 0: multipart/mixed read by Stalwart as text",
+    "malformed/003.eml": "part 0: Stalwart has 1 children, delimiter scan 2",
+    "malformed/004.eml": "part 0: Stalwart used a mid-line delimiter",
+    "malformed/005.eml": "part 1: Stalwart found a header end at 102, the scan none",
+    "malformed/006.eml": "part 1: boundary starts with an ancestor's",
+    "malformed/007.eml": "part 1: 2 Content-Type fields",
+    "malformed/013.eml": "part 0: Stalwart has 2 children, delimiter scan 8",
+    "malformed/014.eml": "part 0: Stalwart has 1 children, delimiter scan 2",
+    "malformed/016.eml": "part 0: boundary longer than 70",
+    "malformed/018.eml": "mixed line ends: Stalwart parsed only LF and CRLF normalizations of it",
+    "malformed/019.eml": "part 0: close delimiter disagrees with unterminated flag",
+    "malformed/020.eml": "part 1: 2 Content-Type fields",
+    "malformed/021.eml": "part 1: 2 Content-Type fields",
+    "malformed/022.eml": "part 2: header end disagrees with no_blank_line",
+    "malformed/023.eml": "part 0: Stalwart used a mid-line delimiter",
+    "thirdparty/001.eml": "mixed line ends: Stalwart parsed only LF and CRLF normalizations of it",
+    "thirdparty/003.eml": "mixed line ends: Stalwart parsed only LF and CRLF normalizations of it",
+    "thirdparty/005.eml": "part 0: close delimiter disagrees with unterminated flag",
+    "thirdparty/015.eml": "part 3: multipart/alternative read by Stalwart as text",
+    "regressions/boundary-of-dashes.eml": "part 0: close delimiter disagrees with unterminated flag",
+    "regressions/doubly-encoded-message.eml": "part 0: transfer encoding on a message",
+    "regressions/empty-nested-message-base64.eml": "part 0: header end disagrees with no_blank_line",
+    "regressions/empty-nested-message-in-multipart.eml": "part 1: message/rfc822 read by Stalwart as text",
+    "regressions/empty-nested-message.eml": "part 0: header end disagrees with no_blank_line",
+    "regressions/encoded-message-without-header.eml": "mixed line ends: Stalwart parsed only LF and CRLF normalizations of it",
+    "regressions/fallback-delimiter-after-text.eml": "part 0: Stalwart used a mid-line delimiter",
+    "regressions/fallback-delimiter-mid-line.eml": "part 0: close delimiter disagrees with unterminated flag",
+    "regressions/nested-encoded-message.eml": "mixed line ends: Stalwart parsed only LF and CRLF normalizations of it",
+    "regressions/no-delimiter-close-mid-line.eml": "part 0: Stalwart used a mid-line delimiter",
+    "regressions/unopened-multiparts.eml": "part 2: multipart/alternative read by Stalwart as binary"
+  }
+}

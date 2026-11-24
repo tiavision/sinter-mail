@@ -1,0 +1,25 @@
+{
+  "file": "jsmime-shift-jis-image.eml",
+  "source": "jsmime test/data/shift-jis-image; body string from jsmime test_mime_tree.js, with its CRLF read as the file's LF",
+  "environment": {
+    "node": "v22.23.5",
+    "icu": "78.3",
+    "fullIcu": true
+  },
+  "parts": [
+    {
+      "part": "1.1",
+      "charset": "Shift-JIS",
+      "transferEncoding": "8bit",
+      "text": "Portable Network Graphics（ポータブル・ネットワーク・グラフィックス、PNG）はコンピュータでビットマップ画像を扱うファイルフォーマットである。圧縮アルゴリズムとしてDeflateを採用している、圧縮による画質の劣化のない可逆圧縮の画像ファイルフォーマットである。\n",
+      "problems": []
+    },
+    {
+      "part": "1.2",
+      "type": "image/png",
+      "charset": null,
+      "note": "image/png: no charset applies"
+    }
+  ],
+  "note": "Content-Description holds raw Shift_JIS bytes; jsmime decodes them with the part charset (ケツァルコアトル). The proposal reads 8-bit headers as UTF-8 (RFC 6532) and does not say more, so no expectation is set for it."
+}

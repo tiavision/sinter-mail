@@ -1,0 +1,16 @@
+From: sender@example.test
+To: reader@example.test
+Subject: =?utf-8?Q?hello=0D=0ABcc:_victim@example.test?=
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b"
+
+--b
+Content-Type: text/plain
+
+text
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="=?utf-8?Q?a=0D=0AX-Evil:_1=E2=80=AEtxt.exe?="
+
+x
+--b--

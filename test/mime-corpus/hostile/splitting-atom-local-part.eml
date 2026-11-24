@@ -1,0 +1,10 @@
+From: =?x?q?collab=40psres.net=3e=00?=foo@example.com
+To: reader@example.test
+Cc: =?utf-7?q?&AEA-psres.net&AD4-?=@example.com, "=?utf-8?q?ceo=40bank.example_=3cceo=40bank.example=3e?=" <attacker@evil.example>
+Subject: hostile fixture
+Date: Tue, 24 Nov 2026 09:30:00 +0100
+Message-ID: <hostile@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+body
