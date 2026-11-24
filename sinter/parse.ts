@@ -12,7 +12,7 @@
 import { parseHTML, resolve } from '@tiavision/sinter-mail/parser';
 import type { RawElement, RawNode } from './raw.js';
 import { attr } from './raw.js';
-import { attrsOf, DROP, RENAME, TAGS, TEXT } from './tags.js';
+import { attrsOf, DROP, PROPERTIES, RENAME, TAGS, TEXT } from './tags.js';
 import type { Attrs, Body, Element, Node, ParseOptions, Property, Style, Tag } from './sinter.types.js';
 
 /**
@@ -21,6 +21,16 @@ import type { Attrs, Body, Element, Node, ParseOptions, Property, Style, Tag } f
  */
 export function parse(html: string | null | undefined, options?: ParseOptions): Body {
   return last(typeof html === 'string' ? html : '', optionsOf(options));
+}
+
+/**
+ * The tree of `html` under `options`, parsed now and kept nowhere: for <mail-warm>, whose sample emails are parsed
+ * for the parsing's sake. Through parse() they would stay in its cache, two dozen trees held for nothing in the
+ * room it has for real emails.
+ */
+export function parseOnce(html: string, options?: ParseOptions): Body {
+  const o = optionsOf(options);
+  return frozen(build(html, { images: o.images, proxy: o.proxy, cidTemplate: o.cidTemplate, cidMap: pairs(o.cidMap), media: o.media, dataImages: o.dataImages, legacyDisplay: o.legacyDisplay }));
 }
 
 /**
@@ -62,23 +72,25 @@ const parseTree = (() => {
   };
 })();
 
-/** `body` frozen at every depth */
+const F = Object.freeze;
+
+/**
+ * `body` frozen at every depth: its nodes, their attributes, styles and child lists are frozen as they are made
+ * (element, nodesOf, projected), while they are still in the cache, rather than walked again; this freezes the rest.
+ */
 function frozen(body: Body): Body {
-  const F = Object.freeze;
   F(body.style); F(body.images.origins); F(body.images);
   if (body.schemes) F(body.schemes);
-  const stack: Node[][] = [body.children];
-  while (stack.length) {
-    const list = stack.pop()!;
-    for (let i = 0; i < list.length; i++) {
-      const n = list[i];
-      if (n.type === 'element') { F(n.attrs); F(n.style); stack.push(n.children); }
-      F(n);
-    }
-    F(list);
-  }
+  F(body.children);
   return F(body);
 }
+
+/** a void element's children: a list of its own, as every element has */
+const NO_CHILDREN = (): Node[] => {
+  const none: Node[] = [];
+  F(none);
+  return none;
+};
 
 type Images = 'block' | 'allow' | 'proxy';
 interface Options {
@@ -204,6 +216,8 @@ interface Context {
   quoted: boolean;
   /** Outlook's markers of a quote already started, and the elements around them: none starts another */
   started: Set<RawElement>;
+  /** some element of the body is one of Outlook's markers (scan): otherwise no list is searched for one */
+  outlook: boolean;
 }
 
 function build(html: string, o: Options): Body {
@@ -211,8 +225,8 @@ function build(html: string, o: Options): Body {
   if (o.legacyDisplay) legacyDisplay(root);
   const { styles, colorScheme, dark } = resolve(root, { media: o.media });
   const body = root.children.find((n): n is RawElement => n.type === 'element' && n.tag === 'body');
-  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, projected: new Map(), quoted: false, started: new Set() };
-  if (body) collectTargets(body, cx.targets);
+  const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, projected: new Map(), quoted: false, started: new Set(), outlook: false };
+  if (body) scan(body, cx);
   const children = body ? nodes(body, 'body', cx) : [];
   // the body's style is the root's: its text properties and its background, the <html> element's under it
   const style: Style = {};
@@ -273,26 +287,39 @@ function colored(body: Body): boolean {
 const ROOT_PROPS: readonly Property[] = [...TEXT, 'background-color'];
 
 /**
- * The fragments in-email links point at that the email has (an id, or an old-style `<a name>`): such a
- * link keeps its href, and its target its id. Every other id is left out, and every other fragment link
- * loses its href.
+ * One pass over the body for what the rest needs to know of it first. The fragments in-email links point at
+ * that the email has (an id, or an old-style `<a name>`): such a link keeps its href, and its target its id.
+ * Every other id is left out, and every other fragment link loses its href. And whether any element is one
+ * of Outlook's markers (isMarker), which most email has none of.
  */
-function collectTargets(body: RawElement, out: Set<string>): void {
-  const linked = new Set<string>(), named = new Set<string>();
+function scan(body: RawElement, cx: Context): void {
+  let linked: Set<string> | null = null;
+  const named: string[] = [];
   const stack: RawElement[] = [body];
   while (stack.length) {
     const el = stack.pop()!;
-    const id = attr(el, 'id');
-    if (id) named.add(id);
-    if (el.tag === 'a') {
-      const name = attr(el, 'name');
-      if (name) named.add(name);
-      const href = attr(el, 'href')?.trim();
-      if (href?.startsWith('#') && href.length > 1) linked.add(fragment(href));
+    // the attributes read at once, the first of each name (as attr() reads them)
+    let id: string | null = null, name: string | null = null, href: string | null = null, style: string | null = null;
+    const a = el.attrs;
+    for (let i = 0; i < a.length; i++) {
+      switch (a[i][0]) {
+        case 'id': id ??= a[i][1]; break;
+        case 'name': name ??= a[i][1]; break;
+        case 'href': href ??= a[i][1]; break;
+        case 'style': style ??= a[i][1]; break;
+      }
     }
+    if (id) named.push(id);
+    if (el.tag === 'a') {
+      if (name) named.push(name);
+      const h = href?.trim();
+      if (h?.startsWith('#') && h.length > 1) (linked ??= new Set()).add(fragment(h));
+    }
+    if (!cx.outlook && isMarker(el.tag, id, style)) cx.outlook = true;
     for (const c of el.children) if (c.type === 'element') stack.push(c);
   }
-  for (const f of linked) if (named.has(f)) out.add(f);
+  if (!linked) return;
+  for (const n of named) if (linked.has(n)) cx.targets.add(n);
 }
 
 function fragment(href: string): string {
@@ -329,7 +356,13 @@ function nodes(el: RawElement, tag: string, cx: Context): Node[] {
  */
 function nodesOf(list: readonly RawNode[], tag: string, cx: Context, from: number): Node[] {
   const allowed = TABLE_CHILDREN[tag];
-  const marker = allowed ? -1 : list.findIndex((c, k) => k >= from && c.type === 'element' && !!startsRest(c, cx, 0));
+  let marker = -1;
+  if (!allowed && cx.outlook) {
+    for (let k = from; k < list.length; k++) {
+      const c = list[k]!;
+      if (c.type === 'element' && startsRest(c, cx, 0)) { marker = k; break; }
+    }
+  }
   if (marker >= 0) {
     // its header: the marker and those right after it (appendonsend, the rule, divRplyFwdMsg), each with what wraps it
     for (let k = marker; k < list.length; k++) {
@@ -350,7 +383,10 @@ function nodesOf(list: readonly RawNode[], tag: string, cx: Context, from: numbe
     cx.quoted = true;
     // in the quote, a later marker (history it quotes in turn) starts a quote in it
     const children = nodesOf(list.slice(start), tag, cx, 0);
-    return [...nodesOf(list.slice(0, start), tag, cx, start), { type: 'element', tag: 'div', attrs: {}, style: {}, part: 'quote', children }];
+    const quote: Element = { type: 'element', tag: 'div', attrs: F({}), style: F({}), part: 'quote', children };
+    const out = [...nodesOf(list.slice(0, start), tag, cx, start), F(quote)];
+    F(out);
+    return out;
   }
   const out: Node[] = [];
   for (const c of list) {
@@ -368,19 +404,31 @@ function nodesOf(list: readonly RawNode[], tag: string, cx: Context, from: numbe
     if (!allowed && TAGS[n.tag].inTable) continue;
     out.push(n);
   }
+  // the elements are frozen by element(); text nodes once merged
+  for (let i = 0; i < out.length; i++) if (out[i]!.type === 'text') F(out[i]);
+  F(out);
   return out;
 }
 
 function element(el: RawElement, cx: Context): Element | null {
-  if (DROP.has(el.tag)) return null;
-  const tag: Tag = el.tag in TAGS ? (el.tag as Tag) : RENAME[el.tag] ?? 'span';
+  const known = TAG_OF.get(el.tag);
+  if (known === null) return null;
+  // any other is a span (by the map, never `in TAGS`: an email may name what every object has, `<constructor>`)
+  const tag: Tag = known ?? 'span';
   const info = TAGS[tag];
   const attrs: Attrs = {};
-  for (const name of ATTRS[tag]) {
-    const raw = attr(el, name);
-    if (raw === null) continue;
-    const v = attribute(tag, name, raw, cx);
-    if (v !== null) attrs[name] = v;
+  // most elements have no attribute the tag keeps (a cell's style, class, align and width are the cascade's):
+  // the kept ones are read in their order only when one is there
+  const allowed = ALLOWED.get(tag);
+  let some = !allowed;
+  for (let i = 0; !some && i < el.attrs.length; i++) some = allowed!.has(el.attrs[i][0]);
+  if (some) {
+    for (const name of ATTRS[tag]) {
+      const raw = attr(el, name);
+      if (raw === null) continue;
+      const v = attribute(tag, name, raw, cx);
+      if (v !== null) attrs[name] = v;
+    }
   }
   // an old-style anchor, <a name="top">, is a target as an id is
   if (tag === 'a' && attrs.id === undefined) {
@@ -396,13 +444,13 @@ function element(el: RawElement, cx: Context): Element | null {
     if (pixel(style)) return null;
     image(el, attrs, cx);
   }
-  const out: Element = { type: 'element', tag, attrs, style, children: info.void ? [] : nodes(el, tag, cx) };
+  const out: Element = { type: 'element', tag, attrs: F(attrs), style, children: info.void ? NO_CHILDREN() : nodes(el, tag, cx) };
   const part = partOf(el, tag);
   if (part) {
     out.part = part;
     if (part === 'quote') cx.quoted = true;
   }
-  return out;
+  return F(out);
 }
 
 // ── Quoted history and signatures ─────────────────────────────────────────────────────────────────────
@@ -411,10 +459,12 @@ function element(el: RawElement, cx: Context): Element | null {
 
 const QUOTE_CLASSES = ['gmail_quote', 'yahoo_quoted', 'protonmail_quote', 'moz-cite-prefix'];
 const SIGNATURE_CLASSES = ['gmail_signature', 'moz-signature'];
+const NO_CLASSES: readonly string[] = [];
 
 function partOf(el: RawElement, tag: Tag): Element['part'] | undefined {
   if (tag !== 'div' && tag !== 'blockquote') return undefined;
-  const classes = (attr(el, 'class') ?? '').split(/\s+/);
+  const cls = attr(el, 'class');
+  const classes = cls === null ? NO_CLASSES : cls.split(/\s+/);
   const id = attr(el, 'id');
   // Gmail, Yahoo, Proton, Thunderbird's "On … wrote:", new Outlook; Apple Mail's and Thunderbird's quote
   if (QUOTE_CLASSES.some((c) => classes.includes(c)) || id === 'mail-editor-reference-message-container') return 'quote';
@@ -435,35 +485,72 @@ const OUTLOOK_HEADER = /^\s*border:\s*none;\s*border-top:\s*solid\s+#(?:e1e1e1|b
  */
 function startsRest(el: RawElement, cx: Context, depth: number): RawElement[] | null {
   if (cx.started.has(el)) return null;
-  const id = attr(el, 'id');
-  if (id === 'appendonsend' || id === 'divRplyFwdMsg' || (el.tag === 'div' && OUTLOOK_HEADER.test(attr(el, 'style') ?? ''))) return [el];
+  if (isMarker(el.tag, attr(el, 'id'), el.tag === 'div' ? attr(el, 'style') : null)) return [el];
   if (depth >= 3) return null;
-  const content = el.children.filter((c) => c.type === 'element' || c.value.trim());
-  const inner = content.length === 1 && content[0]!.type === 'element' ? startsRest(content[0] as RawElement, cx, depth + 1) : null;
+  // its only content: one element, and no other element or text but whitespace
+  let only: RawNode | null = null;
+  for (const c of el.children) {
+    if (c.type === 'text' && !c.value.trim()) continue;
+    if (only) return null;
+    only = c;
+  }
+  const inner = only?.type === 'element' ? startsRest(only, cx, depth + 1) : null;
   return inner && [el, ...inner];
 }
 
+/** whether an element with this tag, id and style attribute is one of Outlook's markers */
+function isMarker(tag: string, id: string | null, style: string | null): boolean {
+  return id === 'appendonsend' || id === 'divRplyFwdMsg' || (tag === 'div' && style !== null && OUTLOOK_START.test(style) && OUTLOOK_HEADER.test(style));
+}
+
+// how OUTLOOK_HEADER starts, without the `i` flag: a case-insensitive pattern costs a tenth of a millisecond to
+// compile, on the first email opened, and most styles are not this one
+const OUTLOOK_START = /^\s*[bB][oO][rR][dD][eE][rR]:/;
+
+/**
+ * What becomes of each tag sinter/tags.ts names, in one lookup: null when it is dropped, else the tree's tag (itself, or
+ * what it is renamed to); dropping first, then keeping, then renaming, as element() reads them. Any other is a span.
+ */
+const TAG_OF = new Map<string, Tag | null>([
+  ...Object.entries(RENAME),
+  ...Object.keys(TAGS).map((t) => [t, t as Tag] as const),
+  ...[...DROP].map((t) => [t, null] as const),
+]);
+
 /** each tag's attributes, GLOBAL included (attrsOf), listed once */
 const ATTRS = Object.fromEntries(Object.keys(TAGS).map((t) => [t, attrsOf(t as Tag)])) as Record<Tag, readonly (keyof Attrs)[]>;
+const ALLOWED = new Map<string, ReadonlySet<string>>(Object.entries(ATTRS).map(([t, names]) => [t, new Set(names)]));
 
 /**
  * The resolved style with only the properties `tag` binds. The cascade shares one resolved style among the
  * elements that have the same, so this shares one result per resolved style and tag, as one object of the tree.
  */
 function projected(resolved: Style | undefined, tag: Tag, cx: Context): Style {
-  if (!resolved) return {};
+  if (!resolved) return F({});
   let byTag = cx.projected.get(resolved);
   if (!byTag) cx.projected.set(resolved, (byTag = new Map()));
   let style = byTag.get(tag);
   if (!style) {
     style = {};
-    for (const p of TAGS[tag].props) if (resolved[p] !== undefined) style[p] = resolved[p];
-    byTag.set(tag, style);
+    const binds = BINDS.get(tag);
+    // a resolved style has a few of the properties, in PROPERTIES order (sinter/css, finish): when the tag's
+    // are in that order too, its own are gone through, not every one the tag binds
+    if (binds) { for (const p in resolved) if (binds.has(p as Property)) style[p as Property] = resolved[p as Property]; }
+    else for (const p of TAGS[tag].props) if (resolved[p] !== undefined) style[p] = resolved[p];
+    byTag.set(tag, F(style));
   }
   return style;
 }
 
+/** the properties each tag binds whose list is in PROPERTIES order (most tags': FLOW and the groups after it) */
+const BINDS = new Map<string, ReadonlySet<Property>>();
+for (const [tag, info] of Object.entries(TAGS)) {
+  const at = info.props.map((p) => PROPERTIES.indexOf(p));
+  if (at.every((n, i) => n >= 0 && (i === 0 || n > at[i - 1]!))) BINDS.set(tag, new Set(info.props));
+}
+
 const INTEGER = /^\s*\d{1,9}\s*$/;
+const LENGTH = /^\s*\d{1,5}\s*%?\s*$/;
 const KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   dir: ['ltr', 'rtl', 'auto'],
   scope: ['row', 'col', 'rowgroup', 'colgroup'],
@@ -495,7 +582,7 @@ function attribute(tag: Tag, name: keyof Attrs, value: string, cx: Context): str
     }
     case 'width':
     case 'height':
-      return /^\s*\d{1,5}\s*%?\s*$/.test(value) ? value.replace(/\s/g, '') : null;
+      return LENGTH.test(value) ? value.replace(/\s/g, '') : null;
     case 'colspan':
       return INTEGER.test(value) ? String(Math.min(Math.max(+value, 1), 1000)) : null;
     case 'rowspan':
@@ -534,9 +621,11 @@ function attribute(tag: Tag, name: keyof Attrs, value: string, cx: Context): str
  * tracking pixel or a spacer that takes no room. It is left out, so it never loads and its origin is not listed.
  */
 function pixel(style: Style): boolean {
-  const small = (v: string | undefined) => v !== undefined && /^(?:0|\d*\.?\d+px)$/.test(v) && parseFloat(v) <= 1;
   return small(style.width) && small(style.height);
 }
+
+const small = (v: string | undefined) => v !== undefined && PX.test(v) && parseFloat(v) <= 1;
+const PX = /^(?:0|\d*\.?\d+px)$/;
 
 /** an image's `src` under the options, and its origin counted */
 function image(el: RawElement, attrs: Attrs, cx: Context): void {

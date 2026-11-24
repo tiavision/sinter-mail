@@ -127,6 +127,11 @@ An email from an API renders through a script builder that is about 7 times fast
 writes HTML; a use with slot fills, or `templates: true`, renders through templates. The build ships only the
 path a page uses. See [how `<mail-body>` renders](docs/mail.md#how-mail-body-renders).
 
+**The first email of a page**, which the browser parses three to four times as slowly as a later one, until it
+has compiled the parser: `<mail-warm></mail-warm>` on the page runs the parser on sample emails while the page is
+idle. A 185 kB newsletter is then painted 32 ms after its last byte instead of 68, where DOMPurify and a sandboxed
+iframe take 106 ms ([the measurements](docs/mail.md#the-first-email-mail-warm)).
+
 Links and images can be restyled by filling the `link` and `image` slots of `<mail-body>`. `<mail-width>` says
 when the reader is narrow enough for the email's phone layout, so a newsletter is not a 600px page scrolled
 sideways on a phone.

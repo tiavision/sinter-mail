@@ -11,10 +11,12 @@ import type { Body, Element as El, Node as TreeNode, Tag } from './sinter.types.
 const has = Object.prototype.hasOwnProperty;
 const shown = (n: TreeNode): n is El => n.type === 'element' && n.style.display !== 'none';
 
-/** per tag: its attributes, and each of its properties' place in its component's order */
-const ATTRS = {} as Record<Tag, readonly string[]>, ORDER = {} as Record<Tag, Record<string, number>>;
+/** per tag: its attributes (as a lookup with no prototype: a key of the tree is data), and each of its properties' place in its component's order */
+const ATTRS = {} as Record<Tag, Record<string, true>>, ORDER = {} as Record<Tag, Record<string, number>>;
 for (const t of Object.keys(TAGS) as Tag[]) {
-  ATTRS[t] = attrsOf(t);
+  const a: Record<string, true> = Object.create(null);
+  for (const k of attrsOf(t)) a[k] = true;
+  ATTRS[t] = a;
   const o: Record<string, number> = Object.create(null);
   TAGS[t].props.forEach((p, i) => { o[p] = i + 1; });
   ORDER[t] = o;
@@ -63,8 +65,10 @@ function fresh(n: El, tag: Tag): HTMLElement {
 /** the element of `n` as `tag` (a key of TAGS): its attributes, its style, its parts */
 function open(n: El, tag: Tag): HTMLElement {
   const e = styled(n, tag);
-  const a = n.attrs as Record<string, unknown>;
-  for (const k of ATTRS[tag]) {
+  // the attributes it has that the tag may have (an element has two or three of its tag's dozen)
+  const a = n.attrs as Record<string, unknown>, allowed = ATTRS[tag];
+  for (const k in a) {
+    if (allowed[k] !== true || !has.call(a, k)) continue;
     let v = a[k];
     if (v == null || v === false || (k === 'id' && !v)) continue;
     v = v === true ? '' : k === 'id' ? 'mail-' + v : '' + v;
@@ -79,7 +83,10 @@ const put = (st: CSSStyleDeclaration, p: string, v: unknown) => {
 };
 /** the children of `n` into `e`: text runs, every shown element by its tag */
 function flow(n: { children: TreeNode[] }, e: Node): void {
-  for (const c of n.children) {
+  const list = n.children;
+  // text alone, as most cells, paragraphs and links hold: one call for its node
+  if (list.length === 1 && list[0]!.type === 'text') { e.textContent = list[0]!.value; return; }
+  for (const c of list) {
     if (c.type === 'text') e.appendChild(document.createTextNode(c.value));
     else if (c.style.display !== 'none') node(c, e);
   }

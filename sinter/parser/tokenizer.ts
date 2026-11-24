@@ -7,7 +7,7 @@
 // The standard's states are a character-at-a-time machine; most of them only decide where a token ends, so
 // here they are scans: a comment ends at the first `-->` or `--!>`, a doctype at the first `>`, raw text at
 // its end tag. Every scan moves forward, so the time is linear in the input.
-import { ENTITIES, LEGACY } from './entities.js';
+import { entity, LEGACY } from './entities.js';
 
 export type Attrs = [name: string, value: string][];
 
@@ -33,6 +33,7 @@ const TAG_END = 1, NAME_END = 2, VALUE_END = 3;
 const ends = (c: number, kind: number): boolean =>
   isWs(c) || c === 62 || (kind !== VALUE_END && c === 47) || (kind === NAME_END && c === 61);
 const COMMENT_END = /--!?>/g;
+const NONE: Attrs = [];
 const REFERENCE = /&(?:#[xX]([\dA-Fa-f]+);?|#(\d+);?|([A-Za-z\d]{1,32})(;?))/g;
 // numeric references to 0x80\u20130x9F mean what windows-1252 has there; a code with no character there stays itself
 const C1 = '\u20AC\x81\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\x8D\u017D\x8F\x90\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\x9D\u017E\u0178';
@@ -41,6 +42,8 @@ const C1 = '\u20AC\x81\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u20
 const lower = (s: string): string => (/[A-Z]/.test(s) ? s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32)) : s);
 const nul = (s: string): string => (s.includes('\0') ? s.replace(/\0/g, '\uFFFD') : s);
 const isAlpha = (c: number): boolean => ((c | 32) >= 97 && (c | 32) <= 122);
+/** an uppercase ASCII letter or NUL: what a name is rewritten for */
+const isOdd = (c: number): boolean => (c >= 65 && c <= 90) || c === 0;
 
 /** `s` with its character references decoded; in an attribute value, a legacy one before `=` or a letter stays */
 function decode(s: string, inAttr: boolean): string {
@@ -51,14 +54,17 @@ function decode(s: string, inAttr: boolean): string {
       const n = digits.length > 8 ? 0x110000 : parseInt(digits || '0', hex === undefined ? 10 : 16);
       return n === 0 || n > 0x10FFFF || (n >= 0xD800 && n <= 0xDFFF) ? '\uFFFD' : n >= 0x80 && n <= 0x9F ? C1[n - 0x80] : String.fromCodePoint(n);
     }
-    if (semi && ENTITIES.has(name)) return ENTITIES.get(name)!;
+    if (semi) {
+      const v = entity(name);
+      if (v !== undefined) return v;
+    }
     // the longest name that is a reference without `;` (at most six letters long)
     for (let k = Math.min(name.length, 6); k > 1; k--) {
       const prefix = name.slice(0, k);
       if (!LEGACY.has(prefix)) continue;
       const next = k < name.length ? name[k] : semi || s[at + m.length];
       if (inAttr && next !== undefined && /[=\dA-Za-z]/.test(next)) return m;
-      return ENTITIES.get(prefix)! + m.slice(k + 1);
+      return entity(prefix)! + m.slice(k + 1);
     }
     return m;
   });
@@ -74,14 +80,35 @@ export function tokenize(input: string, sink: Sink): void {
     if (text) sink.text(text);
     text = '';
   };
+  // the scans count in a local and set `pos` once: a variable the closures share lives in memory, not a register
   const skipWs = (): void => {
-    while (pos < n && isWs(s.charCodeAt(pos))) pos++;
+    let i = pos;
+    while (i < n && isWs(s.charCodeAt(i))) i++;
+    pos = i;
   };
   /** the characters from `pos` up to one that ends `kind` (or the end of the input) */
   const scan = (kind: number): string => {
     const from = pos;
-    while (pos < n && !ends(s.charCodeAt(pos), kind)) pos++;
-    return s.slice(from, pos);
+    let i = from;
+    while (i < n && !ends(s.charCodeAt(i), kind)) i++;
+    pos = i;
+    return s.slice(from, i);
+  };
+  /**
+   * A name from `from`, up to a character that ends `kind` (`pos` is past what is already read of it, an
+   * attribute name's first character, which may be one): lowercase, NUL as U+FFFD. Most names have neither
+   * an uppercase letter nor NUL and are a slice of the input.
+   */
+  const name = (from: number, kind: number): string => {
+    let i = pos, odd = from < i && isOdd(s.charCodeAt(from));
+    for (; i < n; i++) {
+      const c = s.charCodeAt(i);
+      if (ends(c, kind)) break;
+      if (isOdd(c)) odd = true;
+    }
+    pos = i;
+    const t = s.slice(from, i);
+    return odd ? lower(nul(t)) : t;
   };
   /** `</name` followed by whitespace, `/` or `>` at `i`: the end tag raw text ends at */
   const endsAt = (i: number, name: string): boolean =>
@@ -89,46 +116,53 @@ export function tokenize(input: string, sink: Sink): void {
 
   /** reads a tag from `pos` (its name's first letter); returns false at the end of the input, which drops it */
   const tag = (isEnd: boolean): boolean => {
-    const name = lower(nul(scan(TAG_END)));
-    const attrs: Attrs = [];
+    const tagName = name(pos, TAG_END);
+    // an end tag's attributes are read past and dropped
+    const attrs: Attrs = isEnd ? NONE : [];
     let names: Set<string> | null = null, selfClosing = false;
     for (;;) {
       skipWs();
       if (pos >= n) return false;
-      let c = s[pos];
-      if (c === '>') break;
-      if (c === '/') {
+      let c = s.charCodeAt(pos);
+      if (c === 62) break; // `>`
+      if (c === 47) { // `/`
         pos++;
-        if (s[pos] === '>') { selfClosing = true; break; }
+        if (s.charCodeAt(pos) === 62) { selfClosing = true; break; }
         continue;
       }
-      pos++; // the name's first character, which may be `=`
-      const an = lower(nul(c + scan(NAME_END)));
+      const an = name(pos++, NAME_END); // its first character may be `=`
       skipWs();
       let value = '';
-      if (s[pos] === '=') {
+      if (s.charCodeAt(pos) === 61) { // `=`
         pos++;
         skipWs();
-        c = s[pos];
-        if (c === '"' || c === "'") {
-          const close = s.indexOf(c, pos + 1);
+        c = s.charCodeAt(pos);
+        if (c === 34 || c === 39) { // a quote
+          const close = s.indexOf(c === 34 ? '"' : "'", pos + 1);
           if (close < 0) return false;
           value = s.slice(pos + 1, close);
           pos = close + 1;
         } else value = scan(VALUE_END);
-        value = nul(decode(value, true));
+        if (!isEnd) value = nul(decode(value, true));
       }
+      if (isEnd) continue;
       // the first of duplicate names is kept; a set only for tags with many attributes
-      if (attrs.length > 16 && !names) names = new Set(attrs.map((a) => a[0]));
-      if (names ? names.has(an) : attrs.some((a) => a[0] === an)) continue;
-      names?.add(an);
+      if (names) {
+        if (names.has(an)) continue;
+        names.add(an);
+      } else {
+        let i = attrs.length;
+        while (--i >= 0 && attrs[i][0] !== an);
+        if (i >= 0) continue;
+        if (attrs.length === 16) names = new Set(attrs.map((a) => a[0])).add(an);
+      }
       attrs.push([an, value]);
     }
     pos++;
-    if (isEnd) sink.end(name);
+    if (isEnd) sink.end(tagName);
     else {
-      state = sink.start(name, attrs, selfClosing);
-      last = name;
+      state = sink.start(tagName, attrs, selfClosing);
+      last = tagName;
     }
     return true;
   };
