@@ -320,8 +320,10 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
   Informational problems (a charset fallback, canonicalized line ends) never stop a step.
 - **Boundaries**: a delimiter line is exactly `--` and the boundary, then optional whitespace (RFC 2046's
   transport padding, legal and not a problem), then the line end (or `--` for the close); `--boundaryX` is not
-  `--boundary`. A boundary that is empty or longer than 70 characters, or a child's boundary that starts with
-  an ancestor's, is `boundary-invalid`.
+  `--boundary`. A boundary that is empty or longer than 70 characters, a child's boundary that starts with an
+  ancestor's, or an ancestor's that is the child's followed by `--` (the child's close line is the ancestor's
+  delimiter to an outer-first parser), is `boundary-invalid`; the check stays within one source (a decrypted
+  payload's boundaries are not compared with the outer message's).
 - **Transfer encodings**:
   - base64 skips characters outside its alphabet, decodes per quantum (padding in the middle, as in
     concatenated chunks, ends that quantum and decoding continues), and drops a final partial quantum; each a
