@@ -1,8 +1,8 @@
 # Proposal: MIME and OpenPGP structure in sinter-mail
 
 Status: proposed. Follows [Later](sinter-mail.md#later) of the first proposal, and replaces its plan to build
-on postal-mime ([Decisions](#decisions), 1). Caley, the app this is first for, will move to it; what it
-does today is in [The case](#the-case).
+on postal-mime ([Decisions](#decisions), 1). Why the structure belongs in the library is in
+[The case](#the-case).
 
 ## Goals
 
@@ -20,17 +20,18 @@ does today is in [The case](#the-case).
 
 ### Not in this proposal
 
-S/MIME (Caley has none; the interface leaves room for it, [Decisions](#decisions), 8), parsing iCalendar
-(a `text/calendar` part is handed over, not read), composing (Caley builds its own PGP/MIME; a writer could
+S/MIME (the interface leaves room for it, [Decisions](#decisions), 8), parsing iCalendar
+(a `text/calendar` part is handed over, not read), composing (apps build their own PGP/MIME; a writer could
 follow), Autocrypt (headers are exposed; key handling is the app's).
 
 ## The case
 
-Caley shows encrypted mail today. Its backend (Rust, `mail-parser`) parses ordinary mail and caches the bodies;
-the browser decrypts with openpgp.js and parses raw and decrypted messages with its own 300-line MIME reader
-(`frontend/src/lib/pgp/mime.ts`). Reading that code for this proposal found:
+A webmail app that shows encrypted mail without this library typically has a server that parses ordinary
+mail and caches the bodies, and a browser that decrypts with openpgp.js and parses raw and decrypted messages
+with a small MIME reader of its own. Such readers are short and take shortcuts; the ones below are each easy
+to write and each has a consequence:
 
-| | What Caley does | What follows |
+| | The shortcut | What follows |
 | --- | --- | --- |
 | Encrypted | decrypts the first `-----BEGIN PGP MESSAGE-----` anywhere in the message | an old ciphertext to the reader, wrapped in another sender's mail, is decrypted and shown as theirs, marked encrypted; a reply quotes the plaintext back to them |
 | Signed | verifies an inline signed block found anywhere, then badges the whole message | a genuine signed snippet pasted into other text makes that text look verified |
@@ -39,10 +40,9 @@ the browser decrypts with openpgp.js and parses raw and decrypted messages with 
 | Charsets | the whole message decoded as UTF-8 before parsing | 8-bit Latin-1 parts are garbled |
 | Bodies | the first `text/html` and the first `text/plain` win | a later body part is lost |
 | Limits | none on nesting or part count; recursive | a deeply nested message overflows the stack |
-| Two parsers | `mail-parser` for cached bodies, `mime.ts` for raw and decrypted | the same message can split differently |
+| Two parsers | the server's parser for cached bodies, the browser's for raw and decrypted | the same message can split differently |
 
-These were found by reading, not by exploiting; the first two are the reason the structure belongs in the
-library rather than in each app.
+The first two are the reason the structure belongs in the library rather than in each app.
 
 ## Design
 
@@ -172,7 +172,7 @@ What becomes a step, and nothing else:
   `multipart/mixed` and appends a footer), because the verdict labels only that part's subtree. `signed` is
   the first part's exact bytes, from the start of its headers to the line break before the next delimiter
   (which belongs to the delimiter): not re-canonicalized, so a message mangled in transit fails as strict
-  clients fail it. Caley's `extractDetachedSignedMime` does this today, over a string; here it is over bytes.
+  clients fail it.
 - **Inline PGP** in a `text/plain` body: an armored message is a decrypt step only when it is the **whole**
   body (whitespace aside); a cleartext-signed block (`-----BEGIN PGP SIGNED MESSAGE-----`) is a
   `verify-cleartext` step wherever it is, and splits its body into text parts: the text before it, the
@@ -204,7 +204,7 @@ part is the root), as RFC 9788 (Header Protection for Cryptographically Protecte
   payload, is read as headers and is not a body.
 - **The outer subject** of an encrypted message is often `...` or `[...]`; `headers.subject` is the inner
   one once decrypted. An app writing a reply must choose which to use: the inner one in an unencrypted reply
-  sends it in the clear ([For Caley](#for-caley)).
+  sends it in the clear ([For apps](#for-apps)).
 
 ### 6. Protection
 
@@ -257,31 +257,32 @@ charset tables: `TextDecoder` has them). Pure: an `.eml` in a `file:` resource f
 
 ## Plan
 
-1. The reader: headers, addresses, dates, encodings, structure, limits; a corpus of real messages (Caley's
-   cache can supply them, with consent, anonymized) and hostile ones (nesting, boundaries, encodings).
+1. The reader: headers, addresses, dates, encodings, structure, limits; a corpus of real messages (with
+   consent, anonymized) and hostile ones (nesting, boundaries, encodings).
 2. Body choice, attachments, inline, calendar, nested messages; the `mail.parse` and `mail.plain` hand-off.
 3. Crypto steps and `mail.decrypted` / `mail.verified`, tested with openpgp.js in the tests only (a dev
-   dependency): messages from Thunderbird, Mailvelope, Proton, K-9/FairEmail, Delta Chat, and Caley's own
-   compose.
+   dependency): messages from Thunderbird, Mailvelope, Proton, K-9/FairEmail, Delta Chat, and openpgp.js-based
+   web composers.
 4. Protected headers, legacy display (`mail.parse`'s option), the summary.
 5. The guide (a section in `docs/mail.md`, a recipe: a reader with decrypt, badges and attachments) and
    `llms.txt`.
-6. Caley moves over ([For Caley](#for-caley)).
+6. A first app moves over ([For apps](#for-apps)).
 
-## For Caley
+## For apps
 
-- **The reader renders from `mail.mime`** on the raw message, which it already fetches for signed and
-  encrypted mail; its `mime.ts` and the parsing in `keyring.ts` go; `decryptMessage` and
-  `verifySignedMessage` become the step handlers, returning a `Verdict` with the signer's addresses.
-- **The server's flags become hints.** `is_encrypted` / `is_signed` can keep choosing whether to fetch the raw
-  message; the badges come from `protection`. `mail-parser` stays for search and the list; a disagreement then
-  changes what is found, not what is shown as verified.
+What an app with its own MIME and PGP handling changes to move over:
+
+- **The reader renders from `mail.mime`** on the raw message; the app's own MIME parsing goes; its decrypt
+  and verify functions become the step handlers, returning a `Verdict` with the signer's addresses.
+- **A server's encrypted and signed flags become hints**: they can keep choosing whether to fetch the raw
+  message; the badges come from `protection`. A server-side parser can stay for search and the list; a
+  disagreement then changes what is found, not what is shown as verified.
 - **Badges follow the summary**: a message-level badge only for `'all'`, per-part marks otherwise, and a
   warning when `from` is `'differs'` or `'unknown'` on decrypted content.
 - **Replies**: decide whether a reply to an encrypted message uses the inner subject (only when the reply is
   encrypted too).
 - **The list**: encrypted subjects stay `...` until opened unless the browser keeps decrypted headers; that
-  is Caley's choice.
+  is the app's choice.
 
 ## Open questions
 
