@@ -161,7 +161,13 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
   if (within(r.cuts, ciphertext).length) {
     // the ciphertext was cut out of the input: no digest, so no `open` id; a root step is offered incomplete
     const id = `${e.id}#cut`;
-    if (root && canOffer(st)) {
+    if (root && !canOffer(st)) {
+      // past the step limit, as for a whole message
+      if (!st.budget.overrun) problem(r, e, 'limit', true, root);
+      scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, 'over-limit', ctx));
+      return;
+    }
+    if (root) {
       st.root.decrypts++;
       offerIncomplete(st, { id, state: 'pending', part: e.id, kind: 'decrypt', ciphertext, armored: false, incomplete: true });
     }
@@ -172,21 +178,19 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
   const id = `${e.id}#${digestOf(r, ciphertext, bytes)}`;
   st.known.add(id);
   if (!root && !st.open.has(id)) { scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, 'not-root', ctx)); return; }
-  if (r.cuts?.length) {
-    // a cut message: a cut body elsewhere may hide a delimiter that changes what this structure is in, so nothing is
-    // decrypted from the cut input; the step is incomplete (read the whole message)
-    const cut = `${e.id}#cut`;
-    if (canOffer(st)) {
-      if (root) st.root.decrypts++;
-      offerIncomplete(st, { id: cut, state: 'pending', part: e.id, kind: 'decrypt', ciphertext, armored: armored(bytes), incomplete: true });
-    }
-    scope.parts.push(encryptedPart(shownId(e), e.type, ref, cut, 'incomplete', ctx));
-    return;
-  }
   if (!canOffer(st)) {
     // opening a part past the step limit: the app's choice, not the structure, stops nothing around it
     if (!st.budget.overrun) problem(r, e, 'limit', true, root);
     scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, 'over-limit', ctx));
+    return;
+  }
+  if (r.cuts?.length) {
+    // a cut message: a cut body elsewhere may hide a delimiter that changes what this structure is in, so nothing is
+    // decrypted from the cut input; the step is incomplete (read the whole message)
+    const cut = `${e.id}#cut`;
+    if (root) st.root.decrypts++;
+    offerIncomplete(st, { id: cut, state: 'pending', part: e.id, kind: 'decrypt', ciphertext, armored: armored(bytes), incomplete: true });
+    scope.parts.push(encryptedPart(shownId(e), e.type, ref, cut, 'incomplete', ctx));
     return;
   }
   if (root) st.root.decrypts++;
@@ -339,16 +343,16 @@ function inlineEncrypted(r: Reader, e: Entity, pid: string, id: string, ref: Ref
   const st = stateOf(r);
   st.known.add(id);
   if (!root && !st.open.has(id)) { scope.parts.push(encryptedPart(pid, e.type, ref, id, 'not-root', ctx)); return; }
-  if (r.cuts?.length) {
-    // a cut message: nothing is decrypted from it (showEncrypted); opened, the armor is an incomplete step
-    const cut = `${pid}#cut`;
-    if (canOffer(st)) offerIncomplete(st, { id: cut, state: 'pending', part: pid, kind: 'decrypt', ciphertext: ref, armored: true, incomplete: true });
-    scope.parts.push(encryptedPart(pid, e.type, ref, cut, 'incomplete', ctx));
-    return;
-  }
   if (!canOffer(st)) {
     if (!st.budget.overrun) problem(r, e, 'limit', true, root);
     scope.parts.push(encryptedPart(pid, e.type, ref, id, 'over-limit', ctx));
+    return;
+  }
+  if (r.cuts?.length) {
+    // a cut message: nothing is decrypted from it (showEncrypted); opened, the armor is an incomplete step
+    const cut = `${pid}#cut`;
+    offerIncomplete(st, { id: cut, state: 'pending', part: pid, kind: 'decrypt', ciphertext: ref, armored: true, incomplete: true });
+    scope.parts.push(encryptedPart(pid, e.type, ref, cut, 'incomplete', ctx));
     return;
   }
   if (root) st.root.decrypts++;

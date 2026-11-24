@@ -460,7 +460,9 @@ export async function partBytes(id: string, raw: Uint8Array, ref: Ref, results: 
 <article data-sn-let="{ msg: m ? mail.mime(m.raw, { ...results, holes: m.holes }) : null }">
 ```
 
-A hole is `{ start, end, size }`: its range in the whole message and its size decoded. The input is the whole
+A hole is `{ start, end, size }`: its range in the whole message and its size decoded. Holes are your server's
+data, and a malformed one (not an array of non-negative integers) throws a `TypeError`, as any invalid option does:
+check what the server sent, or catch the error and read the whole message. The input is the whole
 message without those ranges, so a hole is at `start` minus the lengths of the holes before it, where its body is
 now empty. `holes` is compared by value, so the object may be new at every read. The limits count the whole
 message: the bytes cut out count against the call's byte budget. Without `holes`, a cut input reads as a whole
@@ -488,7 +490,9 @@ cleartext and decrypt step, and to an encrypted part the reader opens, not only 
 A cut body elsewhere may hide a delimiter that puts the step in another structure in the whole message, or in
 none (the epilogue), so nothing is verified or decrypted on a cut input. Signed parts show `signed: 'pending'`
 meanwhile, and an encrypted part has reason `'incomplete'`. To verify or decrypt, read the whole message: its
-steps have the usual ids, and every part has the same id as before, so the reader's choices (`open`) carry over.
+steps have the usual ids, and every part has the same id as before. The reader's choices (`open`) carry over,
+except for an encrypted part whose own ciphertext was cut: it has no digest id in the cut message, so it is not a
+step there. Its part is `'incomplete'`, and the reader opens it on the whole message.
 A pending label can become no label at all on the whole message. That happens when a cut body turns out to be
 malformed under the signature. An armored ciphertext (`-----BEGIN PGP MESSAGE-----`) is never cut, because its
 lines start with `--`. Bodies inside an encrypted payload are local once it is decrypted.
@@ -496,6 +500,7 @@ lines start with `--`. Bodies inside an encrypted payload are local once it is d
 ```ts
 // what an app does with a cut message: read the whole one when the cut was refused or a step needs its bytes
 const needsWhole = msg.cut === 'invalid' || msg.steps.some((s) => s.incomplete);
+// and, when the reader asks to open an encrypted part with reason 'incomplete' (no step), read the whole one then
 ```
 
 **Until a cut body is fetched**, the reader cannot see its bytes, so it cannot rule out that they hide a

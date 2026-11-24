@@ -394,6 +394,22 @@ describe('second review: every step of a cut message is incomplete', () => {
     expect(m.reply).toEqual(first.reply);
   });
 
+  test('past the step limit, an opened part in a cut message is over-limit, as in the whole message', () => {
+    const enc1 = (i: number) => ['Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="e' + i + '"', '',
+      `--e${i}`, 'Content-Type: application/pgp-encrypted', '', 'Version: 1', `--e${i}`, 'Content-Type: application/octet-stream', '',
+      '-----BEGIN PGP MESSAGE-----', '', `hQ${i}`, '-----END PGP MESSAGE-----', `--e${i}--`];
+    const whole = enc(eml(...HEAD, ...multipart('multipart/mixed', 'b', ...Array.from({ length: 18 }, (_, i) => enc1(i)), pdf(200_000))));
+    const ids = mime(whole).parts.map((p) => (p as Part & { type: 'encrypted' }).step);
+    const w = mime(whole, { open: ids });
+    const c = cut(whole);
+    const m = mime(c.raw, { holes: c.holes, open: ids });
+    expect(m.steps).toHaveLength(16);
+    expect(m.steps.every((x) => x.incomplete)).toBe(true);
+    expect(m.parts.map((p) => (p as Part & { type: 'encrypted' }).reason).slice(16)).toEqual(['over-limit', 'over-limit']);
+    expect(w.parts.map((p) => (p as Part & { type: 'encrypted' }).reason).slice(16)).toEqual(['over-limit', 'over-limit']);
+    expect(m.problems.filter((p) => p.code === 'limit')).toEqual(w.problems.filter((p) => p.code === 'limit'));
+  });
+
   test('an invalid cut marks no Ref', () => {
     const whole = eml('From: a@a.test', 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary=o', '', '--o', 'Content-Type: application/pdf', '', 'AAAA-', '-o--', 'more', '--o--', '');
     const a = whole.indexOf('-\r\n-o--') + 1;
