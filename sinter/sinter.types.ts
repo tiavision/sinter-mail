@@ -134,6 +134,19 @@ export interface ParseOptions {
   media?: 'wide' | 'narrow';
   /** the largest `data:` image kept, in characters of its URL (default 65536; 0 keeps none) */
   dataImages?: number;
+  /**
+   * the HTML part has `hp-legacy-display="1"` (RFC 9788): the body's first child, when it is a `div` with class
+   * `header-protection-legacy-display` (the protected headers repeated for clients that cannot read them), is
+   * left out with its content. Default false: a class alone drops nothing.
+   */
+  legacyDisplay?: boolean;
+  /**
+   * the body was decrypted: remote images are blocked, whatever `images` says, unless `consent` is also given;
+   * `images.origins` is reported either way. `cid:` and `data:` images are unaffected. Default false.
+   */
+  encrypted?: boolean;
+  /** with `encrypted`: the reader asked to load this message's remote images (their click, never a standing setting) */
+  consent?: boolean;
 }
 
 export interface PlainOptions {

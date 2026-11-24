@@ -32,8 +32,9 @@ const last = (() => {
   let h: string | undefined, p: ReturnType<typeof optionsOf> | undefined, v: Body | undefined;
   return (html: string, o: ReturnType<typeof optionsOf>): Body => {
     if (v && html === h && p && o.images === p.images && o.proxy === p.proxy && o.cidTemplate === p.cidTemplate && o.media === p.media && o.dataImages === p.dataImages
+      && o.legacyDisplay === p.legacyDisplay
       && o.cidMap.length === p.cidMap.length && o.cidMap.every((x, i) => x === p!.cidMap[i])) return v;
-    const r = parseTree(html, o.images, o.proxy, o.cidTemplate, o.cidMap, o.media, o.dataImages);
+    const r = parseTree(html, o.images, o.proxy, o.cidTemplate, o.cidMap, o.media, o.dataImages, o.legacyDisplay);
     h = html; p = o; v = r;
     return r;
   };
@@ -48,13 +49,13 @@ const parseTree = (() => {
   const MAX = 4 * 1024 * 1024;
   const cache = new Map<string, Map<string, Body>>();
   let total = 0;
-  return (html: string, images: Images, proxy: string, cidTemplate: string, cidMap: string[], media: 'wide' | 'narrow', dataImages: number): Body => {
-    const key = `${images}|${media}|${dataImages}|${proxy.length}:${proxy}|${cidTemplate.length}:${cidTemplate}|${cidMap.map((s) => `${s.length}:${s}`).join('')}`;
+  return (html: string, images: Images, proxy: string, cidTemplate: string, cidMap: string[], media: 'wide' | 'narrow', dataImages: number, legacyDisplay: boolean): Body => {
+    const key = `${images}|${media}|${dataImages}|${legacyDisplay ? 1 : 0}|${proxy.length}:${proxy}|${cidTemplate.length}:${cidTemplate}|${cidMap.map((s) => `${s.length}:${s}`).join('')}`;
     let of = cache.get(html);
     if (of) { cache.delete(html); cache.set(html, of); } else { cache.set(html, (of = new Map())); total += html.length; }
     let v = of.get(key);
     if (!v) {
-      of.set(key, (v = frozen(build(html, { images, proxy, cidTemplate, cidMap: pairs(cidMap), media, dataImages }))));
+      of.set(key, (v = frozen(build(html, { images, proxy, cidTemplate, cidMap: pairs(cidMap), media, dataImages, legacyDisplay }))));
       for (const [k] of cache) { if (total <= MAX || k === html) break; cache.delete(k); total -= k.length; }
     }
     return v;
@@ -88,6 +89,8 @@ interface Options {
   cidMap: Map<string, string>;
   media: 'wide' | 'narrow';
   dataImages: number;
+  /** drop RFC 9788's legacy display element (legacyDisplay()) */
+  legacyDisplay: boolean;
 }
 
 // ── Options ───────────────────────────────────────────────────────────────────────────────────────────
@@ -125,7 +128,20 @@ function optionsOf(options: ParseOptions | undefined) {
   if (media !== 'wide' && media !== 'narrow') fail(`\`media\` is 'wide' or 'narrow', not ${JSON.stringify(media)}`);
   const dataImages = o.dataImages ?? 65536;
   if (typeof dataImages !== 'number' || !Number.isInteger(dataImages) || dataImages < 0) fail(`\`dataImages\` is a length in characters, not ${JSON.stringify(dataImages)}`);
-  return { images: images as Images, proxy, cidTemplate, cidMap, media: media as 'wide' | 'narrow', dataImages };
+  const legacyDisplay = o.legacyDisplay ?? false;
+  if (typeof legacyDisplay !== 'boolean') fail(`\`legacyDisplay\` is a boolean, not ${JSON.stringify(legacyDisplay)}`);
+  const encrypted = o.encrypted ?? false;
+  if (typeof encrypted !== 'boolean') fail(`\`encrypted\` is a boolean, not ${JSON.stringify(encrypted)}`);
+  const consent = o.consent ?? false;
+  if (typeof consent !== 'boolean') fail(`\`consent\` is a boolean, not ${JSON.stringify(consent)}`);
+  // A decrypted body makes no request on its own (EFAIL's channel, and a read receipt for private content) unless the
+  // reader consented for this message: `'allow'` and `'proxy'` are then `'block'`, silently (the call is the app's
+  // usual policy, written once for every message), with `proxy` still validated above so a bad template throws
+  // whatever the message. Folded into `images`, the tree is the one plain `'block'` gives, so the two share it, and
+  // `encrypted` and `consent` need no place of their own in last() or the cache key. Origins are counted either way.
+  const effective: Images = encrypted && !consent ? 'block' : (images as Images);
+  if (effective !== 'proxy') proxy = '';
+  return { images: effective, proxy, cidTemplate, cidMap, media: media as 'wide' | 'narrow', dataImages, legacyDisplay };
 }
 
 const pairs = (flat: string[]) => {
@@ -192,6 +208,7 @@ interface Context {
 
 function build(html: string, o: Options): Body {
   const root = parseHTML(html);
+  if (o.legacyDisplay) legacyDisplay(root);
   const { styles, colorScheme, dark } = resolve(root, { media: o.media });
   const body = root.children.find((n): n is RawElement => n.type === 'element' && n.tag === 'body');
   const cx: Context = { o, targets: new Set(), ids: new Set(), origins: new Set(), styles, projected: new Map(), quoted: false, started: new Set() };
@@ -213,6 +230,24 @@ function build(html: string, o: Options): Body {
   if (!schemes.includes('dark') && colored(out)) out.light = true;
  
   return out;
+}
+
+/**
+ * RFC 9788's legacy display element, which repeats the protected headers for clients that cannot read them: the
+ * body's first child (whitespace before it is no child), when it is a `div` with class `header-protection-legacy-display`,
+ * removed with its content. Only that one, and only with the option: a class alone drops nothing. Removed from the
+ * raw tree before the cascade, so the email's rules, its link targets and its quotes see the body without it, as an
+ * email written without it.
+ */
+function legacyDisplay(root: RawElement): void {
+  const body = root.children.find((n): n is RawElement => n.type === 'element' && n.tag === 'body');
+  if (!body) return;
+  const i = body.children.findIndex((c) => c.type === 'element' || c.value.trim() !== '');
+  const c = body.children[i];
+  if (c?.type === 'element' && c.tag === 'div' && (attr(c, 'class') ?? '').split(/[\t\n\f\r ]+/).includes('header-protection-legacy-display')) {
+    body.children.splice(i, 1);
+    c.parent = null;
+  }
 }
 
 /** whether the email sets a text or background colour anywhere it shows, its body included */

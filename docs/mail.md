@@ -75,6 +75,9 @@ sinter's, and the email is painted about 50 ms sooner than when the browser pars
 | `cid` | a map, or a template with `{cid}` once | `cid:` images (inline parts of the message): `{ 'logo@acme': 'data:image/png;base64,…' }` or `'/api/messages/42/parts?cid={cid}'`. An unresolved one is left out |
 | `media` | `'wide'` (default), `'narrow'` | the width the email's `@media` rules are evaluated at: 800 px, or 375 px for a narrow reading pane |
 | `dataImages` | a length, default 65536 | the largest `data:` image kept, in characters; 0 keeps none |
+| `legacyDisplay` | `true`, `false` (default) | the part has `hp-legacy-display="1"` (RFC 9788): the body's first child, when it is a `div` with class `header-protection-legacy-display`, is left out with its content. Without the option a class drops nothing |
+| `encrypted` | `true`, `false` (default) | the body was decrypted: remote images are blocked whatever `images` says (no request a decrypted body makes on its own), `images.origins` still listed. `cid:` and `data:` images are unaffected |
+| `consent` | `true`, `false` (default) | with `encrypted`: the reader clicked "show images" for this message; `images` applies again. Never a standing per-sender setting |
 
 An invalid option throws at each call (`mail.parse: \`images\` is 'block', 'allow' or 'proxy', not …`). The
 same source and options give the same tree, frozen and shared: change a copy (`structuredClone(body)`).
