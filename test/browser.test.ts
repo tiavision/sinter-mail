@@ -44,6 +44,8 @@ const apps = {
   reset: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message }"></mail-body></main>', `${HEAD}<link rel="stylesheet" href="/src/app.css">`), 'src/app.css': RESET }),
   mailcss: app({ 'index.html': page('<sn-resource name="message" src="/api/message" type="Body"></sn-resource>\n<main><mail-body id="message" data-sn-with="{ body: message }"></mail-body></main>', `${HEAD}<link rel="stylesheet" href="/src/app.css">`), 'src/app.css': `@import '@tiavision/sinter-mail/mail.css';\n${RESET}` }),
   // the same email parsed for a phone from the start, without <mail-width>: what waiting for it is compared with
+  // <mail-warm> on a page, counting its samples
+  warm: app({ 'index.html': page('<main data-sn-state="{ n: 0 }"><mail-warm data-sn-on-sample="n = n + 1"></mail-warm><p id="n" data-sn-text="n"></p></main>', HEAD) }),
   narrow: app({ 'index.html': page(`<sn-resource name="html" src="/api/html" type="string"></sn-resource>
 <main><mail-body id="message" data-sn-with="{ body: html ? mail.parse(html, { images: 'allow', media: 'narrow' }) : null }"></mail-body></main>`, HEAD) }),
 };
@@ -93,7 +95,7 @@ async function tab(): Promise<{ page: Page; violations: () => Promise<string[]>;
 
 const dist = (a: keyof typeof apps) => join(apps[a].root, 'dist');
 beforeAll(async () => {
-  for (const name of ['api', 'plain', 'width', 'narrow', 'reset', 'mailcss'] as const) {
+  for (const name of ['api', 'plain', 'width', 'narrow', 'reset', 'mailcss', 'warm'] as const) {
     // (`as never`: sinter from a local path brings its own copy of Vite's types, which TypeScript sees as another Vite)
     await build({ root: apps[name].root, logLevel: 'silent', plugins: [sinter({ libraries: ['@tiavision/sinter-mail'] }) as never], build: { outDir: dist(name), emptyOutDir: true } });
   }
@@ -315,4 +317,17 @@ test('mail.css gives an email back what an app\'s reset takes, and a light canva
   });
   // the cell's padding is the browser's own again, not the reset's
   expect(withCss.td['padding-top']).not.toBe('16px');
+});
+
+test('<mail-warm> requests nothing: its samples\' images, pixel and fonts stay unloaded (proxied, they would be the app\'s own URLs)', async () => {
+  const base = await serve(dist('warm'));
+  const { page: p, errors } = await tab();
+  const requested: string[] = [];
+  p.on('request', (r) => requested.push(r.url()));
+  await p.goto(base);
+  await p.waitForFunction(() => document.querySelector('#n')?.textContent === '24', undefined, { timeout: 30_000 });
+  await p.waitForTimeout(300);
+  expect(requested.filter((u) => !/\.(js|css)$/.test(new URL(u).pathname) && u !== base)).toEqual([]);
+  expect(errors).toEqual([]);
+  await p.close();
 });

@@ -1,7 +1,9 @@
 // The script of <mail-warm>: mail.parse and the builder run on sample emails (../warm.ts), one per idle period, so
 // their code is compiled, and its hot paths optimised, before the first real email: V8 compiles a function at its
 // first call and runs it in its interpreter until it has seen enough of it, which makes the first email of a session
-// three to four times as slow to parse as a later one. Nothing of it reaches the page.
+// three to four times as slow to parse as a later one. Nothing of it reaches the page: the builder makes its elements in a
+// document of their own, without a window, where an image does not load (in the page's, an <img> requests its src as
+// soon as it has one, attached or not).
 import { build } from '../build.js';
 import { parseOnce } from '../parse.js';
 import { sample } from '../warm.js';
@@ -13,7 +15,7 @@ import { MailWarmComponent } from './mail-warm.html';
 const ROUNDS = 24, SMALL = 3;
 const idle = (f: () => void) => (typeof requestIdleCallback === 'function' ? requestIdleCallback(f, { timeout: 200 }) : setTimeout(f, 0));
 
-let started = false;
+let started = false, inert: Document | undefined;
 export class MailWarm extends MailWarmComponent {
   connected() {
     if (started) return;
@@ -22,7 +24,7 @@ export class MailWarm extends MailWarmComponent {
     const step = () => {
       // not kept: mail.parse's cache is for the emails the reader opens
       const b = parseOnce(sample(k, k < SMALL ? 2 : 8), { images: 'proxy', proxy: '/?{url}', cid: '/?{cid}' });
-      build(b);
+      build(b, (inert ??= document.implementation.createHTMLDocument('')));
       this.emit('sample', b);
       if (++k < ROUNDS) idle(step);
     };

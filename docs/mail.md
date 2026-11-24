@@ -808,8 +808,9 @@ show an email does that work beforehand:
 
 While the page is idle (the reader looks at the list, a message is on its way, a PGP mail is being decrypted)
 it parses and builds two dozen sample emails written as mail is written: a builder's newsletter, an Outlook
-thread, a Gmail reply. Nothing of them reaches the page or `mail.parse`'s cache; it renders an empty hidden
-element. Measured in Chromium, from an email's last byte to the email painted, first email of a page:
+thread, a Gmail reply. Nothing of them reaches the page or `mail.parse`'s cache, and nothing of them is
+requested: their elements are made in a document without a window, where an image does not load. It renders an
+empty hidden element. Measured in Chromium, from an email's last byte to the email painted, first email of a page:
 
 | | without | with `<mail-warm>` | a later email |
 | --- | --- | --- | --- |
