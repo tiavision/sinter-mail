@@ -1,6 +1,6 @@
 # Proposal: MIME and OpenPGP structure in sinter-mail
 
-Status: proposed, revision 4 (after two reviews, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
+Status: accepted for implementation, revision 5 (after three reviews, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
 proposal. Why the structure belongs in the library is in [The case](#the-case).
 
 ## Goals
@@ -53,7 +53,7 @@ mail.mime(bytes: Uint8Array | string, options?: {
   prefer?: 'html' | 'text';                    // in multipart/alternative; default 'html'
   decrypted?: Record<string, Decrypted>;       // results of decrypt steps, by step id
   verdicts?: Record<string, Verdict[]>;        // results of verify steps, by step id
-  open?: string[];                             // ids of encrypted parts the reader chose to open (section 5)
+  open?: string[];                             // step ids of encrypted parts the reader chose to open (section 5)
 }): Message
 
 mail.bytes(bytes: Uint8Array | string, ref: Ref, options?: { decrypted?: Record<string, Decrypted> }): Uint8Array
@@ -70,12 +70,19 @@ plain value (no hidden reference to the input, nothing lost through `structuredC
 
 ```ts
 // the action: run the steps the message asks for, until none is pending, then store the results
-export async function unlock(raw: Uint8Array, prior: Results): Promise<Results> {
-  const r = { decrypted: { ...prior.decrypted }, verdicts: { ...prior.verdicts } };
-  for (let msg = mail.mime(raw, r); msg.steps.some((s) => s.state === 'pending'); msg = mail.mime(raw, r)) {
+// (every call awaited: with the package in `sinter({ lazy })`, an action's imports of it are stubs that return
+// Promises; awaiting is harmless when it is not lazy)
+export async function unlock(raw: Uint8Array, prior: Results, open: string[]): Promise<Results> {
+  const r = { decrypted: { ...prior.decrypted }, verdicts: { ...prior.verdicts }, open };
+  for (let msg = await mail.mime(raw, r); msg.steps.some((s) => s.state === 'pending'); msg = await mail.mime(raw, r)) {
     for (const s of msg.steps.filter((s) => s.state === 'pending')) {
-      if (s.kind === 'decrypt') r.decrypted[s.id] = await decrypt(mail.bytes(raw, s.ciphertext, r));
-      else r.verdicts[s.id] = await verify(s, (ref) => mail.bytes(raw, ref, r));
+      if (s.kind === 'decrypt') {
+        const ciphertext = await mail.bytes(raw, s.ciphertext, r);
+        r.decrypted[s.id] = await decrypt(ciphertext);
+      } else {
+        const bytes = (ref: Ref) => mail.bytes(raw, ref, r);   // verify awaits each call
+        r.verdicts[s.id] = await verify(s, bytes);
+      }
     }
   }
   return r;
@@ -124,7 +131,7 @@ type Part = { id: string; contentType: string; protection: Protection } & (
   | { type: 'html'; html: string; legacyDisplay: boolean; inline: Inline[] }
   | { type: 'text'; text: string; flowed: boolean; delsp: boolean }
   | { type: 'message'; message: Message; ref: Ref }     // a forwarded message/rfc822, inline
-  | { type: 'encrypted'; ref: Ref; step: string | null; reason: EncryptedReason }
+  | { type: 'encrypted'; ref: Ref; step: string; reason: EncryptedReason }   // ref: the whole entity or armor block
   | { type: 'report'; text: string }                    // message/delivery-status and the like, as text
 );
 
@@ -161,6 +168,7 @@ interface Ref {
   start: number; end: number;  // byte offsets in that source
   encoding: 'base64' | 'quoted-printable' | 'identity';   // what mail.bytes undoes
   canonical?: true;            // mail.bytes also converts bare LF to CRLF (section 5)
+  slice?: [number, number];    // offsets in the decoded bytes (Settled for implementation)
 }
 
 interface Attachment {
@@ -188,7 +196,9 @@ interface Problem {
 ```
 
 - **Ids** are paths. The root entity is `1`, its parts `1.1`, `1.2`, theirs `1.2.1`, as IMAP numbers them; a
-  non-multipart root is `1` with no children. Inside a decrypted payload the path continues after the decrypt
+  non-multipart root is `1` with no children. Ids continue through nested messages, as IMAP's do: a
+  `message/rfc822` at `1.2` has its root's parts at `1.2.1`, `1.2.2`, so every id in a message, nested ones
+  included, is unique. Inside a decrypted payload the path continues after the decrypt
   step's id and `/` (`1#3f…/1.2`). A text part split around cleartext-signed blocks (section 5) gives parts
   `<id>:1`, `<id>:2`, … in order. Step ids are in section 5. The same bytes and options give the same ids.
 - **No map is keyed by the sender's strings.** Content-IDs, header names and list headers are in arrays of
@@ -196,10 +206,10 @@ interface Problem {
 - **Every related part is an attachment**, `kind: 'related'`, `disposition: 'inline'`: the reader does not
   scan HTML (it imports no HTML parser), so it cannot tell which ones the body references; an app lists the
   attachments of other kinds, or filters by `Inline`.
-- **Inline images belong to their body.** An HTML part's `inline` lists the related parts of its own
-  `multipart/related`; when that has none for a Content-ID, a part anywhere in the same message (not in a
-  nested message) whose Content-ID is unique in the message. In both cases, only parts with the same
-  `protection` as the body: an unsigned part outside a signed body cannot supply the image the signed body
+- **Inline images belong to their body.** An HTML part's `inline` is a set, decided without reading the HTML:
+  the related parts of its own `multipart/related`, plus the parts elsewhere in the same message (not in a
+  nested message) whose Content-ID is unique in the message and not among the first; in both cases only parts
+  with the same `protection` as the body: an unsigned part outside a signed body cannot supply the image the signed body
   shows. A Content-ID that appears twice in a scope resolves to nothing there, and is a problem.
   `Content-Location` is never resolved.
 - **Inline images go to `mail.parse` as URLs**: an action reads each `Inline`'s bytes with `mail.bytes`,
@@ -228,7 +238,7 @@ case gets a code and a row.
 | `encoding-unknown` | yes | an unknown transfer encoding |
 | `no-header-end` | yes | a part whose headers run to its end |
 | `crypto-shape` | yes | a `multipart/encrypted` or `multipart/signed` not of the shape section 5 requires |
-| `armor-headers` | yes | a cleartext-signed block with armor headers other than `Hash:`, or lines starting `-` not dash-escaped |
+| `armor-headers` | no | an anchored cleartext-signed block with armor headers other than `Hash:`, or lines starting `-` not dash-escaped: no step for it |
 | `limit` | yes | a limit of section 4 reached |
 | `integrity` | yes | a decrypt result without `integrity: true` |
 | `duplicate-header` | no | a repeated From, Sender, Subject or Date (From: `summary.from` is `'unknown'`) |
@@ -316,7 +326,9 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
     `message/disposition-notification` and `text/rfc822-headers` are `report` parts; the returned message is a
     `message` part.
   - `message/rfc822` (and `message/global`): inline, a nested `Message`; as an attachment, of kind `message`,
-    which the app may read with `mail.mime` again. A nested message never makes steps (section 5).
+    which the app may read with `mail.mime` again. A nested message makes no steps of its own and applies no
+    protected headers; its encrypted parts are `not-root` parts, which the reader may open (section 5), and the
+    step is in the outer message's `steps` (one list per call).
   - `text/calendar`: always in `calendar` (with its `method` parameter), and an attachment of kind `calendar`,
     so it can be saved. Its text is data for an iCalendar parser, never HTML: a description with markup is
     shown as text.
@@ -341,7 +353,7 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
   decrypted payload and every nested message together, so feeding results back cannot multiply the work.
   The bytes read in one call are bounded at 256 MiB and one decrypted payload at 64 MiB; there is no ratio to
   the ciphertext, since OpenPGP compresses and the app has already decompressed. A decoder's output is never
-  larger than its input.
+  larger than its input (canonical line ends in `mail.bytes` at most double it).
 - **No backtracking regular expressions**: the grammars are hand-written scanners; the test suite runs each
   hostile case under a time bound.
 - **Filenames**:
@@ -412,9 +424,10 @@ What becomes a step, and nothing else:
   **Only the root is decrypted on its own**: content decrypted from inside someone else's message cannot be
   told apart from theirs, and a reply would quote it to them. The same structure anywhere else is one
   `encrypted` part (`reason: 'not-root'`, with its `Ref`), not two loose attachments. **The reader may open
-  it**: an app that lists the part's id in `open` gets a decrypt step for it; what it decrypts to is shown in
+  it**: the part's `step` is the id its decrypt step would have (a digest-carrying id, as every step's), and an app that
+  lists that id in `open` gets the step; a stale `open` matches nothing in another message; what it decrypts to is shown in
   that part's place, labelled encrypted, but never counted as the message's: `summary.encrypted` is `'some'`,
-  its headers are not applied, and its `from` is `'unknown'`. This is where Exchange variants not matched
+  its headers are not applied, and it counts for nothing in `summary.from`. This is where Exchange variants not matched
   above, list-manager footers around encrypted mail, and inline armor with a footer end up.
 - **The app's result is checked.** A `Decrypted` without `integrity: true` shows nothing (`integrity`
   problem, the step `failed`): a missing or failed MDC, a partial plaintext and a "ciphertext" that is only a
@@ -438,8 +451,10 @@ What becomes a step, and nothing else:
     `reason: 'not-root'`, which the reader may open;
   - a cleartext-signed block is a `verify-cleartext` step only when `-----BEGIN PGP SIGNED MESSAGE-----` starts
     a line that is not quoted (`>`), its armor headers are only `Hash:`, every line of the signed text starting
-    with `-` is dash-escaped, and the body has at most 4 blocks; otherwise it is text and an `armor-headers`
-    problem. The rules make the reader's reading a strict subset of what OpenPGP implementations accept.
+    with `-` is dash-escaped, and the body has at most 4 blocks. A quoted, unanchored or fifth block is plain
+    text, with no problem (a reply that quotes a signed message is ordinary); an anchored block with other armor
+    headers or a line starting `-` that is not dash-escaped is text and an `armor-headers` problem, which is
+    informational: the block makes no step, and nothing else changes. The rules make the reader's reading a strict subset of what OpenPGP implementations accept.
     `block` is the block's bytes as sent, with `charset`, so the app verifies what the sender signed, not a
     re-encoding. The signed part shown is the signed text with dash-escaping removed and each line's trailing
     whitespace removed (what text-mode hashing covers; RFC 9580), never read as `flowed`, so unsigned trailing
@@ -457,12 +472,19 @@ message shows nothing until decrypted, and the app can say why.
 ### 6. Protected headers
 
 Read from the root of the cryptographic payload: the decrypted entity, or the signed part when the signed part
-is the message's root or the root of a decrypted payload. Opened parts (section 5) have none.
+is the message's root or the root of a decrypted payload. Opened parts (section 5) and nested messages have
+none.
+
+- **When the payload counts**: a decrypted payload counts once decrypted (`done`), whatever its signatures
+  say, From aside (below). A signed-only payload (a root `multipart/signed`, not encrypted) counts only with a
+  `good` verdict: while it is `pending`, `bad`, `no-key` or anything else, `headers` are the outer ones and every
+  source is `'outer'`. Signatures inside the ciphertext (`Decrypted.signatures`) are signatures over the
+  payload's root, for `signed`, `summary` and From alike.
 
 - **When they apply**: the payload's root carries protected headers when its Content-Type has the `hp`
   parameter (RFC 9788) or `protected-headers="v1"` (the older convention of Enigmail, Autocrypt, K-9 and
   Thunderbird, on the root whatever its type, `text/plain` included).
-- **With `hp`, the whole set** comes from the payload: Subject, Reply-To, To, Cc, Date, Message-ID,
+- **With `hp`, the whole set** comes from the payload: Subject, Sender, Reply-To, To, Cc, Date, Message-ID,
   In-Reply-To, References. RFC 9788 has the sender copy them all, so a field the payload does not have is
   empty, not the outer one: an attacker re-sending an old ciphertext cannot add a `Reply-To` of their own.
 - **With `protected-headers="v1"`, field by field**: a field the payload has replaces the outer one, others
@@ -480,8 +502,9 @@ is the message's root or the root of a decrypted payload. Opened parts (section 
   else is normalized. A field with a `null` address never matches.
 - **Which headers were confidential**: with `hp="cipher"`, the payload's `HP-Outer` fields list the outer
   header fields as sent; a protected field whose outer value differs from its inner one, or that has no outer
-  value, is in `confidential`. An app writing an unencrypted reply uses the outer value of those, and leaves
-  out a field that has none.
+  value, is in `confidential`. With `protected-headers="v1"` on an encrypted payload, a protected field whose
+  outer value differs or is absent is in `confidential` too, so the usual `...` subject is covered. An app
+  writing an unencrypted reply uses the outer value of those, and leaves out a field that has none.
 - **Legacy display**, honoured only inside a payload whose root has the `hp` parameter or
   `protected-headers="v1"`:
   - RFC 9788: a `text/plain` part with `hp-legacy-display="1"` loses its leading lines that are header fields,
@@ -524,7 +547,7 @@ interface Summary {
   | --- | --- | --- |
   | nothing is encrypted and nothing shown is signed | `null` | outer |
   | `headers.from` has not exactly one address, or a `null` one | `'unknown'` | outer |
-  | a good signature over the payload's root has a `signer` including the protected From (when there is one) or else the outer From | `'matches'` | that From |
+  | a good signature over the payload's root has a `signer` including the From to show: the protected From when the payload has one, else the outer From | `'matches'` | that From |
   | protected headers carry a From whose address differs from the outer one | `'differs'` | outer |
   | anything else (encrypted and unsigned, signed by another key, a signature over a part only) | `'unknown'` | outer |
 
@@ -541,17 +564,21 @@ interface Summary {
 
 ```
 sinter/
-  mime.ts          mail.mime (imports the reader by its specifier), mail.bytes, mail.imageType
+  mime.ts          mail.mime: options, cache; imports the reader by its specifier
+  bytes.ts         mail.bytes, mail.imageType: imports no reader
   mime/            the reader, behind `@tiavision/sinter-mail/mime`: headers, addresses, dates, encodings,
-                   structure, steps, SHA-256
-  mime/bytes.ts    what mail.bytes and mail.imageType need: the decoders, canonical line ends, magic numbers
+                   structure, steps, SHA-256; mime/decode.ts the decoders and canonical line ends, which
+                   bytes.ts imports relatively
 ```
 
-- **The import graph, as for `mail.parse`**: `sinter.helpers.ts` re-exports `mime`, `bytes` and `imageType`
-  from `./mime.js`; `mime.ts` imports the reader as `@tiavision/sinter-mail/mime` (a new `exports` entry,
-  `./mime` → `./sinter/mime/index.ts`), never by a relative path, so `sinter({ lazy })` loads it when a let
-  first needs `mail.mime` (the let is undefined until then); `mime.ts` imports `mime/bytes.ts` relatively, so
-  `mail.bytes` and `mail.imageType` are ordinary helpers, eager, and an action calls them without awaiting.
+- **The import graph, as for `mail.parse`**: sinter's lazy rule is per declaring module. `mime.ts` imports the
+  reader as `@tiavision/sinter-mail/mime` (a new `exports` entry, `./mime` → `./sinter/mime/index.ts`), never by
+  a relative path, so with `sinter({ lazy })` `mail.mime` is a lazy helper: in a let, undefined until the
+  reader has loaded. `bytes.ts` declares `mail.bytes` and `mail.imageType` and imports no reader, so they are
+  ordinary helpers in markup. `sinter.helpers.ts` re-exports each from its declaring module, as it does
+  `plain.ts` and `tree.ts`.
+- **In actions**, with the package lazy, every import of it is a stub that returns a Promise, so every call is
+  awaited (the recipe in section 1), whatever the function is in the package.
 - `mail.parse` gains the `legacyDisplay`, `encrypted` and `consent` options, in `optionsOf`, its `last()`
   comparison and its cache key.
 - Budget: 12 kB gzip, to be measured (no charset tables: `TextDecoder` has them; the address and date
@@ -635,11 +662,33 @@ ambiguity draft) were read only through summaries, and are to be read in full be
 | `cid:` and Content-Location reaching across parts | [Re: What's Up Johnny?](https://arxiv.org/abs/1904.07550) (ACNS 2019: hidden content, replies as decryption oracles) | inline per body and per protection; no Content-Location (section 2) |
 | Signature spoofing by wrapping and display | [Johnny, You Are Fired](https://www.usenix.org/conference/usenixsecurity19/presentation/muller) (USENIX Security 2019: most OpenPGP and S/MIME clients); Thunderbird (signed text read as headers, [MFSA 2023-55](https://www.mozilla.org/security/advisories/mfsa2023-55/)) | labels per part, strict shape, `'all'` only for one root signature by the From; signed text never re-read as headers (sections 5, 7) |
 | EFAIL | [Poddebniak et al.](https://www.usenix.org/conference/usenixsecurity18/presentation/poddebniak) (USENIX Security 2018) | bodies never joined; root only; integrity required; no remote images in decrypted parts (sections 2, 5) |
-| Ciphertext replay, reply oracles | Re: What's Up Johnny?; an old ciphertext re-sent as a new message's root | protected headers as a set, From only when signed, replies quote only on `'matches'` (sections 6, 7) |
+| Ciphertext replay, reply oracles | Re: What's Up Johnny?; an old ciphertext re-sent as a new message's root | protected headers per their form, Reply-To from the payload, From only when signed, replies quote only on `'matches'` (sections 6, 7) |
 | Unprotected headers trusted inside E2EE | [Delta Chat](https://eprint.iacr.org/2024/918.pdf) (USENIX Security 2024: a plaintext header removed a group member) | outer-only fields never protected (section 6) |
 | Vendor headers and external parts acted on | Thunderbird ([MFSA 2025-26](https://www.mozilla.org/security/advisories/mfsa2025-26): an external-attachment header fetched); `message/partial` reassembly to evade scanners | opaque types, vendor headers never acted on (section 3) |
 
 Memory-safety bugs in C parsers (mutt, PHP's mailparse) do not carry over to TypeScript and are left out.
+
+## Settled for implementation
+
+Choices the third review left to the implementation, recorded so that every part of it makes the same ones:
+
+- **A sub-range of a decoded body**: `Ref` has an optional `slice: [start, end]`, offsets in the decoded bytes,
+  applied after `encoding` is undone (a cleartext block inside a base64 `text/plain`).
+- **Digests**: SHA-256 over the step's bytes as `mail.bytes` returns them; for `verify`, over the signed bytes'
+  length as 4 bytes big-endian, then the signed bytes, then the signature. Digests are kept per input (by
+  identity) and per decrypted payload, so a cache miss of `mail.mime` hashes nothing twice.
+- **`mail.bytes`** throws a `TypeError` for a `Ref` outside its source, or whose `source` step has no `ok`
+  plaintext in `decrypted`.
+- **`summary.from`**, row 3: the signer must include the From to show; a protected From with a signer that
+  matches only the outer From is `'differs'`.
+- **Types**: `Attachment.disposition` is as declared (a related part may have none); `armored` is whether the
+  ciphertext's bytes start with an armor line, PGP/MIME included; `integrity` is required with `status: 'ok'`
+  and ignored otherwise; a `limit` problem with `part: null` (the call's byte budget) stops every step not
+  yet offered.
+- **Dates** are parsed with plain arithmetic, no `Date`, which is not a fold global.
+- **Blocking scope**: section 3's wording ("Near crypto") is the one that counts.
+- **Boundary prefixes**: a child boundary starting with an ancestor's is blocking; to be measured against the
+  corpus in step 1, and relaxed if real generators do it.
 
 ## Decisions
 
