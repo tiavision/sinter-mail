@@ -125,11 +125,11 @@ export interface Calendar { part: string; method: string | null; text: string; a
 export type ProblemCode =
   // blocking
   | 'boundary-missing-close' | 'boundary-invalid' | 'duplicate-field' | 'duplicate-parameter'
-  | 'encoding-on-multipart' | 'encoding-unknown' | 'no-header-end' | 'crypto-shape' | 'limit' | 'integrity'
+  | 'encoding-on-multipart' | 'encoding-unknown' | 'crypto-shape' | 'limit' | 'integrity'
   | 'control-in-structure' | 'parameter-conflict' | 'header-malformed' | 'content-type-invalid'
   | 'parameter-malformed'
   // informational
-  | 'armor-headers' | 'duplicate-header' | 'canonicalized' | 'exchange-shape' | 'charset-unknown'
+  | 'armor-headers' | 'no-header-end' | 'duplicate-header' | 'canonicalized' | 'exchange-shape' | 'charset-unknown'
   | 'charset-fallback' | 'base64-junk' | 'qp-invalid' | 'rfc2231-segments' | 'content-id-duplicate'
   | 'field-dropped' | 'stale-result' | 'address-ambiguous' | 'legacy-display' | 'encoded-word-in-parameter';
 
