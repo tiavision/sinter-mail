@@ -319,6 +319,26 @@ test('mail.css gives an email back what an app\'s reset takes, and a light canva
   expect(withCss.td['padding-top']).not.toBe('16px');
 });
 
+test('mail.css keeps an image in a table cell at its size, beside a cell of long text (an order\'s product list)', async () => {
+  // a shop's order confirmation, made up: a product picture floated in an auto-width cell, its description beside
+  // it. A percentage max-width makes the picture's cell give way to the text, and the picture narrow to it.
+  const { parse } = await import('../sinter/parse.js');
+  const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const text = 'A product with a long description that wraps over several lines in its cell. '.repeat(4);
+  message = JSON.stringify(parse(`<table style="width: 560px"><tr><td><table><tr>
+<td><img id="product" src="${pixel}" alt="" align="left" width="60" height="60" style="margin-right: 15px; border: 1px solid #e5e5e5"></td>
+<td style="width: 100%">${text}</td></tr></table></td></tr></table>`));
+  for (const name of ['api', 'mailcss'] as const) {
+    const { page: p } = await tab();
+    await p.setViewportSize({ width: 1000, height: 700 });
+    await p.goto(await serve(dist(name)));
+    await p.waitForFunction(() => document.querySelector('#message img'));
+    const box = await p.$eval('#message img', (e) => { const r = e.getBoundingClientRect(); return [r.width, r.height]; });
+    expect(box, name).toEqual([62, 62]);
+    await p.close();
+  }
+});
+
 test('<mail-warm> requests nothing: its samples\' images, pixel and fonts stay unloaded (proxied, they would be the app\'s own URLs)', async () => {
   const base = await serve(dist('warm'));
   const { page: p, errors } = await tab();

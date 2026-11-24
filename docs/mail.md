@@ -155,8 +155,9 @@ import '@tiavision/sinter-mail/mail.css'; // or @import it in your CSS, before i
 ```
 
 - Tables and images as the browser draws them (`all: revert`): layout tables get no lines or padding, inline
-  images stay inline. Images no wider than the reader. `content-box` sizing, which emails' widths are written
-  for. Paragraphs, headings, lists and quotes get their margins back.
+  images stay inline, at the size the email gives them (a reset's `img { max-width: 100% }` goes too: in a
+  table cell it lets the cell give way to text beside it and squeezes the image). `content-box` sizing, which
+  emails' widths are written for. Paragraphs, headings, lists and quotes get their margins back.
 - `.mail-light`: the light scheme's canvas, text and link colours, for an email written for a white page
   (below).
 - `.mail-scroll`, a box you put around `<mail-body>`: an email wider than it scrolls sideways, its background
