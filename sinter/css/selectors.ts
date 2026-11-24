@@ -384,41 +384,74 @@ export interface Info {
   siblings: Info[];
   /** index among siblings */
   index: number;
-  /** index among siblings of the same tag, and how many there are */
+  /**
+   * index among siblings of the same tag, and how many there are: -1 until an of-type selector first
+   * asks (ofType), as most stylesheets have none
+   */
   typeIndex: number;
   typeCount: number;
   id: string | null;
   classes: string[];
+  /** the style attribute, which the cascade reads: all three read in one pass over the attributes */
+  style: string | null;
 }
+
+const NO_CLASSES: string[] = [];
 
 /** every element of the tree, in document order, with its Info */
 export function indexTree(root: RawElement): Info[] {
   const all: Info[] = [];
   const rootInfo = info(root, null, [], 0);
   rootInfo.siblings.push(rootInfo);
-  rootInfo.typeCount = 1;
   // iterative: a deep tree must not exhaust the call stack
   const stack: Info[] = [rootInfo];
   while (stack.length) {
     const p = stack.pop()!;
     all.push(p);
-    const kids: Info[] = [];
-    for (const c of p.el.children) if (c.type === 'element') kids.push(info(c, p, kids, kids.length));
-    const counts = new Map<string, number>();
-    for (const k of kids) {
-      const n = counts.get(k.el.tag) ?? 0;
-      k.typeIndex = n;
-      counts.set(k.el.tag, n + 1);
-    }
-    for (const k of kids) k.typeCount = counts.get(k.el.tag)!;
-    for (let j = kids.length - 1; j >= 0; j--) stack.push(kids[j]);
+    // the children's list of siblings, made only for an element that has element children
+    let kids: Info[] | null = null;
+    for (const c of p.el.children) if (c.type === 'element') { kids ??= []; kids.push(info(c, p, kids, kids.length)); }
+    if (kids) for (let j = kids.length - 1; j >= 0; j--) stack.push(kids[j]);
   }
   return all;
 }
 
 function info(el: RawElement, parent: Info | null, siblings: Info[], index: number): Info {
-  const cls = attr(el, 'class');
-  return { el, parent, siblings, index, typeIndex: 0, typeCount: 0, id: attr(el, 'id'), classes: cls ? cls.split(/[ \t\n\f\r]+/).filter(Boolean) : [], };
+  let id: string | null = null, cls: string | null = null, style: string | null = null;
+  const a = el.attrs;
+  for (let i = 0; i < a.length; i++) {
+    // the first of each, as attr() reads it
+    const n = a[i][0];
+    if (n === 'id') id ??= a[i][1];
+    else if (n === 'class') cls ??= a[i][1];
+    else if (n === 'style') style ??= a[i][1];
+  }
+  return { el, parent, siblings, index, typeIndex: -1, typeCount: 0, id, classes: cls ? classList(cls) : NO_CLASSES, style };
+}
+
+const isSpace = (c: number) => c === 32 || c === 9 || c === 10 || c === 12 || c === 13;
+
+/** a class attribute's names, split at ASCII whitespace */
+function classList(s: string): string[] {
+  const out: string[] = [];
+  let start = -1;
+  for (let i = 0; i <= s.length; i++) {
+    if (i === s.length || isSpace(s.charCodeAt(i))) {
+      if (start >= 0) { out.push(s.slice(start, i)); start = -1; }
+    } else if (start < 0) start = i;
+  }
+  return out;
+}
+
+/** `e`'s typeIndex and typeCount, computed for all its siblings at once */
+function ofType(e: Info): void {
+  const counts = new Map<string, number>();
+  for (const k of e.siblings) {
+    const n = counts.get(k.el.tag) ?? 0;
+    k.typeIndex = n;
+    counts.set(k.el.tag, n + 1);
+  }
+  for (const k of e.siblings) k.typeCount = counts.get(k.el.tag)!;
 }
 
 // a match's outcome, as WebKit's matcher has them (plain numbers: sinter's build-time check reads no enum)
@@ -500,8 +533,10 @@ function simpleMatches(s: Simple, e: Info, b: Budget): boolean {
     case 'is': return s.list.some((x) => matches(x, e, b));
     case 'nth': {
       let pos: number;
-      if (s.type) pos = s.last ? e.typeCount - e.typeIndex : e.typeIndex + 1;
-      else if (s.of) {
+      if (s.type) {
+        if (e.typeIndex < 0) ofType(e);
+        pos = s.last ? e.typeCount - e.typeIndex : e.typeIndex + 1;
+      } else if (s.of) {
         if (!s.of.some((x) => matches(x, e, b))) return false;
         pos = 1;
         const sib = e.siblings;
