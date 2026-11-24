@@ -25,6 +25,8 @@ export interface Message {
   outer: Headers;
   /** where each shown field came from */
   sources: Sources;
+  /** whom a reply goes to (section 6) */
+  reply: Address[];
   /** header names the sender sent only encrypted, lowercase */
   confidential: string[];
   /** what to show, in reading order */
@@ -128,7 +130,7 @@ export type ProblemCode =
   // informational
   | 'armor-headers' | 'duplicate-header' | 'canonicalized' | 'exchange-shape' | 'charset-unknown'
   | 'charset-fallback' | 'base64-junk' | 'qp-invalid' | 'rfc2231-segments' | 'content-id-duplicate'
-  | 'field-dropped' | 'stale-result' | 'address-ambiguous';
+  | 'field-dropped' | 'stale-result' | 'address-ambiguous' | 'legacy-display';
 
 export interface Problem {
   code: ProblemCode;

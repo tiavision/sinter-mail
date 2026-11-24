@@ -1,6 +1,6 @@
 # Proposal: MIME and OpenPGP structure in sinter-mail
 
-Status: accepted for implementation, revision 5 (after three reviews, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
+Status: accepted for implementation, revision 6 (RFC 9788 read in full, after three reviews, a survey of the existing parsers and a survey of their vulnerabilities). Follows [Later](sinter-mail.md#later) of the first
 proposal. Why the structure belongs in the library is in [The case](#the-case).
 
 ## Goals
@@ -118,6 +118,7 @@ interface Message {
   headers: Headers;            // the headers to show (section 6)
   outer: Headers;              // the headers as transported
   sources: Sources;            // where each shown field came from (section 6)
+  reply: Address[];            // whom a reply goes to (section 6)
   confidential: string[];      // header names the sender sent only encrypted (section 6), lowercase
   parts: Part[];               // what to show, in reading order
   attachments: Attachment[];
@@ -240,6 +241,7 @@ case gets a code and a row.
 | `crypto-shape` | yes | a `multipart/encrypted` or `multipart/signed` not of the shape section 5 requires |
 | `armor-headers` | no | an anchored cleartext-signed block with armor headers other than `Hash:`, or lines starting `-` not dash-escaped: no step for it |
 | `limit` | yes | a limit of section 4 reached |
+| `control-in-structure` | yes | a NUL or other control byte in a raw Content-Type, Content-Transfer-Encoding or Content-Disposition (and so its boundary) |
 | `integrity` | yes | a decrypt result without `integrity: true` |
 | `duplicate-header` | no | a repeated From, Sender, Subject or Date (From: `summary.from` is `'unknown'`) |
 | `canonicalized` | no | bare LF line ends converted to CRLF for a signature |
@@ -251,6 +253,7 @@ case gets a code and a row.
 | `field-dropped` | no | a header field past a field limit |
 | `stale-result` | no | a result whose id matches no step |
 | `address-ambiguous` | no | an addr-spec read as `null` |
+| `legacy-display` | no | a `text/plain` part with `hp-legacy-display="1"` and no blank line: nothing dropped |
 
 ### 3. Reading MIME
 
@@ -268,13 +271,21 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
     encoded words decoded after**, and only in phrases (a display name, quoted or not: Outlook encodes inside
     quotes), comments and unstructured text, never in an addr-spec, a parameter name or a token, so a decoded
     `<`, `>`, `,`, `@`, quote or line break is text, never structure (Mailsploit, "Splitting the email atom");
+  - an encoded word counts only as a whole whitespace-delimited word (or a quoted string's whole content); one
+    glued inside a word (`collab=?x?b?QA==?=psres.net`) is literal text. One with an unknown charset, or one
+    `TextDecoder` rejects, is left as written (RFC 2047 §6.2), with `charset-unknown`;
   - every decoded value, `Headers` fields and filenames alike, has NUL, C0 controls, CR, LF and bidirectional
-    controls removed; an app that reuses a value in a reply cannot inject a header with it;
+    controls removed; an app that reuses a value in a reply cannot inject a header with it. In a raw structural
+    field (Content-Type, Content-Transfer-Encoding, Content-Disposition) a control byte is also the blocking
+    `control-in-structure`: parsers disagree on it (the IETF MIME ambiguity draft makes NUL fatal);
   - an address list is read by the RFC 5322 grammar with its obsolete forms, iteratively (comments nested at
     most 8 deep, at most 1,000 addresses per field); an addr-spec the grammar cannot read one way only is
     `address: null`, which makes `summary.from` `'unknown'`, never a guess;
   - `suspicious`: the display name, after decoding, contains `@` or `<`, unless it is the address itself
-    (ASCII case-insensitive, quotes aside);
+    (ASCII case-insensitive, quotes aside); or the address uses a form other software reads differently: an
+    encoded word in the local part, the percent hack (`%`), a UUCP path (`!`), a quoted `@`, a domain literal
+    (`[…]`), or a source route (`@a,@b:x@y`, whose route is dropped);
+  - a domain's `xn--` labels must be valid and round-trip; otherwise `address: null`;
   - encoded words (RFC 2047) decoded, adjacent ones joined without the space between them, consecutive words
     of one charset joined into one buffer and decoded once (linear, and a multi-byte character split across
     two words comes out whole); UTF-8 headers (RFC 6532);
@@ -476,43 +487,71 @@ is the message's root or the root of a decrypted payload. Opened parts (section 
 none.
 
 - **When the payload counts**: a decrypted payload counts once decrypted (`done`), whatever its signatures
-  say, From aside (below). A signed-only payload (a root `multipart/signed`, not encrypted) counts only with a
-  `good` verdict: while it is `pending`, `bad`, `no-key` or anything else, `headers` are the outer ones and every
-  source is `'outer'`. Signatures inside the ciphertext (`Decrypted.signatures`) are signatures over the
+  say, From aside (below). A signed-only payload (a root `multipart/signed`, not encrypted; RFC 9788 gives it
+  `hp="clear"`) counts only with a `good` verdict: while it is `pending`, `bad`, `no-key` or anything else,
+  `headers` are the outer ones and every source is `'outer'`. This is stricter than RFC 9788 §4.3.1, which takes
+  the payload's values and marks them unprotected; deliberately, since an unverified signed part's headers are no
+  better than the outer ones and showing them invites trust. Signatures inside the ciphertext (`Decrypted.signatures`) are signatures over the
   payload's root, for `signed`, `summary` and From alike.
 
 - **When they apply**: the payload's root carries protected headers when its Content-Type has the `hp`
-  parameter (RFC 9788) or `protected-headers="v1"` (the older convention of Enigmail, Autocrypt, K-9 and
-  Thunderbird, on the root whatever its type, `text/plain` included).
+  parameter (RFC 9788, values `cipher` and `clear`; ignored anywhere but the payload's root, §4.1) or
+  `protected-headers="v1"` (the older convention of Enigmail, Autocrypt, K-9 and Thunderbird, from the
+  Autocrypt draft that preceded RFC 9788, on the root whatever its type, `text/plain` included). `hp="cipher"`
+  never means the message was encrypted (§2.1.1): only a `done` decrypt step does.
 - **With `hp`, the whole set** comes from the payload: Subject, Sender, Reply-To, To, Cc, Date, Message-ID,
-  In-Reply-To, References. RFC 9788 has the sender copy them all, so a field the payload does not have is
-  empty, not the outer one: an attacker re-sending an old ciphertext cannot add a `Reply-To` of their own.
+  In-Reply-To, References. RFC 9788 has the sender copy every non-structural field (§5.2.1), and a receiver
+  not render an outer-only value (§4), so a field the payload does not have is empty, not the outer one: an
+  attacker re-sending an old ciphertext cannot add a `Reply-To` of their own. Fields added in transit
+  (`List-*`, `Archived-At`) are the exception the RFC names (§7), and are outer-only here anyway.
 - **With `protected-headers="v1"`, field by field**: a field the payload has replaces the outer one, others
   stay outer (K-9 protects only the Subject; senders differ on Date). Reply-To is the exception: it is taken
   from the payload only, empty if the payload has none, since a reply is where a re-sent ciphertext pays off.
 - **From, in both forms**: the protected From replaces the outer one only with a `good` verdict on a signature
   over the payload's root whose `signer` includes that address. Otherwise `headers.from` is the outer From and
   `summary.from` says whether the inner one differs. Encryption alone proves nothing about the author: anyone
-  with the reader's public key can encrypt `From: ceo@…`.
+  with the reader's public key can encrypt `From: ceo@…`. RFC 9788 asks the same: on a mismatch without a
+  valid, correctly bound signature, warn and show both (§4.4.1–4.4.3); the comparison is with the actual outer
+  From.
+- **`reply`**: whom a reply goes to. With protected headers in an encrypted payload, the protected Reply-To,
+  else the protected From, even when the shown From is the outer one: RFC 9788 has replies use only the
+  protected fields for recipients (§4.4.4, §6.2), which also sends a reply to a re-sent ciphertext to its
+  author, not to whoever re-sent it. Otherwise the shown Reply-To, else the shown From.
 - **`sources`** records, for every field, whether the shown value came from the payload or from outside.
   Fields that exist only outside (`list`, `autocrypt`, `raw`) are never protected: an app must not let them
   change what it does with encrypted content (the Delta Chat group-membership attack used such a header).
 - **Without protected headers** (older senders), every source is `'outer'`.
-- **Addresses compare** by their addr-spec, ASCII case-insensitive in both parts, after Unicode NFC; nothing
-  else is normalized. A field with a `null` address never matches.
-- **Which headers were confidential**: with `hp="cipher"`, the payload's `HP-Outer` fields list the outer
-  header fields as sent; a protected field whose outer value differs from its inner one, or that has no outer
-  value, is in `confidential`. With `protected-headers="v1"` on an encrypted payload, a protected field whose
-  outer value differs or is absent is in `confidential` too, so the usual `...` subject is covered. An app
-  writing an unencrypted reply uses the outer value of those, and leaves out a field that has none.
-- **Legacy display**, honoured only inside a payload whose root has the `hp` parameter or
-  `protected-headers="v1"`:
-  - RFC 9788: a `text/plain` part with `hp-legacy-display="1"` loses its leading lines that are header fields,
-    up to the blank line after them; an HTML part with it is `legacyDisplay: true`, and `mail.parse(html, {
-    legacyDisplay: true })` drops the first `div` child of the body with class
-    `header-protection-legacy-display` (only then: a class alone drops nothing);
-  - the older convention: a `text/rfc822-headers; protected-headers="v1"` part first in the payload is a
-    display part: hidden, and not read for headers, which always come from the payload's root.
+- **Addresses compare** as RFC 9788 §4.4.5 has them: the domain converted from U-labels to A-labels, then both
+  parts ASCII case-insensitive; nothing else is normalized. A `null` address, or a domain whose labels do not
+  convert, never matches.
+- **Which headers were confidential**, decided only from inside the payload (RFC 9788 §4.3.1; anyone in transit
+  can change the outer fields, §11.3):
+  - with `hp="cipher"` on the payload of a `done` decrypt step, a protected field is confidential unless an
+    `HP-Outer` field in the payload root's header section has the same name (ASCII case-insensitive) and the
+    same unfolded value. `HP-Outer` is `name: value`, split at the first colon and the whitespace after it
+    (§4.2.1); anywhere else it is ignored (§2.2). A protected field whose name no `HP-Outer` lists was removed
+    from the outside altogether;
+  - with `hp="clear"` on an encrypted payload, nothing is confidential: the encryption was probably added in
+    transit (§10.2); without a decrypt step, nothing either;
+  - with `protected-headers="v1"` on an encrypted payload (no `HP-Outer` exists there), a protected field whose
+    outer value differs or is absent is confidential, so the usual `...` subject is covered;
+  - each entry of `confidential` is the field name; an app writing an unencrypted reply uses the `HP-Outer`
+    value for it (in `raw` of the payload, or the outer value under v1), or leaves the field out (§6.1.2).
+- **Legacy display**, honoured only in the payload of a `done` decrypt step (RFC 9788 §4.5.3.1; a signed-only
+  message has none, §4.5.1):
+  - RFC 9788, when the payload's root has `hp`: the parameter `hp-legacy-display="1"` is on the leaf
+    `text/plain` or `text/html` part (on the root itself when the payload is one part). A `text/plain` part
+    loses everything up to and including its first blank line, after charset decoding (§4.5.3.2); without a
+    blank line nothing is dropped (`legacy-display`). An HTML part is `legacyDisplay: true`, and
+    `mail.parse(html, { legacyDisplay: true })` drops every `div` of the body with class
+    `header-protection-legacy-display` (§4.5.3.3; only then: a class alone drops nothing). Dropped content
+    is also gone from text quoted into a reply (§4.5.3), since it is not in the tree;
+  - the older convention: an encrypted `multipart/mixed` payload with `protected-headers="v1"` and exactly two
+    parts, the first `text/plain` or `text/rfc822-headers` with `protected-headers="v1"`: the first part is a
+    display part, hidden, and not read for headers, which always come from the payload's root; the second is the
+    body. ("Memory Hole" was the convention's earlier name, not another scheme.)
+- **Not supported**: RFC 8551's older form, a `message/rfc822` wrapped as the whole payload (RFC 9788 §4.10),
+  is shown as a nested message, without applying its headers.
 - **The outer subject** of an encrypted message is often `...` or `[...]`; `headers.subject` is the inner one
   once decrypted.
 
@@ -556,9 +595,9 @@ interface Summary {
 - An app shows a message-level badge only for `'all'`, and marks the parts otherwise. `'some'` is the case an
   attacker builds; it is also the mailing-list footer, which is why parts are labelled rather than the message
   refused.
-- **Replies**: an app should not quote decrypted content into a reply unless `summary.from` is `'matches'`,
-  or should ask first: the reply goes to the outer sender, who may only have forwarded someone else's
-  ciphertext.
+- **Replies**: a reply goes to `reply` (section 6). An app should still not quote decrypted content into a reply
+  unless `summary.from` is `'matches'`, or should ask first: without protected headers, `reply` is the outer
+  sender, who may only have re-sent someone else's ciphertext.
 
 ### 8. The package
 
@@ -579,8 +618,9 @@ sinter/
   `plain.ts` and `tree.ts`.
 - **In actions**, with the package lazy, every import of it is a stub that returns a Promise, so every call is
   awaited (the recipe in section 1), whatever the function is in the package.
-- `mail.parse` gains the `legacyDisplay`, `encrypted` and `consent` options, in `optionsOf`, its `last()`
-  comparison and its cache key.
+- `mail.parse` gains the `legacyDisplay`, `encrypted` and `consent` options (done): `legacyDisplay` in `optionsOf`,
+  its `last()` comparison and its cache key; `encrypted` without `consent` folded into `images` as `'block'`, so it
+  shares plain `'block'`'s tree and needs no key of its own.
 - Budget: 12 kB gzip, to be measured (no charset tables: `TextDecoder` has them; the address and date
   grammars and SHA-256 are the reader's). Pure: an `.eml` in a `file:` resource folds at build time, as text
   (section 1).
@@ -718,8 +758,9 @@ Choices the third review left to the implementation, recorded so that every part
 
 ## Plan
 
-0. Read RFC 9788 in full (and the IETF MIME ambiguity draft, and PortSwigger's paper) and settle section 6's
-   details before the types are frozen: `hp`, `HP-Outer`, legacy display, its From guidance.
+0. Done: RFC 9788 read in full (the RFC Editor's final XML from the authors' repository), the Autocrypt
+   protected-headers draft, and the payloads of "Splitting the email atom"; section 6 and the header rules of
+   section 3 follow them.
 1. The reader: headers, addresses, dates, encodings, structure, limits, problems, ids, `mail.bytes`,
    `mail.imageType`, SHA-256. Tests: Stalwart's corpus and jsmime's charset set (licenses permitting, with
    attribution), real messages (with consent, anonymized), hostile ones (nesting, boundaries, encodings, the
@@ -753,14 +794,16 @@ What an app with its own MIME and PGP handling changes to move over:
 - **Badges follow the summary**: a message-level badge only for `'all'`, per-part marks otherwise, a warning
   when `from` is `'differs'` or `'unknown'` on decrypted content, and an opened part shown as its own block.
 - **Images in decrypted parts** load only after the reader's consent for that message (`consent: true`).
-- **Replies**: quote decrypted content only when `from` is `'matches'` (or after asking); in an unencrypted
-  reply, use the outer value of the `confidential` headers, and leave out those that have none.
+- **Replies**: address them to `reply`; quote decrypted content only when `from` is `'matches'` (or after
+  asking); in an unencrypted reply, use the `HP-Outer` (or, under v1, outer) value of the `confidential`
+  headers, and leave out those that have none.
 - **The list**: encrypted subjects stay `...` until opened unless the browser keeps decrypted headers; that
   is the app's choice.
 
 ## Open questions
 
-- **RFC 9788's details** (Plan, step 0).
+- **The IETF MIME ambiguity draft** (draft-chen-email-mime-ambiguity-defense-00) could be read only through
+  summaries: its full text is behind hosts this environment blocks. To read before release.
 - **Signed but not encrypted, with protected headers**: a good signature's inner Subject wins (section 6).
   Is a differing outer Subject worth a problem of its own?
 - **`prefer`**: whether an app needs more than `'html' | 'text'`.
