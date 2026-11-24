@@ -48,7 +48,7 @@ sinter-mail needs sinter 0.22.0 or later (until it is released, sinter's main).
 | The email | Where it is parsed | What the page ships |
 | --- | --- | --- |
 | A file: `src="file:./welcome.html"` | at build time | the email as plain HTML, no JavaScript |
-| HTML from an API, in a `data-sn-let` | in the browser, once per source and options | the parser, about 37 kB gzip, and the components, about 16 kB |
+| HTML from an API, in a `data-sn-let` | in the browser, once per source and options | the parser, about 40 kB gzip, and the components, about 16 kB |
 | The same, with the package lazy | in the browser, once the parser has loaded | the parser in a chunk of its own |
 | A tree from your API (`mail.parse` run on the server, in Node) | on the server | no parser: the components only |
 
@@ -322,16 +322,60 @@ API emails does not ship the templates:
 <mail-body data-sn-with="{ body, templates: true }"></mail-body>  <!-- templates -->
 ```
 
-Two more things help a page that parses the email in the browser:
+### The first email: `<mail-warm>`
 
-- `sinter({ compileHints: true })` asks V8 to compile the page's module eagerly, which shortens the parser's
-  first run.
-- `<mail-warm></mail-warm>` on the page parses a small sample email while the page waits for its API, so
-  the parser is compiled before the real email arrives. It renders a hidden empty element.
+The first email a page parses is its slowest: the browser compiles a function when it first runs and
+optimises it from what it has seen it do, so the parser's first run takes three to four times as long as a
+later one, and it takes about three large emails before it is at speed. `<mail-warm>` on the page that will
+show an email does that work beforehand:
 
-A tree parsed on the server is still the fastest: the page ships no parser (about 15 kB gzip of JavaScript
-in total), and the newsletter is in place about 33 ms after its response, against about 55 ms for an
-iframe with DOMPurify (Chromium).
+```html
+<mail-warm></mail-warm>
+```
+
+While the page is idle (the reader looks at the list, a message is on its way, a PGP mail is being decrypted)
+it parses and builds two dozen sample emails written as mail is written: a builder's newsletter, an Outlook
+thread, a Gmail reply. Nothing of them reaches the page or `mail.parse`'s cache; it renders an empty hidden
+element. Measured in Chromium, from an email's last byte to the email painted, first email of a page:
+
+| | without | with `<mail-warm>` | a later email |
+| --- | --- | --- | --- |
+| a reply, 3 kB | 20 ms | 16 ms | 12 ms |
+| an Outlook thread, 39 kB | 34 ms | 22 ms | 17 ms |
+| a newsletter, 185 kB | 68 ms | 32 ms | 24 ms |
+| a digest, 285 kB, 2,575 elements | 69 ms | 45 ms | 43 ms |
+
+It costs about 150 ms of idle time, in slices, and 4.5 kB gzip on the pages that have it, and changes nothing
+for a later email.
+
+`sinter({ compileHints: true })` asks V8 to compile the page's module as it loads. It shortens the first
+parse a little (the newsletter's script 47 to 39 ms) and adds nothing measurable on a page with `<mail-warm>`.
+
+An app that has an email's HTML before its reader opens (a prefetch on hover, the next unread message) can
+also call `mail.parse` then: the tree is kept by its source, and the click finds it.
+
+### Against an iframe
+
+What a mail app usually does instead is sanitize the HTML with DOMPurify and show it in a sandboxed iframe.
+Measured against that (as [Caley](https://git.tia.sh/tia/Caley) did it before it moved to this library: its
+sanitizer and its frame, without `allow-same-origin` for decrypted mail, which Chrome then runs in a process
+of its own), `first email / a later one`, in ms:
+
+| | `<mail-body>`, with `<mail-warm>` | DOMPurify and an iframe | the same, isolated |
+| --- | --- | --- | --- |
+| a reply, 3 kB | 16 / 14 | 29 / 17 | 41 / 37 |
+| a receipt, 20 kB | 20 / 13 | 35 / 35 | 47 / 40 |
+| an Outlook thread, 39 kB | 22 / 16 | 35 / 35 | 54 / 40 |
+| a newsletter, 185 kB | 32 / 24 | 107 / 73 | 106 / 95 |
+| a digest, 285 kB | 45 / 41 to 54 | 120 / 121 | 138 / 118 |
+
+DOMPurify's time is calls into the DOM, which do not get faster with use; the HTML is parsed twice; and an
+isolated frame is parsed, laid out and painted in another process. The page with the parser is 51 kB gzip of
+JavaScript (55 kB with `<mail-warm>`), the one with DOMPurify 26 kB. How it was measured, and what else was
+tried: [docs/proposals/html-from-api.md](proposals/html-from-api.md) (`bench/html.mjs`).
+
+A tree parsed on the server is still the cheapest for the browser: the page ships no parser (about 15 kB gzip
+of JavaScript in total) and only builds the elements.
 
 ## Long messages
 
@@ -391,8 +435,8 @@ yet.
 - `@media` is decided at parse time, for one width (`media`), not as the reader resizes: parse again with
   the other `media` to switch, when [`<mail-width>`](#the-readers-width-mail-width) says so. Only the colour scheme follows the page, and only for colours (`light-dark()`).
 - Quirks mode is not followed: class names match case-sensitively and unitless lengths are dropped.
-- The parser's size: about 37 kB gzip with the cascade. The HTML parser is about 16 kB of it, nearly half of
-  that the HTML standard's entity table, and the cascade about 17.5 kB. A server that sends the tree ships
+- The parser's size: about 40 kB gzip with the cascade. The HTML parser is about 17.5 kB of it, nearly half of
+  that the HTML standard's entity table, and the cascade about 19 kB. A server that sends the tree ships
   none of it.
 - A very large email may exceed sinter's budget of components expanded at build time (10,000): it then
   renders in the browser (SN536).

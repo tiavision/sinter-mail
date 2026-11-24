@@ -220,8 +220,9 @@ function compare(a: number, op: '<' | '<=' | '>' | '>=' | '=', b: number): boole
   }
 }
 
-const PX: Record<string, number> = { px: 1, em: 16, rem: 16, ex: 8, ch: 8, pt: 96 / 72, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6 };
-const DPPX: Record<string, number> = { dppx: 1, x: 1, dpi: 1 / 96, dpcm: 2.54 / 96 };
+// without a prototype, as every table looked up by what the email wrote (a unit `constructor`)
+const PX: Record<string, number> = Object.assign(Object.create(null), { px: 1, em: 16, rem: 16, ex: 8, ch: 8, pt: 96 / 72, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6 });
+const DPPX: Record<string, number> = Object.assign(Object.create(null), { dppx: 1, x: 1, dpi: 1 / 96, dpcm: 2.54 / 96 });
 
 /** a feature's value in the feature's unit (px, a plain number, a ratio, dppx), or null */
 function valueOf(items: CV[], kind: 'length' | 'number' | 'ratio' | 'resolution'): number | null {

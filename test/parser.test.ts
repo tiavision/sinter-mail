@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { characterEntities } from 'character-entities';
 import { characterEntitiesLegacy } from 'character-entities-legacy';
 import { describe, expect, test } from 'vitest';
-import { ENTITIES, LEGACY } from '../sinter/parser/entities.js';
+import { entities, entity, LEGACY } from '../sinter/parser/entities.js';
 import { parseHTML } from '../sinter/parser/index.js';
 import type { RawElement, RawNode } from '../sinter/raw.js';
 import { plainOf, reference } from './reference.js';
@@ -235,6 +235,19 @@ describe('the depth bound', () => {
     }
   });
 
+  test('a table at the bound: its cell opens beside its row, and a section\'s end tag then closes the section', () => {
+    // the row closes for the cell, so the cell's end finds no row: this took the stack down to its root, and failed
+    for (const [html, max] of [['<div>'.repeat(251) + '<table><td></tbody>x', 256], ['<x><x><x><x><table><td></tbody>', 9], ['<div>'.repeat(5) + '<table><tr><td>a</td></tr></tbody><tr><td>b</table>z', 9]] as const) {
+      const tree = parseHTML(html, { maxDepth: max });
+      expect(depth(tree)).toBeLessThanOrEqual(max);
+      expect(parentsAreRight(tree)).toBe(true);
+    }
+    // the table's own text and what follows it stay in the body
+    const body = parseHTML('<div>'.repeat(6) + '<table><td>cell</tbody></table>after', { maxDepth: 9 }).children[1] as RawElement;
+    const text = (n: RawNode): string => (n.type === 'text' ? n.value : n.children.map(text).join(''));
+    expect(text(body)).toBe('cellafter');
+  });
+
   test('the default bound is 256', () => {
     expect(depth(parseHTML('<div>'.repeat(1000)))).toBe(256);
   });
@@ -276,8 +289,11 @@ describe('the entity table', () => {
     execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/build-entities.mjs', import.meta.url)), '--check']);
   });
   test('unpacks to character-entities and character-entities-legacy', () => {
-    expect(Object.fromEntries(ENTITIES)).toEqual(characterEntities);
+    expect(Object.fromEntries(entities())).toEqual(characterEntities);
     expect([...LEGACY].sort()).toEqual([...characterEntitiesLegacy].sort());
+  });
+  test('the small table the parser starts with agrees with it', () => {
+    for (const [name, value] of Object.entries(characterEntities)) expect(entity(name), name).toBe(value);
   });
 });
 

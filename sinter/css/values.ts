@@ -35,7 +35,12 @@ export function num(n: number): string {
 }
 
 // the units kept, with their size in px for the bound on small negative values
-const UNITS: Record<string, number> = { px: 1, pt: 4 / 3, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6, em: 16, rem: 16, ex: 8, ch: 8 };
+/**
+ * `o` as a table with no prototype, for the ones looked up by what the email wrote (a unit, a property's name):
+ * `constructor` and `__proto__` are names an email may write, and are in none of them.
+ */
+const table = <T extends object>(o: T): T => Object.assign(Object.create(null), o);
+const UNITS = table<Record<string, number>>({ px: 1, pt: 4 / 3, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6, em: 16, rem: 16, ex: 8, ch: 8 });
 
 interface LengthOptions {
   /** a percentage is allowed */
@@ -167,7 +172,7 @@ function rgb(f: Func): string | null {
   return a === 1 ? `rgb(${body})` : `rgba(${body}, ${num(a)})`;
 }
 
-const ANGLE: Record<string, number> = { deg: 1, grad: 0.9, rad: 180 / Math.PI, turn: 360 };
+const ANGLE = table<Record<string, number>>({ deg: 1, grad: 0.9, rad: 180 / Math.PI, turn: 360 });
 
 function hsl(f: Func): string | null {
   const ch = channels(f);
@@ -242,7 +247,7 @@ export function quote(s: string): string | null {
 // the single-value longhands: each a check of the one component value
 type Check = (v: CV | undefined) => string | null;
 
-const SINGLE: Partial<Record<Longhand, Check>> = {
+const SINGLE = table<Partial<Record<Longhand, Check>>>({
   color,
   'background-color': color,
   'font-size': FONT_SIZE,
@@ -302,7 +307,7 @@ const SINGLE: Partial<Record<Longhand, Check>> = {
   'text-decoration-color': color,
   'overflow-x': OVERFLOW,
   'overflow-y': OVERFLOW,
-};
+});
 
 const SIDES = ['top', 'right', 'bottom', 'left'] as const;
 const CORNERS = ['top-left', 'top-right', 'bottom-right', 'bottom-left'] as const;
@@ -323,7 +328,7 @@ function fourSides(xs: CV[], check: Check, name: (side: (typeof SIDES)[number]) 
 // ── Shorthands ───────────────────────────────────────────────────────────────────────────────────────
 
 /** the longhands each shorthand sets, for CSS-wide keywords */
-const SHORTHANDS: Record<string, Longhand[]> = {
+const SHORTHANDS = table<Record<string, Longhand[]>>({
   margin: SIDES.map((s) => `margin-${s}` as Longhand),
   padding: SIDES.map((s) => `padding-${s}` as Longhand),
   'border-width': SIDES.map((s) => `border-${s}-width` as Longhand),
@@ -343,7 +348,7 @@ const SHORTHANDS: Record<string, Longhand[]> = {
   'word-wrap': ['overflow-wrap'],
   'color-scheme': ['color-scheme'],
   ...Object.fromEntries(CORNERS.map((c) => [`border-${c}-radius`, [`border-${c}-radius` as Longhand]])),
-};
+});
 
 /**
  * The longhands a declaration sets, its value re-serialized; null when the property is not kept or the

@@ -41,10 +41,14 @@ export function legacyColor(input: string): string | null {
   return '#' + parts.map((p) => p.padStart(2, '0')).join('').toLowerCase();
 }
 
+// once, not per call: dimension() and integer() run for most legacy attributes
+const DIMENSION = /^[ \t\n\f\r]*(\d+(?:\.\d+)?|\.\d+)(%?)/;
+const INTEGER = /^[ \t\n\f\r]*\+?(\d+)/;
+
 /** HTML's rules for parsing a dimension value: px or % as a CSS value, or null; `nonzero` drops 0 */
 export function dimension(input: string | null, nonzero = false): string | null {
   if (input === null) return null;
-  const m = /^[ \t\n\f\r]*(\d+(?:\.\d+)?|\.\d+)(%?)/.exec(input);
+  const m = DIMENSION.exec(input);
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n) || (nonzero && n === 0)) return null;
@@ -54,7 +58,7 @@ export function dimension(input: string | null, nonzero = false): string | null 
 /** HTML's rules for parsing a non-negative integer, or null */
 export function integer(input: string | null): number | null {
   if (input === null) return null;
-  const m = /^[ \t\n\f\r]*\+?(\d+)/.exec(input);
+  const m = INTEGER.exec(input);
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isSafeInteger(n) ? n : null;
@@ -107,57 +111,67 @@ export interface HintContext {
   link: string | null;
 }
 
+const push = (out: Assignment[], p: Longhand, v: string | null) => { if (v !== null) out.push([p, v]); };
+const bg = (out: Assignment[], el: RawElement) => { const v = attr(el, 'bgcolor'); if (v !== null) push(out, 'background-color', legacyColor(v)); };
+const wh = (out: Assignment[], el: RawElement, nonzero: boolean) => {
+  push(out, 'width', dimension(attr(el, 'width'), nonzero));
+  push(out, 'height', dimension(attr(el, 'height'), nonzero));
+};
+
+// <img align>'s vertical alignments
+// without a prototype: looked up by what the email wrote (`align=constructor`)
+const VA: Record<string, string> = Object.assign(Object.create(null), { top: 'top', middle: 'middle', absmiddle: 'middle', center: 'middle', bottom: 'baseline', absbottom: 'bottom', baseline: 'baseline', texttop: 'text-top' });
+
+/** no hints: shared, never written to */
+const NONE: readonly Assignment[] = [];
+
 /** the presentational hints of an element, in the order they apply */
-export function hints(e: Info, cx: HintContext): Assignment[] {
+export function hints(e: Info, cx: HintContext): readonly Assignment[] {
   const el = e.el;
+  // every hint comes from an attribute but <center>'s and what a cell takes from its table
+  if (el.attrs.length === 0 && el.tag !== 'center' && el.tag !== 'td' && el.tag !== 'th') return NONE;
   const out: Assignment[] = [];
-  const push = (p: Longhand, v: string | null) => { if (v !== null) out.push([p, v]); };
-  const bg = () => { const v = attr(el, 'bgcolor'); if (v !== null) push('background-color', legacyColor(v)); };
-  const wh = (nonzero: boolean) => {
-    push('width', dimension(attr(el, 'width'), nonzero));
-    push('height', dimension(attr(el, 'height'), nonzero));
-  };
   switch (el.tag) {
     case 'body': {
-      bg();
+      bg(out, el);
       const text = attr(el, 'text');
-      if (text !== null) push('color', legacyColor(text));
+      if (text !== null) push(out, 'color', legacyColor(text));
       const mw = dimension(attr(el, 'marginwidth'));
       const mh = dimension(attr(el, 'marginheight'));
-      push('margin-left', dimension(attr(el, 'leftmargin')) ?? mw);
-      push('margin-right', dimension(attr(el, 'rightmargin')) ?? mw);
-      push('margin-top', dimension(attr(el, 'topmargin')) ?? mh);
-      push('margin-bottom', dimension(attr(el, 'bottommargin')) ?? mh);
+      push(out, 'margin-left', dimension(attr(el, 'leftmargin')) ?? mw);
+      push(out, 'margin-right', dimension(attr(el, 'rightmargin')) ?? mw);
+      push(out, 'margin-top', dimension(attr(el, 'topmargin')) ?? mh);
+      push(out, 'margin-bottom', dimension(attr(el, 'bottommargin')) ?? mh);
       break;
     }
     case 'a':
-      if (cx.link && attr(el, 'href') !== null) push('color', cx.link);
+      if (cx.link && attr(el, 'href') !== null) push(out, 'color', cx.link);
       break;
     case 'p': case 'div':
-      push('text-align', blockAlign(lower(el, 'align'), true));
+      push(out, 'text-align', blockAlign(lower(el, 'align'), true));
       break;
     case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6':
-      push('text-align', blockAlign(lower(el, 'align'), false));
+      push(out, 'text-align', blockAlign(lower(el, 'align'), false));
       break;
     case 'center':
-      push('text-align', '-webkit-center');
+      push(out, 'text-align', '-webkit-center');
       break;
     case 'caption': {
       const a = lower(el, 'align');
-      if (a === 'top' || a === 'bottom') push('caption-side', a);
+      if (a === 'top' || a === 'bottom') push(out, 'caption-side', a);
       break;
     }
     case 'br': {
       const c = lower(el, 'clear');
-      push('clear', c === 'all' || c === 'both' ? 'both' : c === 'left' || c === 'right' || c === 'none' ? c : null);
+      push(out, 'clear', c === 'all' || c === 'both' ? 'both' : c === 'left' || c === 'right' || c === 'none' ? c : null);
       break;
     }
     case 'table': {
-      bg();
-      wh(true);
+      bg(out, el);
+      wh(out, el, true);
       const a = lower(el, 'align');
-      if (a === 'center') { push('margin-left', 'auto'); push('margin-right', 'auto'); }
-      else if (a === 'left' || a === 'right') push('float', a);
+      if (a === 'center') { push(out, 'margin-left', 'auto'); push(out, 'margin-right', 'auto'); }
+      else if (a === 'left' || a === 'right') push(out, 'float', a);
       const border = tableBorder(el);
       const bc = attr(el, 'bordercolor');
       const bcolor = bc !== null ? legacyColor(bc) : null;
@@ -167,18 +181,18 @@ export function hints(e: Info, cx: HintContext): Assignment[] {
       }
       if (bcolor) out.push(...sides('color', bcolor));
       const sp = integer(attr(el, 'cellspacing'));
-      if (sp !== null) push('border-spacing', num(sp) + 'px');
+      if (sp !== null) push(out, 'border-spacing', num(sp) + 'px');
       break;
     }
     case 'thead': case 'tbody': case 'tfoot': case 'tr':
-      bg();
-      push('text-align', blockAlign(lower(el, 'align'), true));
-      push('vertical-align', valign(lower(el, 'valign')));
-      push('height', dimension(attr(el, 'height'), true));
+      bg(out, el);
+      push(out, 'text-align', blockAlign(lower(el, 'align'), true));
+      push(out, 'vertical-align', valign(lower(el, 'valign')));
+      push(out, 'height', dimension(attr(el, 'height'), true));
       break;
     case 'col': case 'colgroup':
-      bg();
-      push('width', dimension(attr(el, 'width'), true));
+      bg(out, el);
+      push(out, 'width', dimension(attr(el, 'width'), true));
       break;
     case 'td': case 'th': {
       const { row, section, table } = tableOf(e);
@@ -192,37 +206,36 @@ export function hints(e: Info, cx: HintContext): Assignment[] {
         // present and not a number is 0, as Chromium reads it
         const cp = attr(table.el, 'cellpadding');
         const pad = cp === null ? null : integer(cp) ?? 0;
-        if (pad !== null) for (const s of SIDES) push(`padding-${s}`, num(pad) + 'px');
+        if (pad !== null) for (const s of SIDES) push(out, `padding-${s}`, num(pad) + 'px');
       }
-      bg();
-      wh(true);
-      push('text-align', blockAlign(lower(el, 'align'), true));
-      push('vertical-align', valign(lower(el, 'valign')) ?? (row && valign(lower(row.el, 'valign'))) ?? (section && valign(lower(section.el, 'valign'))));
-      if (attr(el, 'nowrap') !== null) push('white-space', 'nowrap');
+      bg(out, el);
+      wh(out, el, true);
+      push(out, 'text-align', blockAlign(lower(el, 'align'), true));
+      push(out, 'vertical-align', valign(lower(el, 'valign')) ?? (row && valign(lower(row.el, 'valign'))) ?? (section && valign(lower(section.el, 'valign'))));
+      if (attr(el, 'nowrap') !== null) push(out, 'white-space', 'nowrap');
       break;
     }
     case 'img': {
-      wh(false);
+      wh(out, el, false);
       const a = lower(el, 'align');
-      if (a === 'left' || a === 'right') { push('float', a); push('vertical-align', 'top'); }
+      if (a === 'left' || a === 'right') { push(out, 'float', a); push(out, 'vertical-align', 'top'); }
       else {
-        const VA: Record<string, string> = { top: 'top', middle: 'middle', absmiddle: 'middle', center: 'middle', bottom: 'baseline', absbottom: 'bottom', baseline: 'baseline', texttop: 'text-top' };
-        if (a !== null && a in VA) push('vertical-align', VA[a]);
+        if (a !== null && a in VA) push(out, 'vertical-align', VA[a]);
       }
       const b = dimension(attr(el, 'border'));
       if (b !== null) { out.push(...sides('width', b === '0' ? '0' : b), ...sides('style', 'solid')); }
       const hs = dimension(attr(el, 'hspace'));
       const vs = dimension(attr(el, 'vspace'));
-      if (hs !== null) { push('margin-left', hs); push('margin-right', hs); }
-      if (vs !== null) { push('margin-top', vs); push('margin-bottom', vs); }
+      if (hs !== null) { push(out, 'margin-left', hs); push(out, 'margin-right', hs); }
+      if (vs !== null) { push(out, 'margin-top', vs); push(out, 'margin-bottom', vs); }
       break;
     }
     case 'hr': {
       const a = lower(el, 'align');
-      if (a === 'left') { push('margin-left', '0'); push('margin-right', 'auto'); }
-      else if (a === 'right') { push('margin-left', 'auto'); push('margin-right', '0'); }
-      else if (a === 'center') { push('margin-left', 'auto'); push('margin-right', 'auto'); }
-      push('width', dimension(attr(el, 'width'), true));
+      if (a === 'left') { push(out, 'margin-left', '0'); push(out, 'margin-right', 'auto'); }
+      else if (a === 'right') { push(out, 'margin-left', 'auto'); push(out, 'margin-right', '0'); }
+      else if (a === 'center') { push(out, 'margin-left', 'auto'); push(out, 'margin-right', 'auto'); }
+      push(out, 'width', dimension(attr(el, 'width'), true));
       const c = attr(el, 'color');
       const cv = c !== null ? legacyColor(c) : null;
       if (cv) out.push(...sides('style', 'solid'), ...sides('color', cv), ['background-color', cv]);
@@ -230,21 +243,21 @@ export function hints(e: Info, cx: HintContext): Assignment[] {
       const size = attr(el, 'size');
       if (size !== null) {
         const n = integer(size) ?? 0;
-        if (n <= 1) push('border-bottom-width', '0');
-        else push('height', num(n - 2) + 'px');
+        if (n <= 1) push(out, 'border-bottom-width', '0');
+        else push(out, 'height', num(n - 2) + 'px');
       }
       break;
     }
     case 'font': {
       const c = attr(el, 'color');
-      if (c !== null) push('color', legacyColor(c));
+      if (c !== null) push(out, 'color', legacyColor(c));
       const face = attr(el, 'face');
       if (face !== null) {
         const f = expand('font-family', face);
         if (f && !['inherit', 'initial', 'unset'].includes(f[0][1])) out.push(...f);
       }
       const size = attr(el, 'size');
-      if (size !== null) push('font-size', legacyFontSize(size));
+      if (size !== null) push(out, 'font-size', legacyFontSize(size));
       break;
     }
   }
