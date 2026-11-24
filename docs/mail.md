@@ -455,8 +455,10 @@ So **never change an input or a result in place**: a `Uint8Array` written into, 
 options object itself may be new at every read.
 
 The kept messages hold decrypted text, and the kept options their plaintexts. When the reader locks the app or
-logs out, call `mail.mime.clear()` as well as dropping the results from state: it drops every message kept and the
-plaintexts it holds, and the next call reads again.
+logs out, call `mail.forget()` in an action (awaited, which a lazy package needs: its stubs allow calls, not a
+property such as `mail.mime.clear`), as well as dropping the results from state: it drops every message kept and
+the plaintexts it holds, and the next call reads again. `mail.mime.clear()` is the same, for code that holds the
+function itself.
 
 ### Lazy
 
@@ -649,7 +651,7 @@ and `signer`. `summary` is over the whole message, the parts and attachments of 
 | --- | --- | --- |
 | `encrypted` | `'all'`, `'some'`, `'none'` | `'all'`: everything shown came from the root's ciphertext; an opened part makes it `'some'` |
 | `signed` | `'all'`, `'some'`, `'none'` | `'all'`: one good signature covers the message's root (or the decrypted payload's root), its `signer` includes the From shown, and every part and attachment is `good` with that From among its signers; anything less with a good signature is `'some'` |
-| `from` | `'matches'`, `'differs'`, `'unknown'`, `null` | `'matches'`: a good signature over the root whose `signer` includes the From shown. `'differs'`: protected headers name another From than the outer one. `'unknown'`: anything else encrypted or signed (encrypted but unsigned, signed by another key, a signature over one part). `null`: nothing encrypted or signed |
+| `from` | `'matches'`, `'differs'`, `'unknown'`, `null` | `'matches'`: a good signature over the root whose `signer` includes the From shown. `'differs'`: protected headers name another From than the outer one. `'unknown'`: anything else encrypted or signed (encrypted but unsigned, signed by another key, a signature over one part), and always when any part was opened. `null`: nothing encrypted or signed |
 
 How to show it:
 
@@ -670,8 +672,8 @@ How to show it:
   payload's root and binds no From. The decrypted parts carry the signatures inside the ciphertext
   (`Decrypted.signatures`), or `signed: null`.
 - **A nested message has its own `summary`**, by the same rules over its own parts, but it has no steps of its
-  own: `encrypted` is never `'all'` (`'some'` when anything in it is encrypted or opened), and `from` is `null` or
-  `'unknown'`, never `'matches'`.
+  own: `encrypted` is `'all'` only when it lies wholly inside the root's ciphertext (`'some'` when anything in it is
+  opened), and `from` is `null` or `'unknown'`, never `'matches'`.
 - `encrypted` parts that are `'pending'` say why nothing shows yet; `'failed'` that the app's result was refused.
 
 ### Opening an encrypted part: `open`
@@ -681,8 +683,8 @@ told apart from theirs, and a reply would quote it back to them. Any other encry
 armor with a footer around it, one part among several) is an `'encrypted'` part with `reason: 'not-root'`, and no
 step. Its `step` is the id its decrypt step would have: when the reader chooses to open it, put that id in `open`
 (the button above), and the next `mail.mime` call offers the step. What it decrypts to is shown in its place,
-`protection.opened`, never applies protected headers, never counts for `summary.from`, and makes `encrypted`
-`'some'`. An encrypted part in a nested message is opened the same way, through the outer message's `steps`.
+`protection.opened`, never applies protected headers, makes `summary.from` `'unknown'` (so a reply does not quote it
+as the sender's), and makes `encrypted` `'some'`. An encrypted part in a nested message is opened the same way, through the outer message's `steps`.
 
 ### Images in decrypted parts
 
