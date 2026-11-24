@@ -25,10 +25,20 @@ const fail = (msg: string): never => {
 
 const describe = (v: unknown) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'string' ? JSON.stringify(v) : typeof v);
 
+const describeObject = (v: unknown) => (v instanceof Map ? 'a Map' : typeof v === 'object' && v !== null && !Array.isArray(v) ? 'an instance of a class' : describe(v));
+
 const DECRYPTED = new Set(['ok', 'failed', 'no-key', 'locked', 'unsupported']);
 const VERDICT = new Set(['good', 'bad', 'no-key', 'expired', 'revoked', 'unsupported']);
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Uint8Array);
+
+/** an object literal (or one made with Object.create(null)): not a Map, a class instance or an array, whose
+ * entries Object.keys would not see */
+const isPlain = (v: unknown): v is Record<string, unknown> => {
+  if (typeof v !== 'object' || v === null) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+};
 
 /** the options as compared and read: `prefer` by value, the results entry by entry (key, and value by identity) */
 interface Options {
@@ -56,7 +66,7 @@ function optionsOf(options: MimeOptions | undefined): Options {
   if (prefer !== 'html' && prefer !== 'text') fail(`\`prefer\` is 'html' or 'text', not ${JSON.stringify(prefer)}`);
   const decrypted: [string, Decrypted][] = [];
   if (o.decrypted != null) {
-    if (!isRecord(o.decrypted)) fail(`\`decrypted\` is an object of results by step id, not ${describe(o.decrypted)}`);
+    if (!isPlain(o.decrypted)) fail(`\`decrypted\` is an object of results by step id (a plain one), not ${describeObject(o.decrypted)}`);
     for (const k of Object.keys(o.decrypted)) {
       const d = (o.decrypted as Record<string, unknown>)[k];
       const where = `\`decrypted[${JSON.stringify(k)}]\``;
@@ -69,12 +79,13 @@ function optionsOf(options: MimeOptions | undefined): Options {
         if (!Array.isArray(x.signatures)) fail(`${where}: \`signatures\` is an array of verdicts`);
         (x.signatures as unknown[]).forEach((v, i) => verdict(v, `${where}.signatures[${i}]`));
       }
+      if (x.status === 'ok' && !(x.plaintext instanceof Uint8Array)) fail(`${where}: \`plaintext\` is required with status 'ok'`);
       decrypted.push([k, d as unknown as Decrypted]);
     }
   }
   const verdicts: [string, Verdict[]][] = [];
   if (o.verdicts != null) {
-    if (!isRecord(o.verdicts)) fail(`\`verdicts\` is an object of verdict lists by step id, not ${describe(o.verdicts)}`);
+    if (!isPlain(o.verdicts)) fail(`\`verdicts\` is an object of verdict lists by step id (a plain one), not ${describeObject(o.verdicts)}`);
     for (const k of Object.keys(o.verdicts)) {
       const list = (o.verdicts as Record<string, unknown>)[k];
       const where = `\`verdicts[${JSON.stringify(k)}]\``;
@@ -83,10 +94,11 @@ function optionsOf(options: MimeOptions | undefined): Options {
       verdicts.push([k, list as Verdict[]]);
     }
   }
-  const open: string[] = [];
+  let open: string[] = [];
   if (o.open != null) {
     if (!Array.isArray(o.open) || !o.open.every((s) => typeof s === 'string')) fail(`\`open\` is an array of step ids, not ${describe(o.open)}`);
-    open.push(...(o.open as string[]));
+    // copied, never spread: a long array would overflow the call's arguments
+    open = (o.open as string[]).slice();
   }
   return { prefer: prefer as 'html' | 'text', decrypted, verdicts, open };
 }
@@ -111,28 +123,57 @@ const last = (() => {
   };
 })();
 
+/** the cache's bounds: inputs kept, their total cost, option sets per input, and the cost of one entry beyond its
+ * bytes (the message read from it, the options) */
+const MAX_INPUTS = 32, MAX_COST = 16 * 1024 * 1024, PER = 4, ENTRY = 4 * 1024;
+
+/** what one option set holds alive: the plaintexts of its results */
+const optionsCost = (o: Options) => {
+  let n = ENTRY;
+  for (const [, d] of o.decrypted) if (d.plaintext instanceof Uint8Array) n += d.plaintext.byteLength;
+  return n;
+};
+
+interface Kept { o: Options; v: Message; cost: number }
+
 /**
- * Messages kept by input (identity) and options, in order of use, bounded by the inputs' sizes (bytes, or a
- * string's length); at most 4 option sets per input.
+ * Messages kept by input (identity) and options, in order of use: at most 32 inputs, and at most 16 MiB of cost,
+ * which counts each input's length (bytes, or a string's length), a constant per message kept, and the byte length
+ * of every plaintext the kept options hold; at most 4 option sets per input. The input just read is kept whatever
+ * its cost, so one large message still reads once per change of options.
  */
-const cached = (() => {
-  const MAX = 16 * 1024 * 1024, PER = 4;
-  const cache = new Map<Uint8Array | string, { o: Options; v: Message }[]>();
+const cache = (() => {
+  const map = new Map<Uint8Array | string, Kept[]>();
   let total = 0;
-  return (bytes: Uint8Array | string, o: Options): Message => {
-    let of = cache.get(bytes);
-    if (of) { cache.delete(bytes); cache.set(bytes, of); } else { cache.set(bytes, (of = [])); total += bytes.length; }
+  const costOf = (k: Uint8Array | string, of: Kept[]) => { let n = k.length; for (const x of of) n += x.cost; return n; };
+  const get = (bytes: Uint8Array | string, o: Options): Message => {
+    let of = map.get(bytes);
+    if (of) { map.delete(bytes); map.set(bytes, of); } else { map.set(bytes, (of = [])); total += bytes.length; }
     const hit = of.find((x) => sameOptions(x.o, o));
     if (hit) return hit.v;
     const src = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes;
-    const read: ReadOptions = { prefer: o.prefer, decrypted: new Map(o.decrypted), verdicts: new Map(o.verdicts), open: [...o.open] };
+    const read: ReadOptions = { prefer: o.prefer, decrypted: new Map(o.decrypted), verdicts: new Map(o.verdicts), open: o.open.slice() };
     const v = frozen(readMessage(src, read));
-    of.unshift({ o, v });
-    if (of.length > PER) of.pop();
-    for (const [k] of cache) { if (total <= MAX || k === bytes) break; cache.delete(k); total -= k.length; }
+    const kept: Kept = { o, v, cost: optionsCost(o) };
+    of.unshift(kept);
+    total += kept.cost;
+    if (of.length > PER) total -= of.pop()!.cost;
+    for (const [k, list] of map) {
+      if ((total <= MAX_COST && map.size <= MAX_INPUTS) || k === bytes) break;
+      map.delete(k);
+      total -= costOf(k, list);
+    }
     return v;
   };
+  /** for tests: how many inputs and option sets are kept, and their cost */
+  const size = () => { let entries = 0; for (const of of map.values()) entries += of.length; return { inputs: map.size, entries, cost: total }; };
+  return { get, size };
 })();
+
+const cached = cache.get;
+
+/** test-only: the cache's size, to check its bounds (not part of the package's API: sinter.helpers exports `mime` only) */
+export const cacheSize = cache.size;
 
 const readMessage = (src: Uint8Array, o: ReadOptions) => read(src, o);
 

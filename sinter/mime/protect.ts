@@ -14,6 +14,7 @@ export function rootMessage(r: Reader, root: Entity): Message {
   const scope: Scope = { parts: [], attachments: [], calendar: [], html: [], of: new Map() };
   walk(r, root, scope, 'show', { related: null, report: false, protection: unprotected() });
   resolveCandidates(r, scope);
+  cleartextRoot(r, scope);
   inline(r, scope);
   const outer = headersOf(root.fields, (c) => problem(r, root, c));
   const P = st.root.payload;
@@ -27,6 +28,23 @@ export function rootMessage(r: Reader, root: Entity): Message {
     type: 'message', headers, outer, sources, reply: applied.reply, confidential: applied.confidential, parts: scope.parts,
     attachments: scope.attachments, calendar: scope.calendar, steps: st.steps, summary, problems: [],
   };
+}
+
+/**
+ * A root message whose only part shown is one text part that is wholly one cleartext-signed block (whitespace aside,
+ * nothing before or after it), of the input or of the root's payload: that signature is over the payload's root,
+ * for `summary.signed` and `summary.from`, as an armored message in the same place is the root's decrypt step
+ * (section 5). Any other cleartext block labels only its own part.
+ */
+function cleartextRoot(r: Reader, scope: Scope): void {
+  const st = stateOf(r);
+  for (const c of st.cleartexts) {
+    if (c.scope !== scope || scope.parts.length !== 1 || scope.parts[0] !== c.part) continue;
+    const src = c.entity.source;
+    if (src === 'input' ? st.root.encrypted : !(st.root.encrypted && st.root.payload?.source === src)) continue;
+    st.root.sigs.push(c.sig);
+  }
+  st.cleartexts.length = 0;
 }
 
 /**

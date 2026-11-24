@@ -19,7 +19,7 @@ import { asciiLower, decodeText } from './charset.js';
 import { base64Result, ignore } from './decode.js';
 import {
   accept, armored, canOffer, combine, digestOf, findBlocks, offer, refBytes, shownSigned, signedBy, stateOf,
-  verifyDigestOf, whitespace, withdraw, type CryptoState,
+  verifyDigestOf, whitespace, withdraw, type CryptoState, type Sig,
 } from './steps.js';
 import { hasBareLF } from './decode.js';
 import { legacyText, protectionForm, v1Display } from './hp.js';
@@ -338,6 +338,9 @@ export function showText(r: Reader, e: Entity, scope: Scope, ctx: Ctx): boolean 
     return true;
   }
   const charset = asciiLower(paramOf(e.params, 'charset') ?? 'utf-8');
+  // wholly one cleartext-signed block (whitespace aside): its signature may cover the root message (protect.ts)
+  const wholeSigned = blocks.length === 1 && blocks[0]!.kind === 'signed' && !nested
+    && whitespace(bytes, 0, blocks[0]!.start) && whitespace(bytes, blocks[0]!.next, bytes.length);
   let n = 0, pos = 0;
   for (const b of blocks) {
     if (!whitespace(bytes, pos, b.start)) scope.parts.push(segment(r, e, `${e.id}:${++n}`, bytes, pos, b.start, ctx));
@@ -346,18 +349,20 @@ export function showText(r: Reader, e: Entity, scope: Scope, ctx: Ctx): boolean 
     const id = `${pid}#${digestOf(r, ref, bytes.slice(b.start, b.end))}`;
     if (b.kind === 'message') inlineEncrypted(r, e, pid, id, ref, scope, ctx, false);
     else {
-      let protection = { ...ctx.protection };
+      let protection = { ...ctx.protection }, sig: Omit<Sig, 'step'> | null = null;
       if (canOffer(st)) {
         const vs = st.verdicts.get(id);
         const c = vs ? combine(vs) : { status: 'pending' as const, signer: [] };
         offer(st, { id, state: vs ? 'done' : 'pending', part: pid, kind: 'verify-cleartext', block: ref, charset });
         protection = signedBy(ctx.protection, id, c.status, c.signer);
+        sig = c;
       } else if (!st.budget.overrun) problem(r, e, 'limit', true);
       const p = segment(r, e, pid, bytes, b.textStart, b.textEnd, { ...ctx, protection }) as Part & { type: 'text' };
       p.text = shownSigned(p.text);
       p.flowed = false;
       p.delsp = false;
       scope.parts.push(p);
+      if (wholeSigned && sig) st.cleartexts.push({ part: p, entity: e, scope, sig: { step: id, status: sig.status, signer: [...sig.signer] } });
     }
     pos = b.next;
   }

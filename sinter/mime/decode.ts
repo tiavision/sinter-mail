@@ -124,12 +124,22 @@ export function quotedPrintable(src: Uint8Array, start: number, end: number, sin
 
 /**
  * `src[start, end)` with the transfer encoding undone: what mail.bytes returns before `canonical` and `slice`.
- * `identity` is a copy.
+ * `identity` is a copy (a plain Uint8Array, whatever `src` is).
  */
 export function transferDecode(src: Uint8Array, start: number, end: number, encoding: Ref['encoding'], sink: Sink = ignore): Uint8Array {
   if (encoding === 'base64') return base64(src, start, end, sink);
   if (encoding === 'quoted-printable') return quotedPrintable(src, start, end, sink);
-  return src.slice(start, end);
+  return copy(src, start, end);
+}
+
+/**
+ * `src[start, end)` as a new, plain Uint8Array: a Node Buffer's own `slice` is a view sharing its memory, and even
+ * `Uint8Array.prototype.slice.call` makes another Buffer (by its species); this is always a copy of the bytes only.
+ */
+export function copy(src: Uint8Array, start = 0, end = src.length): Uint8Array {
+  const out = new Uint8Array(Math.max(0, end - start));
+  out.set(Uint8Array.prototype.subarray.call(src, start, end));
+  return out;
 }
 
 /** whether `src[start, end)` has a line feed not preceded by a carriage return */

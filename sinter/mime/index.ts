@@ -39,7 +39,8 @@ function stale(st: CryptoState, o: ReadOptions): boolean {
   return false;
 }
 
-/** the problems as the message lists them: one per part and code, in the order found, blocking if any was */
+/** the problems as the message lists them: one per part and code, in the order found, blocking if any was (a nested
+ * message's multipart root shares its message entity's id, scan.ts: their problems merge here, blocking kept) */
 export function problemsOf(found: readonly Found[]): Problem[] {
   const out: Problem[] = [], at = new Map<string, Problem>();
   for (const f of found) {

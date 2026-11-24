@@ -163,7 +163,7 @@ describe('PGP/MIME encrypted at the root', () => {
 describe('the app\'s results', () => {
   const plainPayload = crlf('Content-Type: text/plain\n\nx');
 
-  test('a status other than ok fails without an integrity problem; ok without integrity fails with one; ok without plaintext fails', async () => {
+  test('a status other than ok fails without an integrity problem; ok without integrity fails with one; ok without plaintext is invalid options', async () => {
     const raw = pgpMime(OUTER, await encrypt(plainPayload, bob));
     const id = mime(raw).steps[0]!.id;
     const failed = mime(raw, { decrypted: { [id]: { status: 'no-key', integrity: false } } });
@@ -172,7 +172,7 @@ describe('the app\'s results', () => {
     const noIntegrity = mime(raw, { decrypted: { [id]: { status: 'ok', integrity: false, plaintext: utf8(plainPayload) } } });
     expect([noIntegrity.steps[0]!.state, noIntegrity.parts.map((p) => p.type)]).toEqual(['failed', ['encrypted']]);
     expect(noIntegrity.problems).toEqual([{ code: 'integrity', part: '1', blocking: true }]);
-    expect(mime(raw, { decrypted: { [id]: { status: 'ok', integrity: true } } }).steps[0]!.state).toBe('failed');
+    expect(() => mime(raw, { decrypted: { [id]: { status: 'ok', integrity: true } } })).toThrow(/`plaintext` is required with status 'ok'/);
   });
 
   test('a plaintext over 64 MiB is over the limit', async () => {
@@ -284,6 +284,27 @@ describe('inline PGP', () => {
     ]);
     expect(m.summary).toEqual({ encrypted: 'none', signed: 'some', from: 'unknown' });
     expect(m.problems).toEqual([]);
+  });
+
+  test('a root whose only part shown is wholly one cleartext-signed block: that signature is over the payload\'s root', async () => {
+    const block = await clearsign('All of it, signed', alice);
+    const raw = eml(...OUTER, 'Content-Type: text/plain; charset=utf-8', '', '', block, '', '');
+    const pending = mime(raw);
+    expect([pending.steps.map((s) => s.kind), pending.summary]).toEqual([['verify-cleartext'], { encrypted: 'none', signed: 'none', from: 'unknown' }]);
+    const m = await read(raw, app);
+    expect(texts(m)).toEqual(['All of it, signed']);
+    expect(m.parts[0]!.protection).toMatchObject({ signed: 'good', signer: ['alice@example.test'] });
+    expect(m.summary).toEqual({ encrypted: 'none', signed: 'all', from: 'matches' });
+    // signed by another key than the From's: nothing matches
+    const byMallory = eml(...OUTER, 'Content-Type: text/plain', '', await clearsign('All of it, signed', mallory));
+    expect((await read(byMallory, app)).summary).toEqual({ encrypted: 'none', signed: 'some', from: 'unknown' });
+    // text before or after it, another part shown, or a nested message: the block labels only its own part
+    const after = await read(eml(...OUTER, 'Content-Type: text/plain', '', block, 'unsigned footer'), app);
+    expect(after.summary).toEqual({ encrypted: 'none', signed: 'some', from: 'unknown' });
+    const two = await read(eml(...OUTER, ...multipart('multipart/mixed', 'm', ['Content-Type: text/plain', '', block], ['Content-Type: text/plain', '', 'other'])), app);
+    expect(two.summary).toEqual({ encrypted: 'none', signed: 'some', from: 'unknown' });
+    const alone = await read(eml(...OUTER, ...multipart('multipart/mixed', 'm', ['Content-Type: text/plain', '', block])), app);
+    expect(alone.summary).toEqual({ encrypted: 'none', signed: 'all', from: 'matches' });
   });
 
   test('a cleartext block inside a base64 text/plain: Ref.slice into the decoded body', async () => {

@@ -12,7 +12,7 @@ import { parseDate } from './date.js';
 import { filename } from './filename.js';
 import { clean, messageIds, unstructured, type RawField } from './headers.js';
 import { checkSigned, cryptoShape, encryptedFile, showEncrypted, showSigned, showText } from './crypto.js';
-import { all, isNestedMessage, paramOf, type Entity, type Found } from './scan.js';
+import { all, isMultipart, isNestedMessage, paramOf, type Entity, type Found } from './scan.js';
 import type { CryptoState } from './steps.js';
 
 /** what a walk reads from and reports to: one call's sources and problems */
@@ -57,7 +57,9 @@ export type Mode = 'show' | 'unchosen' | 'related';
 export interface Ctx {
   /** the related parts of the multipart/related whose root this walk is in: an HTML part's own inline set */
   related: Attachment[] | null;
-  /** inside a multipart/report: its message parts are shown inline, whatever their disposition */
+  /** the entity walked is a multipart/report's own part: a returned message is shown inline, whatever its
+   * disposition. Only the report's direct children: every multipart below it (mixed, alternative, related) resets
+   * it, so a message/rfc822 attachment deeper inside is an attachment by the usual rules */
   report: boolean;
   /** the protection of what this walk finds: set under a decryption or a signature (crypto.ts) */
   protection: Protection;
@@ -120,7 +122,7 @@ export function walk(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: Ctx): 
     if (shape === 'encrypted' || shape === 'exchange') return showEncrypted(r, e, shape, scope, mode, ctx);
     if (shape === 'signed') return showSigned(r, e, scope, mode, ctx);
     if (e.type === 'multipart/signed') checkSigned(r, e);
-    if (e.type === 'multipart/alternative') return alternative(r, e, scope, mode, ctx);
+    if (e.type === 'multipart/alternative') return alternative(r, e, scope, mode, { ...ctx, report: false });
     if (e.type === 'multipart/related') return related(r, e, scope, mode, ctx);
     const sub = { ...ctx, report: e.type === 'multipart/report' };
     for (const c of e.children) walk(r, c, scope, mode, sub);
@@ -237,10 +239,15 @@ function related(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: Ctx): void
   for (const c of e.children) walk(r, c, scope, c === root ? mode : 'related', sub);
 }
 
-/** an attachment for the entity (an opaque one is its bytes: the whole entity, or its undecoded body) */
+/**
+ * An attachment for the entity. Its Ref is the whole entity, headers included, only for a multipart (opaque past a
+ * limit or by its boundary, or an encrypted structure) and for the blob that collects the rest of a multipart past
+ * the part limit (which has no headers: its body is the whole of it); any other entity, a leaf or a message/rfc822
+ * past a limit included, is its body with its transfer encoding, as every attachment's is.
+ */
 export function attach(r: Reader, e: Entity, scope: Scope, kind: AttachmentKind, ctx: Ctx): Attachment {
   const names = filename(e.dispositionParams, e.params, (c) => problem(r, e, c));
-  const whole = e.opaque === 'limit' || e.opaque === 'boundary-invalid' || (e.boundary !== null && kind === 'encrypted');
+  const whole = (e.opaque !== null && isMultipart(e.type)) || (e.boundary !== null && kind === 'encrypted');
   const ref: Ref = whole ? { source: e.source, start: e.start, end: e.end, encoding: 'identity' }
     : { source: e.source, start: e.bodyStart, end: e.end, encoding: e.encoding };
   const a: Attachment = {
@@ -320,30 +327,48 @@ export function inline(r: Reader, scope: Scope): void {
     if (seen.has(a.contentId)) dup(a);
     seen.add(a.contentId);
   }
+  // the set depends only on the part's protection and its multipart/related: parts that share both share one
+  // frozen array, built once, so many HTML parts beside many Content-IDs cost one set each, not one per part
+  const sets = new Map<Attachment[] | null, Map<string, Inline[]>>();
   for (const { part, related } of scope.html) {
-    const out: Inline[] = [], own = new Set<string>();
-    if (related) {
-      const local = new Map<string, number>();
-      for (const a of related) if (a.contentId !== null) local.set(a.contentId, (local.get(a.contentId) ?? 0) + 1);
-      for (const a of related) {
-        if (a.contentId === null) continue;
-        const again = own.has(a.contentId);
-        own.add(a.contentId);
-        if (local.get(a.contentId)! > 1) { if (again) dup(a); continue; }
-        if (sameProtection(a.protection, part.protection)) out.push({ contentId: a.contentId, attachment: a.id });
-      }
-    }
-    for (const a of scope.attachments) {
-      if (a.contentId === null || own.has(a.contentId) || counts.get(a.contentId)! > 1) continue;
-      if (related?.includes(a)) continue;
-      if (sameProtection(a.protection, part.protection)) out.push({ contentId: a.contentId, attachment: a.id });
-    }
+    let byProtection = sets.get(related);
+    if (!byProtection) sets.set(related, (byProtection = new Map()));
+    const key = protectionKey(part.protection);
+    let out = byProtection.get(key);
+    if (!out) byProtection.set(key, (out = inlineSet(scope, part.protection, related, counts, dup)));
     part.inline = out;
   }
 }
 
+/** sameProtection's fields, as a key */
+const protectionKey = (p: Protection) => `${p.encrypted ? 1 : 0}${p.opened ? 1 : 0}${p.signed ?? ''}\0${p.step ?? ''}`;
+
+/** one inline set (see `inline`), frozen */
+function inlineSet(scope: Scope, protection: Protection, related: Attachment[] | null, counts: Map<string, number>, dup: (a: Attachment) => void): Inline[] {
+  const out: Inline[] = [], own = new Set<string>();
+  const mine = new Set<Attachment>(related ?? []);
+  if (related) {
+    const local = new Map<string, number>();
+    for (const a of related) if (a.contentId !== null) local.set(a.contentId, (local.get(a.contentId) ?? 0) + 1);
+    for (const a of related) {
+      if (a.contentId === null) continue;
+      const again = own.has(a.contentId);
+      own.add(a.contentId);
+      if (local.get(a.contentId)! > 1) { if (again) dup(a); continue; }
+      if (sameProtection(a.protection, protection)) out.push(Object.freeze({ contentId: a.contentId, attachment: a.id }));
+    }
+  }
+  for (const a of scope.attachments) {
+    if (a.contentId === null || own.has(a.contentId) || counts.get(a.contentId)! > 1 || mine.has(a)) continue;
+    if (sameProtection(a.protection, protection)) out.push(Object.freeze({ contentId: a.contentId, attachment: a.id }));
+  }
+  return Object.freeze(out) as Inline[];
+}
+
 /** the armor a text is wholly made of (whitespace aside): one armored message, one cleartext-signed block, or null */
 export function armorKind(text: string): 'message' | 'signed' | null {
+  // most texts are not armor: nothing is split for them
+  if (!text.trimStart().startsWith('-----BEGIN PGP ')) return null;
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return null;
   const head = lines[0]!.trimEnd(), tail = lines[lines.length - 1]!.trimEnd();

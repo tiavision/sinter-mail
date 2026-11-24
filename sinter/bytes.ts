@@ -2,7 +2,7 @@
 // and 2): the bytes a message's Ref names, and an image's type by its magic number. This module imports only the
 // transfer decoders and the magic numbers, relatively, never the reader: both stay ordinary helpers when an app
 // makes the package lazy. Pure, with no globals beyond the language's and TextEncoder.
-import { canonicalize, transferDecode } from './mime/decode.js';
+import { canonicalize, copy, transferDecode } from './mime/decode.js';
 import { imageType as magic } from './mime/magic.js';
 import type { BytesOptions, ImageType, Ref } from './mime/types.js';
 
@@ -51,7 +51,7 @@ export function bytes(input: Uint8Array | string, ref: Ref, options?: BytesOptio
     if (!Array.isArray(slice) || slice.length !== 2 || !offset(slice[0]) || !offset(slice[1]) || slice[0] > slice[1] || slice[1] > out.length) {
       fail('bytes', `\`ref.slice\` is [start, end] within the ${out.length} decoded bytes, not ${JSON.stringify(slice)}`);
     }
-    out = out.slice(slice[0], slice[1]);
+    out = copy(out, slice[0], slice[1]);
   }
   return canonical ? canonicalize(out) : out;
 }

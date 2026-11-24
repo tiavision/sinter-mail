@@ -5,9 +5,11 @@
 // One pass over the lines, with an explicit stack of the entities open at the current line (no recursion):
 // a line is a delimiter only when it is exactly `--`, an open multipart's boundary, optional transport padding
 // (spaces and tabs) and the line end, or the same with `--` before the padding for the close. CRLF and bare LF end
-// a line; a bare CR is a character. The line break before a delimiter belongs to the delimiter. Each line is
-// compared with the open boundaries only (at most 32 levels, a boundary at most 70 bytes), so the work is linear in
-// the input; past the last open boundary the rest of a body is not read at all.
+// a line; a bare CR is a character (but a CR as the input's last byte after a delimiter, a CRLF the end cut). The
+// line break before a delimiter belongs to the delimiter. A line starting `--` has its padding stripped once and is
+// looked up among the open boundaries by length, last byte and hash, then compared once, so the work per line is a
+// constant times its length however many boundaries are open and however much they share; past the last open
+// boundary the rest of a body is not read at all.
 import type { ProblemCode, Ref } from './types.js';
 import { contentType, param, parameterField, readHeaders, transferEncoding, type ParameterField, type RawField } from './headers.js';
 
@@ -135,8 +137,8 @@ export const isBlocking = (code: ProblemCode) => BLOCKING.has(code);
 /** parameters whose conflicting forms block; a filename's do not */
 const STRUCTURAL = new Set(['boundary', 'protocol', 'micalg', 'start', 'type']);
 
-/** the MIME fields a repetition of which is `duplicate-field` */
-const MIME_FIELDS = new Set(['content-type', 'content-transfer-encoding', 'content-disposition']);
+/** the MIME fields a repetition of which is `duplicate-field` (Content-ID too: it decides multipart/related's root) */
+const MIME_FIELDS = new Set(['content-type', 'content-transfer-encoding', 'content-disposition', 'content-id']);
 
 /** RFC 2046's bchars: digits, letters, `'()+_,-./:=?` and space */
 const bchar = (c: number) => (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)
@@ -207,6 +209,44 @@ export function scan(src: Uint8Array, start: ScanStart = {}, budget: Budget = ne
   const stack: Open[] = [];
   /** the multiparts whose delimiters are looked for, outermost first */
   const open: Open[] = [];
+  /** the same by the hash of their boundary's bytes (`hashOf`), in the order opened; how many have each length, and
+   * each last byte */
+  const byHash = new Map<number, Open[]>();
+  const lengths = new Uint8Array(MAX_BOUNDARY + 1), lasts = new Uint8Array(256);
+  const view = new DataView(src.buffer, src.byteOffset, src.byteLength);
+  const openPush = (e: Open) => {
+    open.push(e);
+    const h = hashOf(new DataView(e.b!.buffer), e.b!, 0, e.b!.length);
+    const list = byHash.get(h);
+    if (list) list.push(e); else byHash.set(h, [e]);
+    lengths[e.b!.length]!++;
+    lasts[e.b![e.b!.length - 1]!]!++;
+  };
+  const openPop = () => {
+    const f = open.pop()!;
+    const h = hashOf(new DataView(f.b!.buffer), f.b!, 0, f.b!.length);
+    const list = byHash.get(h)!;
+    // stack order: the multipart closed last is the last of its list
+    list.pop();
+    if (!list.length) byHash.delete(h);
+    lengths[f.b!.length]!--;
+    lasts[f.b![f.b!.length - 1]!]!--;
+  };
+  /** the open multipart whose boundary is exactly `src[s, e)` (the innermost, should two share it), or null */
+  const lookup = (s: number, e: number): Open | null => {
+    const n = e - s;
+    if (n < 1 || n > MAX_BOUNDARY || !lengths[n] || !lasts[src[e - 1]!]) return null;
+    const list = byHash.get(hashOf(view, src, s, e));
+    if (!list) return null;
+    for (let j = list.length - 1; j >= 0; j--) {
+      const b = list[j]!.b!;
+      if (b.length !== n) continue;
+      let i = 0;
+      while (i < n && src[s + i] === b[i]) i++;
+      if (i === n) return list[j]!;
+    }
+    return null;
+  };
   /** whether the innermost entity's headers are still being read */
   let pending = false;
 
@@ -230,20 +270,24 @@ export function scan(src: Uint8Array, start: ScanStart = {}, budget: Budget = ne
     blob.opaque = 'limit';
     f.children.push(blob);
     f.sealed = true;
-    open.pop();
+    openPop();
     report(blob, 'limit');
     push(blob);
   };
 
   /** the headers of the innermost entity end at `regionEnd`: what it is, and what is read next */
   const endHeaders = (e: Open, regionEnd: number) => {
-    const hb = readHeaders(src, e.start, regionEnd, e.root, (c) => report(e, c));
+    // an mbox `From ` line is skipped only as the input's first line, never in a payload or a nested message
+    const hb = readHeaders(src, e.start, regionEnd, e.root, (c) => report(e, c), source === 'input' && e.start === 0 && !e.parent);
     e.fields = hb.fields;
     e.headerEnded = hb.ended;
     e.bodyStart = hb.ended ? hb.bodyStart : regionEnd;
     if (!hb.ended) report(e, 'no-header-end');
     interpret(e, (c, b) => report(e, c, b));
     const parent = e.parent;
+    // IMAP's numbering: a nested message's multipart root has no number of its own, it is its message/rfc822
+    // entity's; so a Problem's `part` names both, and problemsOf lists their problems together (one per code,
+    // blocking when either's is): none is lost, and a blocking one on either stops the steps of both
     if (e.root && parent && parent.source === source && parent.message === e) e.id = isMultipart(e.type) ? parent.id : parent.id + '.1';
     pending = false;
     if (e.depth > MAX_DEPTH) { e.opaque = 'limit'; report(e, 'limit'); return; }
@@ -261,7 +305,7 @@ export function scan(src: Uint8Array, start: ScanStart = {}, budget: Budget = ne
       e.boundary = b;
       e.b = new Uint8Array(b!.length);
       for (let i = 0; i < b!.length; i++) e.b[i] = b!.charCodeAt(i);
-      open.push(e);
+      openPush(e);
       return;
     }
     if (isNestedMessage(e.type)) {
@@ -279,27 +323,36 @@ export function scan(src: Uint8Array, start: ScanStart = {}, budget: Budget = ne
     const lb = at > 0 && src[at - 1] === 0x0a ? (at > 1 && src[at - 2] === 0x0d ? 2 : 1) : 0;
     const cut = at - lb;
     while (stack.length - 1 > f.k) closeEntity(stack.pop()!, cut);
-    while (open.length && open[open.length - 1]!.k > f.k) open.pop();
+    while (open.length && open[open.length - 1]!.k > f.k) openPop();
   };
 
   const closeEntity = (e: Open, at: number) => {
-    e.end = Math.max(e.start, at);
+    // an entity begun past the delimiter's line break (an empty part, or a nested root at the end of an empty
+    // message/rfc822 body) is the empty range at `at`, so it stays within its parent, which ends at `at` too
+    if (e.start > at) e.start = at;
+    e.end = at;
     if (e.bodyStart > e.end) e.bodyStart = e.end;
     if (e.boundary !== null && !e.closed && !e.sealed) report(e, 'boundary-missing-close');
   };
 
-  /** the open multipart whose delimiter the line [at, stop) is, and whether it is the close */
+  /**
+   * The open multipart whose delimiter the line [at, stop) is, and whether it is the close: the transport padding
+   * stripped from its end once, then what follows `--` looked up as a boundary, else, when it ends in `--`, what
+   * precedes those as a closed one (`lookup`: by length, then by hash, then byte by byte). A line longer than `--`,
+   * 70 bytes and `--` (padding aside) is no delimiter. At most one open boundary can match a line: the open
+   * multiparts are one chain of ancestors, and scan refuses a child boundary that starts with an ancestor's, or
+   * one an ancestor's is with `--` appended; so the lookup's order is the old innermost-first loop's.
+   */
   const match = (at: number, stop: number): [Open, boolean] | null => {
-    for (let j = open.length - 1; j >= 0; j--) {
-      const f = open[j]!, b = f.b!;
-      if (stop - at < 2 + b.length) continue;
-      let i = 0;
-      while (i < b.length && src[at + 2 + i] === b[i]) i++;
-      if (i < b.length) continue;
-      let k = at + 2 + b.length, close = false;
-      if (k + 2 <= stop && src[k] === 0x2d && src[k + 1] === 0x2d) { close = true; k += 2; }
-      while (k < stop && (src[k] === 0x20 || src[k] === 0x09)) k++;
-      if (k === stop) return [f, close];
+    let t = stop;
+    while (t > at && (src[t - 1] === 0x20 || src[t - 1] === 0x09)) t--;
+    const n = t - at - 2;
+    if (n < 1 || n > MAX_BOUNDARY + 2) return null;
+    const f = lookup(at + 2, t);
+    if (f) return [f, false];
+    if (n >= 3 && src[t - 1] === 0x2d && src[t - 2] === 0x2d) {
+      const g = lookup(at + 2, t - 2);
+      if (g) return [g, true];
     }
     return null;
   };
@@ -320,11 +373,12 @@ export function scan(src: Uint8Array, start: ScanStart = {}, budget: Budget = ne
     const next = lf < end ? lf + 1 : end;
     const stop = lf < end && lf > pos && src[lf - 1] === 0x0d ? lf - 1 : lf;
     if (open.length && stop - pos >= 2 && src[pos] === 0x2d && src[pos + 1] === 0x2d) {
-      const m = match(pos, stop);
+      // a CR as the source's last byte, after a delimiter: a CRLF the end cut (`--b--\r`)
+      const m = match(pos, lf === src.length && stop === lf && src[stop - 1] === 0x0d ? stop - 1 : stop);
       if (m) {
         const [f, close] = m;
         delimiter(f, close, pos);
-        if (close) { f.closed = true; open.pop(); }
+        if (close) { f.closed = true; openPop(); }
         else if (budget.parts <= 0) overflow(f, next);
         else {
           const child = make(f, next, `${f.id}.${f.children.length + 1}`, false);
@@ -348,6 +402,15 @@ export function scan(src: Uint8Array, start: ScanStart = {}, budget: Budget = ne
 }
 
 interface Interpreted { boundaryEncoded?: boolean }
+
+/** FNV-1a over `b[s, e)`, four bytes at a time (little-endian words, `v` viewing `b`'s buffer at its offset 0 =
+ * `b[0]`), then the rest byte by byte: the same bytes give the same hash wherever they are */
+function hashOf(v: DataView, b: Uint8Array, s: number, e: number): number {
+  let h = 0x811c9dc5 | 0, i = s;
+  for (; i + 4 <= e; i += 4) h = Math.imul(h ^ v.getUint32(i, true), 16777619);
+  for (; i < e; i++) h = Math.imul(h ^ b[i]!, 16777619);
+  return h >>> 0;
+}
 
 /** an entity's MIME fields read: type and parameters, disposition, transfer encoding, and their problems */
 function interpret(e: Entity & Interpreted, report: (code: ProblemCode, blocking?: boolean) => void): void {
@@ -373,7 +436,8 @@ function interpret(e: Entity & Interpreted, report: (code: ProblemCode, blocking
   const cdf = first.get('content-disposition');
   if (cdf) {
     const codes: ProblemCode[] = [];
-    const cd = parameterField(cdf.value, (c) => codes.push(c));
+    // `attachment filename=x.html`: the leading token counts (an attachment, not a shown body), parameter-malformed
+    const cd = parameterField(cdf.value, (c) => codes.push(c), true);
     for (const c of codes) report(c, c === 'parameter-conflict' ? false : undefined);
     e.disposition = cd.value === 'inline' ? 'inline' : cd.value === '' ? null : 'attachment';
     e.dispositionParams = cd.params;

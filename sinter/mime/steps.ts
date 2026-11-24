@@ -29,6 +29,10 @@ export interface RootInfo {
 /** a text part wholly one armored message in the root message: root step or not, decided once the walk is done */
 export interface Candidate { part: Part & { type: 'encrypted' }; entity: Entity; ctx: Ctx; scope: Scope }
 
+/** a text part wholly one cleartext-signed block, whose step was offered: a signature over the payload's root when
+ * it is the root message's only part shown (protect.ts), decided once the walk is done */
+export interface Cleartext { part: Part; entity: Entity; scope: Scope; sig: Sig }
+
 export interface CryptoState {
   decrypted: Map<string, Decrypted>;
   verdicts: Map<string, Verdict[]>;
@@ -48,6 +52,7 @@ export interface CryptoState {
   payloadRoots: Set<Entity>;
   root: RootInfo;
   candidates: Candidate[];
+  cleartexts: Cleartext[];
 }
 
 export interface StateOptions { decrypted?: Map<string, Decrypted>; verdicts?: Map<string, Verdict[]>; open?: readonly string[] }
@@ -57,7 +62,7 @@ export function newState(o: StateOptions, budget: Budget, root: Entity | null): 
     decrypted: o.decrypted ?? new Map(), verdicts: o.verdicts ?? new Map(), open: new Set(o.open ?? []), budget, steps: [],
     decryptIds: new Set(), verifyIds: new Set(), known: new Set(),
     rootDecrypt: new Set(root ? [root] : []), payloadRoots: new Set(root ? [root] : []),
-    root: { payload: null, encrypted: false, sigs: [], decrypts: 0 }, candidates: [],
+    root: { payload: null, encrypted: false, sigs: [], decrypts: 0 }, candidates: [], cleartexts: [],
   };
 }
 

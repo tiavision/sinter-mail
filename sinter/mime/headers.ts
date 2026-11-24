@@ -54,9 +54,12 @@ const isWsp = (c: number) => c === 0x20 || c === 0x09;
  * name that is not printable ASCII, is skipped; whitespace before the colon is accepted, the name trimmed; a
  * continuation with no field before it is dropped; a line of only whitespace continues the field (obs-FWS) and
  * does not end the block. A control character in a field name (the line skipped) or in MIME-Version's value is
- * `control-in-structure`. With `root`, an mbox `From ` line first in the range is skipped, and reports nothing.
+ * `control-in-structure`, as is a bare CR anywhere in the block (a parser that ends lines at CR sees another field;
+ * the line is still read as one, the CR a character of it), but a CR as the range's last byte (a CRLF the input's
+ * end cut). With `mbox` (by default: `root` and the range starting at offset 0; scan.ts passes it only for the
+ * input's own first line), an mbox `From ` line first in the range is skipped, and reports nothing.
  */
-export function readHeaders(src: Uint8Array, start: number, end: number, root: boolean, sink: Sink): HeaderBlock {
+export function readHeaders(src: Uint8Array, start: number, end: number, root: boolean, sink: Sink, mbox = root && start === 0): HeaderBlock {
   const limit = root ? ROOT_HEADER_BYTES : PART_HEADER_BYTES;
   const report = once(sink);
   const fields: RawField[] = [];
@@ -82,7 +85,7 @@ export function readHeaders(src: Uint8Array, start: number, end: number, root: b
     cur = null;
   };
   let pos = start;
-  if (root && mboxLine(src, start, end)) {
+  if (mbox && mboxLine(src, start, end)) {
     // an mbox `From ` line first in the input: not a field, skipped silently
     while (pos < end && src[pos] !== 0x0a) pos++;
     if (pos < end) pos++;
@@ -92,6 +95,9 @@ export function readHeaders(src: Uint8Array, start: number, end: number, root: b
     while (lf < end && src[lf] !== 0x0a) lf++;
     const content = lf < end && lf > pos && src[lf - 1] === 0x0d ? lf - 1 : lf;
     const next = lf < end ? lf + 1 : end;
+    for (let k = pos; k < content; k++) {
+      if (src[k] === 0x0d && !(k === end - 1 && lf === end)) { report('control-in-structure'); break; }
+    }
     if (content === pos) {
       finish();
       return { fields, ended: true, bodyStart: next };
@@ -541,9 +547,11 @@ function joinSegments(segs: Segment[], watched: boolean, sink: Sink): string {
  * (whitespace or a comment in or beside it, text after the closing quote, an unterminated quote), or is sent in an
  * RFC 2231 form (`boundary*`, `boundary*0`), or a comment that hides a parameter (`; (boundary=a;) boundary=b`);
  * the lenient reading is kept. A control character in the raw value is `control-in-structure`. The value is ''
- * when it is not a token or `type/subtype` (see `contentType` for Content-Type's default).
+ * when it is not a token or `type/subtype` (see `contentType` for Content-Type's default); with `leading` (a
+ * Content-Disposition), a valid token followed by something other than `;` (`attachment filename=x.html`) is kept
+ * as the value, `parameter-malformed`, and what follows it is not read as parameters.
  */
-export function parameterField(raw: string, sink: Sink): ParameterField {
+export function parameterField(raw: string, sink: Sink, leading = false): ParameterField {
   if (hasControl(raw)) sink('control-in-structure');
   const sc = new Scan(raw);
   sc.cfws();
@@ -558,7 +566,11 @@ export function parameterField(raw: string, sink: Sink): ParameterField {
     value = value && sub && sc.comments === typeComments ? value + '/' + sub : '';
   }
   sc.cfws();
-  if (!sc.done && sc.at() !== 0x3b) value = '';
+  let junk = false;
+  if (!sc.done && sc.at() !== 0x3b) {
+    if (leading && value && !value.includes('/')) junk = true;
+    else value = '';
+  }
   value = asciiLower(value);
   const budget = fieldBudget();
   // by output name: a plain value (and how its name was spelled), or RFC 2231's segments (a single `name*` is
@@ -572,6 +584,7 @@ export function parameterField(raw: string, sink: Sink): ParameterField {
   let malformedSeen = false, segmentsSeen = false;
   const segSink: Sink = (c) => { if (c === 'rfc2231-segments') { if (segmentsSeen) return; segmentsSeen = true; } sink(c); };
   const malformed = () => { if (!malformedSeen) { malformedSeen = true; sink('parameter-malformed'); } };
+  if (junk) { malformed(); return { value, params: [], encoded: [], conflicts: [] }; }
   const raws = rawParams(sc);
   if (sc.hiding) malformed();
   for (const p of raws) {
