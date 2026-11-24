@@ -236,6 +236,7 @@ case gets a code and a row.
 | `duplicate-field` | yes | a repeated Content-Type, Content-Transfer-Encoding or Content-Disposition |
 | `duplicate-parameter` | yes | a repeated `boundary`, `charset`, `protocol`, `micalg`, `start`, `type`, `filename` or `name` |
 | `parameter-conflict` | yes for `boundary`, `protocol`, `micalg`, `start`, `type`; no for filenames | two forms of one parameter with different values (`x`, `x*`, `x*0…`; spellings differing in case; `filename*`, `filename`, `name`): the RFC 2231 form wins, then section 4's filename order |
+| `parameter-malformed` | yes | a `boundary`, `protocol`, `micalg`, `start`, `type` or `charset` that is not a clean token or quoted string (whitespace, a comment, junk after the quote, an unterminated quote), a comment hiding a parameter, or an RFC 2231 form of one of them: strict parsers read another value or none |
 | `header-malformed` | yes | a header line without a colon (skipped), whitespace before the colon (name trimmed), a first line that is a continuation (dropped), a whitespace-only line inside the headers (a continuation, not the end) |
 | `content-type-invalid` | yes | a Content-Type that does not parse: read as `text/plain; charset=us-ascii` (RFC 2045) |
 | `encoding-on-multipart` | yes | a transfer encoding other than 7bit, 8bit or binary on `multipart/*` or `message/*` |
@@ -276,7 +277,8 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
     quotes), comments and unstructured text, never in an addr-spec, a parameter name or a token, so a decoded
     `<`, `>`, `,`, `@`, quote or line break is text, never structure (Mailsploit, "Splitting the email atom");
   - an encoded word counts only as a whole atom after tokenizing (bounded by whitespace, a special or the field's
-    ends, so `=?utf8?q?=61=62=63?=<x@y>` decodes its name), or a quoted string's whole content; one glued inside
+    ends, so `=?utf8?q?=61=62=63?=<x@y>` decodes its name), including whole atoms inside a quoted string (as
+    most clients do); one glued inside
     an atom (`collab=?x?b?QA==?=psres.net`), or one whose encoded text holds a space or `?`, is literal text; RFC
     2231's language suffix (`=?utf-8*en?q?…?=`) is accepted and ignored; invalid UTF-8 inside one falls back to
     windows-1252 as in bodies. One with an unknown charset, or one
@@ -291,9 +293,10 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
   - `suspicious`: the display name, after decoding, contains `@` or `<`, unless it is the address itself
     (ASCII case-insensitive, quotes aside); or the address uses a form other software reads differently: an
     encoded word anywhere in the addr-spec, `!`, `%` or `@` in the local part (quoted or not: a UUCP path, the
-    percent hack), a domain literal (`[…]`), or a source route (`@a,@b:x@y`, whose route is dropped); or the
+    percent hack), a group name by the same rule as a display name, a domain literal (`[…]`), or a source route (`@a,@b:x@y`, whose route is dropped); or the
     display name holds a character NFKC turns into `@` or `<` (`＠`, `﹫`, `＜`);
-  - `address: null` also for an encoded word in the domain, an unterminated comment or quote, a backslash outside
+  - `address: null` also for a control, bidirectional, Unicode space or format character in the local part, an
+    invalid group phrase (all its members), a `;` outside a group (the mailboxes on both sides), an encoded word in the domain, an unterminated comment or quote, a backslash outside
     a quoted string, and an `xn--` label a strict RFC 3492 decoder rejects (letters, digits and hyphens only;
     overflow-checked), that decodes to an ASCII special or to nothing non-ASCII, or fails UTS 46 (`address` keeps
     the A-label as sent);
