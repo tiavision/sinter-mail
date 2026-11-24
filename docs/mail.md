@@ -500,8 +500,11 @@ A cut body elsewhere may hide a delimiter that puts the step in another structur
 none (the epilogue), so nothing is verified or decrypted on a cut input. Signed parts show `signed: 'pending'`
 meanwhile, and an encrypted part has reason `'incomplete'`. To verify or decrypt, read the whole message: its
 steps have the usual ids, and every part has the same id as before. The reader's choices (`open`) carry over,
-except for an encrypted part whose own ciphertext was cut: it has no digest id in the cut message, so it is not a
-step there. Its part is `'incomplete'`, and the reader opens it on the whole message.
+except for an encrypted part whose own ciphertext was cut. Its digest cannot be computed, so its part (reason
+`'incomplete'`) carries `step: '<part>#cut'`. That id has no entry in `steps`, except at the root, and matches
+nothing in the whole message. To open such a part, read the whole message: the same part (by its part id) there
+has its real step id, which goes in `open`. `open` takes step ids, never part ids, so the choice stays bound to
+the bytes it was made for.
 A pending label can become no label at all on the whole message. That happens when a cut body turns out to be
 malformed under the signature. An armored ciphertext (`-----BEGIN PGP MESSAGE-----`) is never cut, because its
 lines start with `--`. Bodies inside an encrypted payload are local once it is decrypted.
@@ -509,7 +512,8 @@ lines start with `--`. Bodies inside an encrypted payload are local once it is d
 ```ts
 // what an app does with a cut message: read the whole one when the cut was refused or a step needs its bytes
 const needsWhole = msg.cut === 'invalid' || msg.steps.some((s) => s.incomplete);
-// and, when the reader asks to open an encrypted part with reason 'incomplete' (no step), read the whole one then
+// and, when the reader asks to open an encrypted part with reason 'incomplete' (its step `<part>#cut` is in no list),
+// read the whole one then and open the part there by its own step id
 ```
 
 **Until a cut body is fetched**, the reader cannot see its bytes, so it cannot rule out that they hide a
