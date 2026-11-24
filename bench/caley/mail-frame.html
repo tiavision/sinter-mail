@@ -1,0 +1,9 @@
+<!-- Caley's <mail-frame> before it moved to sinter-mail (frontend/src/components/mail-frame.html at bb53e0f^), for
+     bench/html.mjs: an HTML mail body in a sandboxed iframe (mail-frame.ts), which the script puts into the root.
+     `isolated` (decrypted mail with inline data: images) leaves out allow-same-origin. In the narrow layout the frame
+     fills the rest of the reader and grows to its content, since the whole reader scrolls there; a mail wider than
+     the reader scrolls sideways in it. A new `version` reloads it (after allowing an image origin). `height` fixes
+     the height instead (the compose dialog's forward preview). Only the attribute names are sinter 0.21's. -->
+<template data-sn-props="{ html: string; isolated: boolean; version?: number; label: string; height?: string }">
+  <div class="mail-frame"></div>
+</template>
