@@ -13,6 +13,8 @@ export class MailView extends MailViewComponent {
     const b = this.props.body ?? null;
     if (b === this.#of) return;
     this.#of = b;
-    if (b) this.root.replaceChildren(build(b)); else this.root.replaceChildren();
+    // the email goes in the root's <div class="mail-box"> (mail-view.html), which clips it
+    const box = this.root.firstElementChild!;
+    if (b) box.replaceChildren(build(b)); else box.replaceChildren();
   }
 }

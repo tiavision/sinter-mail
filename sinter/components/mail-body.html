@@ -4,10 +4,16 @@
   runs the parse on the server and sends the tree as JSON).
   Its root is a plain <div class="mail">, so the tag may carry an id or a class. It carries the body's own
   style (its text properties and background-color) and `display: flow-root`, so the email's floats and
-  margins stay inside its box. `display` depends on the body on purpose: the build writes a constant style
+  margins stay inside its box. The email is in a <div class="mail-box"> inside it, which clips what would paint
+  outside the email (`overflow: clip`, as an iframe's edge does: a tall child of a `height: 0` box, a huge glyph
+  on a `line-height: 0` line, a too-wide right float, an outside list marker, text run back by negative
+  letter-spacing), and is as wide as the email needs (`inline-size: fit-content`, at least the root's width), so
+  a 600 px newsletter on a phone is not cut off: it overflows the root to the right, as it would without the box.
+  The box is inside the root, so the app's own rules for the root (margins, widths, flex) work as before.
+  These styles depend on the body on purpose: the build writes a constant style
   into the HTML as a style attribute, which `style-src 'self'` blocks, while one that depends on data is set
   in the browser with style.setProperty, which the policy allows. With no body (a lazy parser that has not
-  arrived) it is an empty <div class="mail">.
+  arrived) it is a <div class="mail"> with an empty, unstyled <div class="mail-box">.
   The slots below are the library's whole contract: `link` replaces every <a> of the email, `image` every
   <img>, each fill reading the element as $slot.node (its attrs, style and, for a link, children through
   <slot></slot>). Without a fill a link opens in a new tab (rel="noopener noreferrer"); an image is a plain

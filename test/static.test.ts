@@ -81,7 +81,7 @@ function html(n: Node): string {
 }
 const noScript = (s: string) => s.replace(/<script type="speculationrules">[^<]*<\/script>/, '');
 /** the rendered body: what is inside <div class="mail"> */
-const mail = (s: string) => /<div class="mail" id="message" style="[^"]*">([\s\S]*)<\/div><\/main>/.exec(s)?.[1] ?? '';
+const mail = (s: string) => /<div class="mail" id="message" style="[^"]*"><div class="mail-box" style="[^"]*">([\s\S]*)<\/div><\/div><\/main>/.exec(s)?.[1] ?? '';
 
 test('a static page: the tree folds, and the page ships no JavaScript', () => {
   const { html: page, js, error } = out.tree!;
@@ -93,8 +93,8 @@ test('a static page: the tree folds, and the page ships no JavaScript', () => {
 
 test('the HTML is the tree: each element, its attributes and inline styles, links, ids, images, parts', () => {
   const page = out.tree!.html;
-  // the root carries the body's own style and flow-root
-  expect(page).toContain('<div class="mail" id="message" style="display: flow-root; color: rgb(34, 34, 34); font-family: Arial, sans-serif; background-color: rgb(238, 238, 238)">');
+  // the root carries the body's own style and flow-root; the box inside it, the clip and the email's width
+  expect(page).toContain('<div class="mail" id="message" style="display: flow-root; color: rgb(34, 34, 34); font-family: Arial, sans-serif; background-color: rgb(238, 238, 238)"><div class="mail-box" style="display: flow-root; overflow: clip; inline-size: fit-content; min-inline-size: 100%; max-inline-size: none">');
   expect(mail(page)).toBe(body.children.map(html).join(''));
   // spot checks of what the expected HTML encodes
   expect(page).toContain('<a target="_blank" rel="noopener noreferrer" href="https://example.com/news" style="color: rgb(0, 102, 204); text-decoration: none">News</a>');
@@ -112,7 +112,7 @@ test('every tag of the table renders, and the page parses back into the same tre
   expect([...tags].sort()).toEqual(Object.keys(TAGS).sort());
   // as a browser parses the built page: the same elements, in the same order, with no text between tags added
   const doc = new JSDOM(page()).window.document;
-  const root = doc.querySelector('#message')!;
+  const root = doc.querySelector('#message > .mail-box')!;
   const shape = (n: ChildNode): unknown => (n.nodeType === 3 ? (n as Text).data : [(n as globalThis.Element).localName, ...[...n.childNodes].map(shape)]);
   const want = (n: Node): unknown => (n.type === 'text' ? n.value : [n.tag, ...(n as Element).children.filter((c) => c.type === 'text' || c.style.display !== 'none').map(want)]);
   expect([...root.childNodes].map(shape)).toEqual(body.children.filter((c) => c.type === 'text' || c.style.display !== 'none').map(want));
