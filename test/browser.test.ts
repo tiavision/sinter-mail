@@ -179,7 +179,7 @@ test(`measured: a newsletter of ${BIG_COUNT} elements from the API, and the page
   for (let i = 0; i < 5; i++) {
     const { page: p, violations, errors } = await tab();
     await p.goto(base);
-    await p.waitForFunction((n) => document.querySelectorAll('#message *').length === n, BIG_COUNT, { polling: 50 });
+    await p.waitForFunction((n) => document.querySelectorAll('#message > .mail-box *').length === n, BIG_COUNT, { polling: 50 });
     // settle, then the time from the API's answer to the last change of the page
     await p.waitForTimeout(200);
     const t = await p.evaluate(() => {
@@ -362,6 +362,86 @@ test('a small negative margin-bottom on an image puts it where the browser does,
   await p.waitForFunction(() => document.querySelector('#message img'));
   expect(await p.evaluate(offset)).toBeCloseTo(expected, 0);
   await p.close();
+});
+
+test('nothing of an email paints outside its mail-box; a wide one widens the mail-box, not the root', async () => {
+  // what still overflows once negative margins and positions are gone, each painted red on a white page
+  const CASES: Record<string, string> = {
+    'height: 0 box': '<div style="height:0"><div style="height:300px;background:red">x</div></div>',
+    'line-height: 0, huge glyph': '<div style="font-size:300px;line-height:0;color:red">X</div>',
+    'right float wider than its box': '<div style="width:100px"><div style="float:right;width:800px;height:20px;background:red"></div></div>',
+    'table align=right wider than its box': '<div style="width:100px"><table align=right width=800 bgcolor=red><tr><td>x</td></tr></table></div>',
+    'dir=rtl wider than its box': '<div dir=rtl style="width:100px"><table width=800 bgcolor=red><tr><td>x</td></tr></table></div>',
+    'centred wider than its box': '<center style="width:100px"><table width=800 bgcolor=red><tr><td>x</td></tr></table></center>',
+    'outside list marker': '<ul style="margin:0;padding:0;font-size:200px;color:red"><li>x</li></ul>',
+    'negative letter-spacing': `<p style="letter-spacing:-16px;font-size:4px;color:red;white-space:nowrap">${'x'.repeat(400)}</p>`,
+    'negative word-spacing': `<p style="word-spacing:-16px;font-size:4px;color:red;white-space:nowrap">${'x '.repeat(400)}</p>`,
+    'right-aligned overflowing text': `<p style="text-align:right;width:100px;color:red;font-size:40px">${'W'.repeat(40)}</p>`,
+    'wide table': '<table width=800 bgcolor=red><tr><td>x</td></tr></table>',
+  };
+  const { parse } = await import('../sinter/parse.js');
+  const sharp = (await import('sharp')).default;
+  for (const [name, html] of Object.entries(CASES)) {
+    message = JSON.stringify(parse(html));
+    const { page: p } = await tab();
+    await p.setViewportSize({ width: 1800, height: 1200 });
+    await p.goto(await serve(dist('api')));
+    await p.waitForFunction(() => document.querySelector('#message')?.firstElementChild);
+    // the email's box: 300 px wide, far from the page's edges (styles set through the CSSOM, which the CSP allows)
+    const root = await p.evaluate(() => {
+      document.body.style.setProperty('background', '#fff');
+      document.body.style.setProperty('margin', '0');
+      const box = document.querySelector('main')!;
+      for (const [k, v] of [['position', 'absolute'], ['left', '800px'], ['top', '500px'], ['width', '300px']]) box.style.setProperty(k, v);
+      const r = document.querySelector('#message > .mail-box')!.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height, root: document.querySelector('#message')!.getBoundingClientRect().width };
+    });
+    const { data, info } = await sharp(await p.screenshot()).raw().toBuffer({ resolveWithObject: true });
+    let outside = 0;
+    for (let y = 0; y < info.height; y++) for (let x = 0; x < info.width; x++) {
+      if (x >= root.x && x < root.x + root.w && y >= root.y && y < root.y + root.h) continue;
+      const i = (y * info.width + x) * info.channels;
+      if (data[i] < 240 || data[i + 1] < 240 || data[i + 2] < 240) outside++;
+    }
+    expect(outside, name).toBe(0);
+    // the wide table widens the mail-box rather than being cut; the root keeps its width
+    expect(root.w, name).toBe(name === 'wide table' ? 800 : 300);
+    expect(root.root, name).toBe(300);
+    await p.close();
+  }
+});
+
+test('the app\'s rules for the root (.mail) lay it out as without the mail-box, with a narrow or a wide email', async () => {
+  const { parse } = await import('../sinter/parse.js');
+  // the app's layout around the email, as rules for .mail and its parent; the root's expected left and width
+  const LAYOUTS: { name: string; css: string; left: number; width: number }[] = [
+    { name: 'margins', css: '.mail { margin: 0 16px }', left: 16, width: 343 },
+    { name: 'width', css: '.mail { width: 200px }', left: 0, width: 200 },
+    { name: 'max-width', css: '.mail { max-width: 200px }', left: 0, width: 200 },
+    { name: 'flex row beside a sidebar', css: 'main { display: flex } main::before { content: ""; flex: 0 0 100px } .mail { flex: 1; min-width: 0 }', left: 100, width: 275 },
+    { name: 'padding', css: '.mail { padding: 0 20px }', left: 0, width: 375 },
+    { name: 'a reset capping widths', css: '* { max-width: 100% }', left: 0, width: 375 },
+  ];
+  for (const html of ['<p>A short email.</p>', '<table width=600><tr><td>A wide one</td></tr></table>']) {
+    message = JSON.stringify(parse(html));
+    for (const l of LAYOUTS) {
+      const { page: p } = await tab();
+      await p.setViewportSize({ width: 375, height: 600 });
+      await p.goto(await serve(dist('api')));
+      await p.waitForFunction(() => document.querySelector('#message > .mail-box')?.firstElementChild);
+      const box = await p.evaluate((css) => {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(`body { margin: 0 } main { width: 375px } ${css}`);
+        document.adoptedStyleSheets = [sheet];
+        const r = document.querySelector('#message')!.getBoundingClientRect();
+        return { left: r.left, width: r.width, box: document.querySelector('#message > .mail-box')!.getBoundingClientRect().width };
+      }, l.css);
+      expect({ left: box.left, width: box.width }, `${l.name}, ${html}`).toEqual({ left: l.left, width: l.width });
+      // the mail-box is as wide as the email: a wide one is not cut, whatever caps the app sets
+      if (html.includes('600')) expect(box.box, `${l.name}, ${html}`).toBeGreaterThanOrEqual(600);
+      await p.close();
+    }
+  }
 });
 
 test('<mail-warm> requests nothing: its samples\' images, pixel and fonts stay unloaded (proxied, they would be the app\'s own URLs)', async () => {

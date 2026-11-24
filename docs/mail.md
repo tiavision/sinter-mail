@@ -144,7 +144,16 @@ images load then. So:
   when your CSS resets them (a reset that makes images `display: block`, tables full width with padding,
   margins zero, `border-box` sizing). [`mail.css`](#mailcss) gives those defaults back under `.mail`.
 - **The email stays in its box.** The root is `display: flow-root`, so floats and margins do not escape it.
-  A wide newsletter (600 px of tables) is as wide as it is: `mail.css`'s `mail-scroll` box around
+  Inside it, the email is in a `<div class="mail-box">` that clips what would paint outside the email
+  (`overflow: clip`, as an iframe's edge does), on every side; Safari supports `overflow: clip` from 16 on,
+  and older versions draw such overflow as before. The box is as wide as the email (`inline-size: fit-content`,
+  at least the root's width), so a wide newsletter (600 px of tables) is not cut: it overflows the root to the
+  right, as it is, and the root's own styles (yours on `.mail`: margins, widths, flex) work as without the box.
+  What overflows a fixed-width box *inside* the email (a 600 px image in a `width: 300px` div) does not widen
+  the email, and is cut where it passes the email's edge, where an iframe would let it be scrolled to.
+  Your rules for the email's top-level elements as children of `.mail` (`.mail > * + *`, a `gap` on `.mail`)
+  now see the one `mail-box`; descendant selectors are unaffected.
+  `mail.css`'s `mail-scroll` box around
   `<mail-body>` scrolls it sideways on a narrow screen (or parse for the reader's width, with
   [`<mail-width>`](#the-readers-width-mail-width), and it shows its phone layout).
 
@@ -980,8 +989,11 @@ What `mail.parse` guarantees, whatever the email:
   sinter's runtime checks every URL it sets once more.
 - **Nothing loads without your consent.** Remote images only under `'allow'` or through your proxy; no
   CSS `url()`, `@import` or `@font-face`; no other element that loads.
-- **Nothing reaches outside the email's box.** No `position` or negative margins; no stylesheet, so no
-  rule of the email applies to the page; no classes; ids only as in-email link targets, prefixed.
+- **Nothing reaches outside the email's box.** No `position` or negative margins; the `mail-box` clips what
+  still would paint outside it (a tall child of a `height: 0` box, a huge glyph on a `line-height: 0` line,
+  a too-wide right float or `dir="rtl"` table, an outside list marker, text run back by negative
+  `letter-spacing`); no stylesheet, so no rule of the email applies to the page; no classes; ids only as
+  in-email link targets, prefixed.
 - **Bounded work.** Linear parsing, nesting bounded, a budget on selector matching (2 million steps) and
   at most 10,000 style rules per email; a plain-text body makes at most 2,000 links, the rest stays text. A
   hostile email of a megabyte parses in well under a second.

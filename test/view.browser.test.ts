@@ -86,7 +86,7 @@ test('the same tree gives the same DOM as <mail-body>, its anchors apart, under 
     const html = (id: string) => sorted(document.getElementById(id)!).replace(/<!--.*?-->/gs, '').replace(/<i hidden=""><\/i>/g, '').replace(/ id="[ab]"/, '').replace(/ data-sn(?:-\w+)?="[^"]*"/g, '');
     // which path each took: the templates leave their anchors' comments, the fast path none
     const comments = (id: string) => { let c = 0; const w = document.createTreeWalker(document.getElementById(id)!, NodeFilter.SHOW_COMMENT); while (w.nextNode()) c++; return c; };
-    return { a: html('a'), b: html('b'), n: document.querySelectorAll('#b *').length, ca: comments('a'), cb: comments('b') };
+    return { a: html('a'), b: html('b'), n: document.querySelectorAll('#b > .mail-box *').length, ca: comments('a'), cb: comments('b') };
   });
   let elements = 0;
   for (const [name, tree] of trees) {
@@ -107,7 +107,7 @@ test('the same tree gives the same DOM as <mail-body>, its anchors apart, under 
   message = trees[0]![1];
   await p.click('#again');
   await expect.poll(async () => { const r = await read(); return r.a === r.b && r.b.includes('mail-top'); }).toBeTruthy();
-  // no body: an empty root, as <mail-body>'s
+  // no body: a root with an empty mail-box, as <mail-body>'s
   message = 'null';
   await p.click('#again');
   await expect.poll(async () => { const r = await read(); return r.a === r.b && r.n === 0; }).toBeTruthy();
