@@ -35,7 +35,9 @@ export function cut(raw: Uint8Array | string, options?: CutOptions): CutMessage 
     return v;
   };
   const bytes = typeof raw === 'string' ? new TextEncoder().encode(raw) : raw;
-  return cutMessage(bytes, { over: n('over', 64 * 1024), relatedOver: n('relatedOver', 512 * 1024), max: n('max', 32) });
+  const root = o.rootCiphertext ?? false;
+  if (typeof root !== 'boolean') throw new TypeError(`mail.cut: \`rootCiphertext\` is true or false, not ${describe(root)}`);
+  return cutMessage(bytes, { over: n('over', 64 * 1024), relatedOver: n('relatedOver', 512 * 1024), max: n('max', 32), rootCiphertext: root });
 }
 
 /** drops every message kept, and the plaintexts of the results they were read with (on lock or logout), as a

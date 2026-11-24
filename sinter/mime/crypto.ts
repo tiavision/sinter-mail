@@ -159,9 +159,15 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
   const ref: Ref = { source: e.source, start: e.start, end: e.end, encoding: 'identity' };
   const root = st.rootDecrypt.has(e) && e.nested === 0 && st.root.decrypts < 2;
   if (within(r.cuts, ciphertext).length) {
-    // the ciphertext was cut out of the input: a root step is offered without a digest, and takes no result
+    // the ciphertext was cut out of the input: no digest, so no `open` id; a root step is offered incomplete
     const id = `${e.id}#cut`;
-    if (root && canOffer(st)) {
+    if (root && !canOffer(st)) {
+      // past the step limit, as for a whole message
+      if (!st.budget.overrun) problem(r, e, 'limit', true, root);
+      scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, 'over-limit', ctx));
+      return;
+    }
+    if (root) {
       st.root.decrypts++;
       offerIncomplete(st, { id, state: 'pending', part: e.id, kind: 'decrypt', ciphertext, armored: false, incomplete: true });
     }
@@ -176,6 +182,15 @@ export function showEncrypted(r: Reader, e: Entity, shape: 'encrypted' | 'exchan
     // opening a part past the step limit: the app's choice, not the structure, stops nothing around it
     if (!st.budget.overrun) problem(r, e, 'limit', true, root);
     scope.parts.push(encryptedPart(shownId(e), e.type, ref, id, 'over-limit', ctx));
+    return;
+  }
+  if (r.cuts?.length) {
+    // a cut message: a cut body elsewhere may hide a delimiter that changes what this structure is in, so nothing is
+    // decrypted from the cut input; the step is incomplete (read the whole message)
+    const cut = `${e.id}#cut`;
+    if (root) st.root.decrypts++;
+    offerIncomplete(st, { id: cut, state: 'pending', part: e.id, kind: 'decrypt', ciphertext, armored: armored(bytes), incomplete: true });
+    scope.parts.push(encryptedPart(shownId(e), e.type, ref, cut, 'incomplete', ctx));
     return;
   }
   if (root) st.root.decrypts++;
@@ -278,8 +293,10 @@ export function showSigned(r: Reader, e: Entity, scope: Scope, mode: Mode, ctx: 
   const signedRef: Ref = { source: e.source, start: signed.start, end: signed.end, encoding: 'identity' };
   if (hasBareLF(r.sources.get(e.source)!, signed.start, signed.end)) signedRef.canonical = true;
   const signature: Ref = { source: sig.source, start: sig.bodyStart, end: sig.end, encoding: sig.encoding };
-  // signed bytes cut out of the input: the step is offered without a digest and takes no result, its parts pending
-  const incomplete = within(r.cuts, signedRef).length > 0 || within(r.cuts, signature).length > 0;
+  // a cut message: the step is offered without a digest and takes no result, its parts pending. Not only when its
+  // own bytes were cut: a cut body beside it may hide a delimiter that puts it in another structure in the whole
+  // message, or in none (the epilogue), so no signature is checked on the cut input
+  const incomplete = !!r.cuts?.length;
   const id = incomplete ? `${e.id}#cut` : `${e.id}#${verifyDigestOf(r, signedRef, signature)}`;
   const vs = incomplete ? undefined : st.verdicts.get(id);
   const c = vs ? combine(vs) : { status: 'pending' as const, signer: [] };
@@ -329,6 +346,13 @@ function inlineEncrypted(r: Reader, e: Entity, pid: string, id: string, ref: Ref
   if (!canOffer(st)) {
     if (!st.budget.overrun) problem(r, e, 'limit', true, root);
     scope.parts.push(encryptedPart(pid, e.type, ref, id, 'over-limit', ctx));
+    return;
+  }
+  if (r.cuts?.length) {
+    // a cut message: nothing is decrypted from it (showEncrypted); opened, the armor is an incomplete step
+    const cut = `${pid}#cut`;
+    offerIncomplete(st, { id: cut, state: 'pending', part: pid, kind: 'decrypt', ciphertext: ref, armored: true, incomplete: true });
+    scope.parts.push(encryptedPart(pid, e.type, ref, cut, 'incomplete', ctx));
     return;
   }
   if (root) st.root.decrypts++;
@@ -428,7 +452,12 @@ export function showText(r: Reader, e: Entity, scope: Scope, ctx: Ctx): boolean 
     if (b.kind === 'message') inlineEncrypted(r, e, pid, id, ref, scope, ctx, false);
     else {
       let protection = { ...ctx.protection }, sig: Omit<Sig, 'step'> | null = null;
-      if (canOffer(st)) {
+      if (canOffer(st) && r.cuts?.length) {
+        // a cut message: an incomplete step, its block pending (see showSigned)
+        const cut = `${pid}#cut`;
+        offerIncomplete(st, { id: cut, state: 'pending', part: pid, kind: 'verify-cleartext', block: ref, charset, incomplete: true });
+        protection = signedBy(ctx.protection, cut, 'pending', []);
+      } else if (canOffer(st)) {
         const vs = st.verdicts.get(id);
         const c = vs ? combine(vs) : { status: 'pending' as const, signer: [] };
         offer(st, { id, state: vs ? 'done' : 'pending', part: pid, kind: 'verify-cleartext', block: ref, charset });

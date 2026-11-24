@@ -469,7 +469,9 @@ export async function partBytes(id: string, raw: Uint8Array, ref: Ref, results: 
 <article data-sn-let="{ msg: m ? mail.mime(m.raw, { ...results, holes: m.holes }) : null }">
 ```
 
-A hole is `{ start, end, size }`: its range in the whole message and its size decoded. The input is the whole
+A hole is `{ start, end, size }`: its range in the whole message and its size decoded. Holes are your server's
+data, and a malformed one (not an array of non-negative integers) throws a `TypeError`, as any invalid option does:
+check what the server sent, or catch the error and read the whole message. The input is the whole
 message without those ranges, so a hole is at `start` minus the lengths of the holes before it, where its body is
 now empty. `holes` is compared by value, so the object may be new at every read. The limits count the whole
 message: the bytes cut out count against the call's byte budget. Without `holes`, a cut input reads as a whole
@@ -491,31 +493,43 @@ gap may not end with a CR; that rule is what makes a cut unable to change the st
 compared there: that the server sent the right bytes rests on the `ETag` (below). A cut attachment's `size` is the hole's (the server's claim, no larger than its bytes allow); a
 Ref's `missing` says what to fetch.
 
-**Steps**: a verify step whose signed bytes include a hole, or a decrypt step whose ciphertext was cut, is offered
-with `incomplete: true` and an id with no digest (`1#cut`): it takes no result (one given is a `stale-result`).
-A signed message's parts show `signed: 'pending'` meanwhile; to verify, read the whole message (its step has the
-usual id, and every part the same id as before, so the reader's choices carry over). The pending label can become
-no label at all on the whole message, when a cut body turns out to be malformed under the signature. A cut
-ciphertext is an `'encrypted'` part with reason `'incomplete'`: fetch the whole message to decrypt it. An armored
-ciphertext (`-----BEGIN PGP MESSAGE-----`) is never cut, its lines starting with `--`, so in practice only base64
-ciphertexts are; bodies inside an encrypted payload are local once it is decrypted.
+**Steps**: in a cut message, every step is incomplete. A step is offered with `incomplete: true` and an id with
+no digest (`<part>#cut`), and it takes no result (one given is a `stale-result`). This applies to every verify,
+cleartext and decrypt step, and to an encrypted part the reader opens, not only to those whose own bytes were cut.
+A cut body elsewhere may hide a delimiter that puts the step in another structure in the whole message, or in
+none (the epilogue), so nothing is verified or decrypted on a cut input. Signed parts show `signed: 'pending'`
+meanwhile, and an encrypted part has reason `'incomplete'`. To verify or decrypt, read the whole message: its
+steps have the usual ids, and every part has the same id as before. The reader's choices (`open`) carry over,
+except for an encrypted part whose own ciphertext was cut: it has no digest id in the cut message, so it is not a
+step there. Its part is `'incomplete'`, and the reader opens it on the whole message.
+A pending label can become no label at all on the whole message. That happens when a cut body turns out to be
+malformed under the signature. An armored ciphertext (`-----BEGIN PGP MESSAGE-----`) is never cut, because its
+lines start with `--`. Bodies inside an encrypted payload are local once it is decrypted.
 
-**Until a cut body is fetched**, the reader cannot see its bytes, so it cannot rule out that they hide a delimiter
-and parts of their own (a sender's trick that `mail.bytes` refuses once they arrive). It never grants trust on
-what it cannot see: in a cut message, a cleartext-signed text is never the signature over the whole message (no
-`summary.from: 'matches'` from it), and an armored text is never the root's decrypt step (it is an `'encrypted'`
-part to open), however few parts are shown; and a signature whose signed bytes include a cut is an incomplete step,
-its parts pending. What the cut message shows can still differ from the whole message's parts until each cut body
-is fetched and passes `mail.bytes`.
+```ts
+// what an app does with a cut message: read the whole one when the cut was refused or a step needs its bytes
+const needsWhole = msg.cut === 'invalid' || msg.steps.some((s) => s.incomplete);
+// and, when the reader asks to open an encrypted part with reason 'incomplete' (no step), read the whole one then
+```
+
+**Until a cut body is fetched**, the reader cannot see its bytes, so it cannot rule out that they hide a
+delimiter and parts of their own. That is a sender's trick, and `mail.bytes` refuses those bytes once they
+arrive. So a cut message is never shown with more trust than the whole one could earn: no label, no root
+signature (no `summary.from: 'matches'`), no decrypted text, no protected headers. Still, which parts it shows
+can differ from the whole message's until each cut body is fetched and passes `mail.bytes`.
 
 **Inline images** cut out are fetched like any attachment, in the `inlineImages` action above (`partBytes` in place
 of `mail.bytes`), in parallel: the body renders first, and each image as it arrives.
 
 **The server** provides:
 
-1. the message cut: `mail.cut(raw, { over, relatedOver, max })` in JavaScript returns `{ raw, holes }`, the
-   reference cutter (bodies over 64 KiB, 512 KiB in a `multipart/related`, at most 32, the largest first; nothing
-   in or around a malformed part). A server in another language may use its own MIME parser, since the reader
+1. the message cut: `mail.cut(raw, { over, relatedOver, max, rootCiphertext })` in JavaScript returns `{ raw,
+   holes }`, the reference cutter. It cuts bodies over 64 KiB, or 512 KiB in a `multipart/related`, at most 32 of
+   them, the largest first, and nothing in or around a malformed part. It does not cut the ciphertext that the
+   reader decrypts without asking: the root's, or the one inside a root `multipart/signed`. The app would fetch the
+   whole message at once anyway, so the cut would cost a request and save nothing. `rootCiphertext: true` cuts it
+   too, for an app that shows a placeholder before the download. Encrypted parts elsewhere (in a forward, or one part
+   of a plain mail) open only on request, and are cut like any attachment. A server in another language may use its own MIME parser, since the reader
    checks every hole: a hole it refuses costs a full download. Send the holes in a
    response header (32 holes are about 1.5 kB of JSON) or in a body of your own design;
 2. Range requests on the whole message, with an `ETag` (and `If-Range`): the bytes the holes were cut from. A
