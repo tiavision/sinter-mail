@@ -1208,7 +1208,13 @@ export function build(html: string, maxDepth: number): { root: RawElement; deep:
 
   const endInRow = (name: string): void => {
     if (name === 'tr' || name === 'table' || name === 'tbody' || name === 'tfoot' || name === 'thead') {
-      if (!inScope('tr', TABLE) && !(name !== 'tr' && name !== 'table' && inScope(name, TABLE))) return;
+      if (!inScope('tr', TABLE)) {
+        // No row to close. That can only be at the depth bound, where a cell opened beside its row (the row closed
+        // for it) and the mode stayed this one: a section's end tag is then the section's own, as in a table body.
+        // (Clearing back to a row that is not there would take the stack down to its root, and the next pop past it.)
+        if (name !== 'tr' && name !== 'table' && inScope(name, TABLE)) { mode = IN_TABLE_BODY; endInTableBody(name); }
+        return;
+      }
       clearToRow();
       pop();
       mode = IN_TABLE_BODY;

@@ -361,7 +361,8 @@ function nodesOf(list: readonly RawNode[], tag: string, cx: Context, from: numbe
 function element(el: RawElement, cx: Context): Element | null {
   const known = TAG_OF.get(el.tag);
   if (known === null) return null;
-  const tag: Tag = known ?? (el.tag in TAGS ? (el.tag as Tag) : 'span');
+  // any other is a span (by the map, never `in TAGS`: an email may name what every object has, `<constructor>`)
+  const tag: Tag = known ?? 'span';
   const info = TAGS[tag];
   const attrs: Attrs = {};
   // most elements have no attribute the tag keeps (a cell's style, class, align and width are the cascade's):

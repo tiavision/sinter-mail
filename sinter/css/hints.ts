@@ -119,7 +119,8 @@ const wh = (out: Assignment[], el: RawElement, nonzero: boolean) => {
 };
 
 // <img align>'s vertical alignments
-const VA: Record<string, string> = { top: 'top', middle: 'middle', absmiddle: 'middle', center: 'middle', bottom: 'baseline', absbottom: 'bottom', baseline: 'baseline', texttop: 'text-top' };
+// without a prototype: looked up by what the email wrote (`align=constructor`)
+const VA: Record<string, string> = Object.assign(Object.create(null), { top: 'top', middle: 'middle', absmiddle: 'middle', center: 'middle', bottom: 'baseline', absbottom: 'bottom', baseline: 'baseline', texttop: 'text-top' });
 
 /** no hints: shared, never written to */
 const NONE: readonly Assignment[] = [];

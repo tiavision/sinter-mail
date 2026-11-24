@@ -401,6 +401,32 @@ describe('attacks', () => {
       }
     });
   }
+  // an email may name what every object has (`constructor`, `__proto__`): as a tag, an attribute's value, a
+  // property, a unit, a class. None is in a table of the library's, and each parsed as any unknown name does
+  const NAMES = [
+    '<constructor>x</constructor>', '<__proto__>x</__proto__>', '<valueof>x', '<img align=constructor>', '<img align=__proto__>',
+    '<p style="constructor: inherit">x', '<p style="constructor: red">x', '<p style="__proto__: 1px">x', '<p style="width: 5constructor; height: 5__proto__">x',
+    '<p style="color: hsl(120constructor 50% 50%)">x', '<style>@media (min-width: 5constructor) { p { color: red } } @media (min-resolution: 2constructor) { p { color: blue } }</style><p>x',
+    '<style>constructor { color: red } .constructor, #constructor, __proto__ { color: blue } p { constructor: inherit; __proto__: inherit }</style><p class="constructor __proto__" id="constructor">x</p><constructor class=constructor>y',
+    '<ol type=constructor><li value=constructor dir=constructor lang=constructor>x</ol>', '<font size=constructor color=constructor face=constructor>x',
+    '<table border=constructor cellpadding=__proto__ align=constructor valign=constructor><tr><td align=constructor valign=__proto__ scope=constructor>x',
+    '<div id=constructor><a href="#constructor">x</a><a href="#__proto__">y</a><a name=__proto__>z</a><img src="cid:constructor"><img src="cid:__proto__"></div>',
+    '<meta name="color-scheme" content="constructor"><div class="constructor gmail_quote">q</div><blockquote type=constructor>x</blockquote>',
+  ];
+  for (const html of NAMES) {
+    test(html.slice(0, 70), () => {
+      for (const o of [undefined, { images: 'allow', cid: '/c?id={cid}', media: 'narrow' }] as const) {
+        const b = parse(html, o);
+        invariants(b, o ?? {});
+        for (const e of els(b)) for (const v of [...Object.values(e.style), ...Object.values(e.attrs)]) expect(typeof v).toBe('string');
+      }
+    });
+  }
+  test('an unknown tag is a span, whatever its name', () => {
+    expect(els(parse('<constructor>a</constructor><hasownproperty>b</hasownproperty><tostring>c</tostring>')).map((e) => e.tag)).toEqual(['span', 'span', 'span']);
+    expect(els(parse('<img align=constructor width=5 height=5>'))[0]!.style['vertical-align']).toBeUndefined();
+    expect(els(parse('<p style="constructor: inherit; color: red">x'))[0]!.style).toEqual({ color: 'red' });
+  });
   test('nesting is bounded', () => {
     const b = parse('<div>'.repeat(5000) + 'x');
     let depth = 0;
