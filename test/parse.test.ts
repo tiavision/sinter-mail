@@ -185,18 +185,17 @@ describe('quoted history and signatures, as mail clients mark them', () => {
 describe('legacy display (RFC 9788)', () => {
   const LD = '<div class="header-protection-legacy-display"><pre>Subject: s</pre></div>';
   const drop = (html: string) => shape(parse(html, { legacyDisplay: true }));
-  test('the body’s first child, a div with the class, is left out with its content', () => {
+  test('every div in the body with the class is left out with its content (RFC 9788 §4.5.3.3)', () => {
     expect(drop(`${LD}<p>a</p>`)).toEqual([['p', 'a']]);
     expect(drop(`<body>\n  <div class="x header-protection-legacy-display  y">h</div><p>a</p></body>`)).toEqual(['\n  ', ['p', 'a']]);
+    expect(drop(`${LD}<div class="header-protection-legacy-display">b</div>`)).toEqual([]);
+    expect(drop(`<p>a</p>${LD}`)).toEqual([['p', 'a']]);
+    expect(drop(`text${LD}`)).toEqual(['text']);
+    expect(drop(`<div>${LD}<p>b</p></div>`)).toEqual([['div', ['p', 'b']]]);
   });
-  test('only the first such div', () => {
-    expect(drop(`${LD}<div class="header-protection-legacy-display">b</div>`)).toEqual([['div', 'b']]);
-  });
-  test('kept when it is not the first child, deeper, on another tag, or without the option', () => {
-    expect(drop(`<p>a</p>${LD}`)).toEqual([['p', 'a'], ['div', ['pre', 'Subject: s']]]);
-    expect(drop(`text${LD}`)).toEqual(['text', ['div', ['pre', 'Subject: s']]]);
-    expect(drop(`<div>${LD}</div>`)).toEqual([['div', ['div', ['pre', 'Subject: s']]]]);
+  test('kept on another tag, or without the option: a class alone drops nothing', () => {
     expect(drop('<p class="header-protection-legacy-display">a</p>')).toEqual([['p', 'a']]);
+    expect(drop('<div class="header-protection-legacy-displayx">a</div>')).toEqual([['div', 'a']]);
     expect(shape(parse(`${LD}<p>a</p>`))).toEqual([['div', ['pre', 'Subject: s']], ['p', 'a']]);
     expect(shape(parse(`${LD}<p>a</p>`, { legacyDisplay: false }))).toEqual([['div', ['pre', 'Subject: s']], ['p', 'a']]);
   });

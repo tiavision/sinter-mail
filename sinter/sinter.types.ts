@@ -135,9 +135,9 @@ export interface ParseOptions {
   /** the largest `data:` image kept, in characters of its URL (default 65536; 0 keeps none) */
   dataImages?: number;
   /**
-   * the HTML part has `hp-legacy-display="1"` (RFC 9788): the body's first child, when it is a `div` with class
-   * `header-protection-legacy-display` (the protected headers repeated for clients that cannot read them), is
-   * left out with its content. Default false: a class alone drops nothing.
+   * the HTML part has `hp-legacy-display="1"` in an encrypted payload (RFC 9788): every `div` in the body with class
+   * `header-protection-legacy-display` (the protected headers repeated for clients that cannot read them) is left
+   * out with its content. Default false: a class alone drops nothing.
    */
   legacyDisplay?: boolean;
   /**

@@ -233,20 +233,27 @@ function build(html: string, o: Options): Body {
 }
 
 /**
- * RFC 9788's legacy display element, which repeats the protected headers for clients that cannot read them: the
- * body's first child (whitespace before it is no child), when it is a `div` with class `header-protection-legacy-display`,
- * removed with its content. Only that one, and only with the option: a class alone drops nothing. Removed from the
- * raw tree before the cascade, so the email's rules, its link targets and its quotes see the body without it, as an
- * email written without it.
+ * RFC 9788's legacy display element, which repeats the protected headers for clients that cannot read them: every
+ * `div` in the body with class `header-protection-legacy-display`, removed with its content (§4.5.3.3: "any element of
+ * the HTML <body>"; its own CSS is `body div.header-protection-legacy-display { display: none }`). Only with the
+ * option, which the caller sets only for a part with `hp-legacy-display="1"` in an encrypted payload: a class alone
+ * drops nothing. Removed from the raw tree before the cascade, so the email's rules, its link targets and its quotes
+ * see the body without it, as an email written without it. Walked without recursion.
  */
 function legacyDisplay(root: RawElement): void {
   const body = root.children.find((n): n is RawElement => n.type === 'element' && n.tag === 'body');
   if (!body) return;
-  const i = body.children.findIndex((c) => c.type === 'element' || c.value.trim() !== '');
-  const c = body.children[i];
-  if (c?.type === 'element' && c.tag === 'div' && (attr(c, 'class') ?? '').split(/[\t\n\f\r ]+/).includes('header-protection-legacy-display')) {
-    body.children.splice(i, 1);
-    c.parent = null;
+  const stack: RawElement[] = [body];
+  while (stack.length) {
+    const el = stack.pop()!;
+    for (let i = el.children.length - 1; i >= 0; i--) {
+      const c = el.children[i];
+      if (c.type !== 'element') continue;
+      if (c.tag === 'div' && (attr(c, 'class') ?? '').split(/[\t\n\f\r ]+/).includes('header-protection-legacy-display')) {
+        el.children.splice(i, 1);
+        c.parent = null;
+      } else stack.push(c);
+    }
   }
 }
 

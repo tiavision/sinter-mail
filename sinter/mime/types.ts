@@ -124,6 +124,7 @@ export type ProblemCode =
   // blocking
   | 'boundary-missing-close' | 'boundary-invalid' | 'duplicate-field' | 'duplicate-parameter'
   | 'encoding-on-multipart' | 'encoding-unknown' | 'no-header-end' | 'crypto-shape' | 'limit' | 'integrity'
+  | 'control-in-structure'
   // informational
   | 'armor-headers' | 'duplicate-header' | 'canonicalized' | 'exchange-shape' | 'charset-unknown'
   | 'charset-fallback' | 'base64-junk' | 'qp-invalid' | 'rfc2231-segments' | 'content-id-duplicate'
