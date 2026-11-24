@@ -79,11 +79,11 @@ interface Message {
   type: 'message';
   headers: Headers;            // the headers to show (section 6)
   outer: Headers;              // the headers as transported
-  headerSource: 'protected' | 'outer';
+  headerSource: 'protected' | 'outer';   // where every shown field but From came from
+  fromSource: 'protected' | 'outer';
   confidential: string[];      // header names the sender sent only encrypted (section 6), lowercase
   parts: Part[];               // what to show, in reading order
   attachments: Attachment[];
-  inline: Inline[];            // for mail.parse's `cid`, through blob URLs (section 3)
   calendar: Calendar[];        // text/calendar parts (iMIP), as text
   steps: Step[];               // what the app is asked to do (section 5); empty for plain mail
   summary: Summary;            // section 7
@@ -91,7 +91,7 @@ interface Message {
 }
 
 type Part = { id: string; contentType: string; protection: Protection } & (
-  | { type: 'html'; html: string; legacyDisplay: boolean }
+  | { type: 'html'; html: string; legacyDisplay: boolean; inline: Inline[] }   // its own related parts
   | { type: 'text'; text: string; flowed: boolean; delsp: boolean }
   | { type: 'message'; message: Message }          // a forwarded message/rfc822, inline
   | { type: 'encrypted'; step: string | null }     // not decrypted (yet): pending, failed, or not offered
@@ -109,7 +109,12 @@ interface Headers {
   raw: [name: string, value: string][];        // every header, unfolded, not decoded
 }
 
-interface Address { name: string | null; address: string; group?: string }
+interface Address {
+  name: string | null;
+  address: string | null;      // null when the addr-spec is ambiguous or malformed: never a guess
+  group?: string;
+  suspicious?: true;           // the display name holds `@` or `<`, or looks like another address
+}
 
 interface Ref { source: string; start: number; end: number; encoding: 'base64' | 'quoted-printable' | 'identity' }
 
@@ -132,11 +137,20 @@ interface Inline { contentId: string; attachment: string }   // the attachment's
   the same ids, so an app can key state by them.
 - **No map is keyed by the sender's strings.** Content-IDs, header names and list headers are in arrays of
   pairs: an object keyed by `__proto__` stores nothing.
-- **Inline images** go to `mail.parse` as URLs: an action reads each `Inline`'s bytes with `mail.bytes`,
-  checks `mail.imageType` (not the declared type) and makes a blob URL; `cid` is then the map of those URLs.
-  An app whose server serves the parts keeps the `cid` template it has today.
+- **Inline images belong to their body.** An HTML part's `inline` lists only the parts of its own
+  `multipart/related`, and only those with the same `protection` as the body: an unsigned part outside a
+  signed body cannot supply the image the signed body shows. A Content-ID that appears twice in one scope
+  resolves to nothing, and is a problem. `Content-Location` is never resolved.
+- **Inline images go to `mail.parse` as URLs**: an action reads each `Inline`'s bytes with `mail.bytes`,
+  checks `mail.imageType` (PNG, JPEG, GIF, WebP, AVIF by their magic numbers; never SVG, whatever the declared
+  type) and makes a blob URL; `cid` is then the map of those URLs. A blob URL has the page's origin, so the
+  type check is what keeps an attachment from becoming a document there. An app whose server serves the parts
+  keeps the `cid` template it has today, and must apply the same rule when serving them.
 - A `Part` goes straight to the existing helpers: `mail.parse(part.html, { …, cid, legacyDisplay:
-  part.legacyDisplay })`, `mail.plain(part.text, { flowed: part.flowed, delsp: part.delsp })`.
+  part.legacyDisplay, encrypted: part.protection.encrypted })`, `mail.plain(part.text, { flowed: part.flowed,
+  delsp: part.delsp })`. With `encrypted: true`, `mail.parse` blocks remote images whatever `images` says:
+  a decrypted body never makes a request (EFAIL's channel, and a read receipt for content the sender meant to
+  be private).
 
 ### 3. Reading MIME
 
@@ -146,20 +160,51 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
 - **Bytes in, bytes kept.** Input is a `Uint8Array`. Each part is a byte range of the input (or of a
   decrypted payload); nothing is decoded before its charset is known. A string input is encoded as UTF-8,
   which suits tests and 7-bit fixtures; an 8-bit fixture is read from bytes.
+- **Line ends, defined once**: CRLF and bare LF end a line, everywhere (headers, boundaries, bodies, signed
+  bytes); a bare CR is not a line end and is kept as a character. The same rule applies to every boundary
+  search and to the signed bytes' canonical form (section 5).
 - **Headers**:
   - unfolded; the raw value kept in `raw`, undecoded;
-  - address lists **tokenized first, encoded words decoded after**, inside display names and comments only,
-    so a decoded `<`, `>`, `,`, `@` or line break is text, never structure;
-  - encoded words (RFC 2047) decoded, adjacent ones joined without the space between them, a multi-byte
-    character split across two words joined before decoding; UTF-8 headers (RFC 6532);
+  - structured fields (addresses, Content-Type, Content-Disposition, Message-ID lists) **tokenized first,
+    encoded words decoded after**, and only in phrases, comments and unstructured text, never in an addr-spec,
+    a parameter name or a token, so a decoded `<`, `>`, `,`, `@`, quote or line break is text, never structure
+    (Mailsploit, "Splitting the email atom");
+  - every decoded value, `Headers` fields and filenames alike, has NUL, C0 controls, CR, LF and bidirectional
+    controls removed; an app that reuses a value in a reply cannot inject a header with it;
+  - an address list is read by the RFC 5322 grammar with its obsolete forms, iteratively (comments nested at
+    most 8 deep, at most 1,000 addresses per field); an addr-spec the grammar cannot read one way only is
+    `address: null`, which makes `summary.from` `'unknown'`, never a guess;
+  - encoded words (RFC 2047) decoded, adjacent ones joined without the space between them, consecutive words
+    of one charset joined into one buffer and decoded once (linear, and a multi-byte character split across
+    two words comes out whole); UTF-8 headers (RFC 6532);
   - parameters with RFC 2231 continuations and charsets (`filename*0*=`), and RFC 2047 words in `filename=`
     and `name=`, which Outlook and Gmail send against the standard;
   - dates by RFC 5322 with the obsolete forms clients send.
-- **Bodies**: base64, quoted-printable, 7bit, 8bit and binary; decoded with the part's charset through
-  `TextDecoder`. A missing charset on `text/*` is read as UTF-8; invalid UTF-8 falls back to windows-1252
-  (what a byte that is not UTF-8 most often is); an unknown label decodes as UTF-8 and adds a problem. UTF-7
-  (no `TextDecoder` has it) is decoded by the reader. Node without full ICU lacks some labels: those parts
-  add a problem, and the guide says so.
+- **Duplicates and conflicts**, each a problem, each resolved one fixed way:
+  - a repeated `Content-Type`, `Content-Transfer-Encoding` or `Content-Disposition` field: the first counts;
+  - a repeated parameter (`boundary`, `charset`, `filename`, `name`, `protocol`): the first counts;
+  - a repeated `From`, `Sender`, `Subject` or `Date`: `headers` shows all `From` addresses, the first of the
+    others; `summary.from` is `'unknown'`;
+  - **inside or above a cryptographic structure, any of these, and any repair below (a missing closing
+    boundary, a boundary with trailing whitespace, an encoding on a multipart), means no step**: the part is
+    shown unlabelled, so a parser that would have read the message another way cannot be steered into a
+    badge.
+- **Boundaries**: a delimiter line is exactly `--` and the boundary, then optional whitespace, then the line
+  end (or `--` for the close); `--boundaryX` is not `--boundary`. A boundary that is empty or longer than 70
+  characters, or a child's boundary that starts with an ancestor's, is a problem (and, by the rule above,
+  stops a step).
+- **Transfer encodings**: base64 skips characters outside its alphabet, stops at the first `=` padding,
+  and drops a final partial quantum; quoted-printable keeps `=` not followed by two hex digits as it is,
+  and drops trailing whitespace before a soft line break. A `Content-Transfer-Encoding` other than 7bit, 8bit
+  or binary on `multipart/*` or `message/*` is ignored, and is a problem. An unknown encoding makes the
+  part an attachment, undecoded.
+- **Charsets**: decoded with the part's charset through `TextDecoder`, WHATWG labels only. A missing
+  charset on `text/*` is read as UTF-8; invalid UTF-8 falls back to windows-1252 (what a byte that is not
+  UTF-8 most often is); any other label, UTF-7 included, decodes as UTF-8 and adds a problem. UTF-7 is not
+  decoded because its escapes can hide text from whatever reads the message before the reader, and browsers
+  dropped it for that reason. WHATWG's `replacement` labels (ISO-2022-KR and others) decode to one
+  replacement character, as browsers do. Encoded words use the same table. Node without full ICU lacks some
+  labels: those parts add a problem, and the guide says so.
 - **Choosing what to show**:
   - `multipart/alternative`: the last part that can be shown (the standard's order is plainest first);
     `prefer` chooses between an HTML and a text candidate. **A text candidate that is wholly one armored
@@ -167,8 +212,8 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
     armor in both alternatives, and the HTML one is never a step (section 5). The parts not chosen are
     neither parts nor attachments, and **their signatures and ciphertexts make no step and count for nothing
     in the summary**.
-  - `multipart/related`: the root (`start`, else the first part) is shown; the rest are `inline`, matched by
-    Content-ID or `Content-Location`; one the root does not reference is also an attachment.
+  - `multipart/related`: the root (`start`, else the first part) is shown; the rest are its `inline`, by
+    Content-ID; one the root does not reference is also an attachment.
   - `multipart/mixed` and unknown `multipart/*`: each part in order. A `text/plain` or `text/html` part
     without `Content-Disposition: attachment` and without a filename is shown; the rest are attachments.
   - `multipart/digest`: parts default to `message/rfc822`.
@@ -178,8 +223,11 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
   - `message/rfc822` (and `message/global`): inline, a nested `Message`; as an attachment, an attachment the
     app may read with `mail.mime` again. A nested message never makes steps (section 5).
   - `text/calendar`: always in `calendar` (with its `method` parameter), and an attachment too, so it can be
-    saved.
+    saved. Its text is data for an iCalendar parser, never HTML: a description with markup is shown as text.
   - `application/pgp-keys`: an attachment, marked so the app can offer to import it.
+  - Opaque, never opened: `message/partial` (no reassembly), `message/external-body` (nothing fetched),
+    TNEF (`winmail.dat`, `application/ms-tnef`) and uuencoded blocks in text: attachments, or text, as they
+    are. Vendor headers (`X-Mozilla-External-Attachment-URL` and the like) are in `raw` and never acted on.
 - **Malformed mail** reads as a tolerant client reads it: a missing closing boundary ends the multipart at the
   end of its parent; a boundary line with trailing whitespace is a boundary; a part with no blank line after
   its headers has an empty body. Each is a problem, none throws.
@@ -189,11 +237,20 @@ Our own reader, over bytes (RFC 2045 to 2049); the choice is argued in
 - **Bounded work**: linear in the input, boundaries found in one pass; nesting at most 32 levels, walked
   without recursion; at most 1,000 parts; header blocks at most 1 MB for the message's root (long recipient
   lists, `Received`, ARC and Microsoft headers) and 64 kB for a part, at most 1,000 fields each; at most 8
-  levels of nested messages; at most 16 steps. Past a limit, the rest is one opaque attachment and a
-  problem. A decoder's output is never larger than its input, so decoded size is bounded by the input's.
-- **Filenames**: path separators, control characters, bidirectional controls (`U+202E`: `evil‮fdp.exe`) and
-  leading dots removed, at most 255 characters keeping the extension; empty becomes `attachment`. The
-  original is in `raw`.
+  levels of nested messages; at most 16 steps; at most 64 encoded words per header field. Past a limit, the
+  rest is one opaque attachment and a problem. A decoder's output is never larger than its input.
+- **One budget per call**: the limits count across everything one `mail.mime` call reads, the input, every
+  decrypted payload and every nested message together, so feeding results back cannot multiply the work;
+  a decrypted payload larger than 4 times its ciphertext (OpenPGP compresses) is refused as a problem.
+- **No backtracking regular expressions**: the grammars are hand-written scanners; the test suite runs each
+  hostile case under a time bound.
+- **Filenames**:
+  - which: `filename*` (RFC 2231), then `filename`, then `name`; RFC 2231 segments out of order, repeated or
+    missing are a problem, and the segments present are joined in order;
+  - removed: path separators, `:`, control characters, every bidirectional control (U+200E, U+200F, U+061C,
+    U+202A to U+202E, U+2066 to U+2069: `evil‮fdp.exe`), leading dots, trailing dots and spaces;
+  - a Windows reserved name (`CON`, `NUL`, `COM1` and the like, with any extension) gets a `_` prefix;
+  - at most 255 characters keeping the extension; empty becomes `attachment`. The original is in `raw`.
 - **Content types are not trusted**: the declared type is reported, lowercased and checked for syntax
   (`type/subtype`), and used only to choose what to show. Showing an attachment inline is the app's decision,
   by its own allowlist; an inline image's type comes from its bytes (`mail.imageType`).
@@ -248,7 +305,9 @@ What becomes a step, and nothing else:
   the line break before the next delimiter (that line break belongs to the delimiter). RFC 3156 has the
   receiver verify the canonical form, with CRLF line endings: bare LF line endings (maildir, mbox, JMAP blobs,
   `file:` fixtures) are converted to CRLF, nothing else is changed, and `canonicalized` and a problem say so.
-  `mail.bytes` returns the canonical bytes.
+  `mail.bytes` returns the canonical bytes. The signed part's text is never re-read as headers unless it is a
+  MIME entity, and a problem anywhere inside the signed subtree leaves its parts `signed: null` whatever the
+  verdict.
 - **Inline PGP**, in a `text/plain` body:
   - an armored message is a decrypt step only when it is the whole body (whitespace aside) **and** the body is
     the root message's only part shown: one among several parts, or inside a nested message, is an
@@ -277,10 +336,12 @@ is the message's root or the root of a decrypted payload.
   Thunderbird, on the root whatever its type, `text/plain` included). Then `headerSource` is `'protected'`
   and **the whole set** comes from the payload: Subject, Reply-To, To, Cc, Date, Message-ID, In-Reply-To,
   References. A field the payload does not have is empty, not the outer one: an attacker re-sending an old
-  ciphertext cannot add a `Reply-To` of their own next to an inner From.
+  ciphertext cannot add a `Reply-To` of their own next to an inner From. Fields that exist only outside
+  (`list`, `autocrypt`, `raw`) are never protected, whatever `headerSource` says: an app must not let them
+  change what it does with encrypted content (the Delta Chat group-membership attack used such a header).
 - **From is the exception.** The protected From replaces the outer one only with a `good` verdict on a
   signature over the payload's root whose `signer` includes that address. Otherwise `headers.from` is the
-  outer From and `summary.from` says whether the inner one differs. Encryption alone proves nothing about the
+  outer From (`fromSource: 'outer'`) and `summary.from` says whether the inner one differs. Encryption alone proves nothing about the
   author: anyone with the reader's public key can encrypt `From: ceo@…`.
 - **Without protected headers** (older senders), `headerSource` is `'outer'`: the outer headers are shown as
   they are, and `summary.from` is `'unknown'` for decrypted content unless a signature binds it.
@@ -338,8 +399,8 @@ sinter/
 ```
 
 Exported from the entry like `mail.plain`, and as `@tiavision/sinter-mail/mime` so `lazy` covers it; a page
-without MIME pays nothing. `mail.parse` gains the `legacyDisplay` option. Budget: 12 kB gzip, to be measured
-(no charset tables: `TextDecoder` has them; UTF-7 and the address and date grammars are the reader's). Pure: an
+without MIME pays nothing. `mail.parse` gains the `legacyDisplay` and `encrypted` options. Budget: 12 kB gzip, to be measured
+(no charset tables: `TextDecoder` has them; the address and date grammars are the reader's). Pure: an
 `.eml` in a `file:` resource folds at build time.
 
 ## Our own reader or a dependency
@@ -350,8 +411,31 @@ result and the decision will be here.
 
 ## Pitfalls from other MIME parsers
 
-Being surveyed (published vulnerabilities of MIME parsers and mail clients, and the research on
-encrypted-mail attacks), each mapped to this design; the result will be here.
+Published vulnerabilities of MIME parsers and mail clients, and the research on encrypted mail, each mapped to
+where this design answers it. Surveyed for this revision; a few sources (PortSwigger's paper, the IETF's MIME
+ambiguity draft) were read only through summaries, and are to be read in full before step 1.
+
+| Class | Seen in | This design |
+| --- | --- | --- |
+| Address parse differentials, sender spoofing | Python [CVE-2023-27043](https://access.redhat.com/articles/7051467); postal-mime before 4.2.1 ([domain truncation](https://www.vulncheck.com/advisories/postal-mime-before-4.2.1-sender-spoofing-via-address-parser-domain-truncation)); Nodemailer [GHSA-mm7p-fcc7-pg87](https://github.com/advisories/GHSA-mm7p-fcc7-pg87) (quoted local part); Thunderbird (malformed From) | the grammar, `address: null` rather than a guess, `'unknown'` (section 3) |
+| Encoded words smuggled into structure | Mailsploit (2017, Thunderbird and others: an encoded NUL and `@`); Gareth Heyes, [Splitting the email atom](https://portswigger.net/kb/papers/rclapqr/splitting-the-email-atom.pdf) (2024: encoded `@ , < >`); Python (an encoded comma when folding) | tokenize first, decode only in phrases and comments; controls removed; `suspicious` (section 3) |
+| Header injection through decoded values | Python [CVE-2024-6923](https://openwall.com/lists/oss-security/2024/08/01/3); MimeKit (CRLF in a quoted local part) | CR, LF, NUL removed from every decoded value (section 3) |
+| Duplicate or conflicting fields and parameters | Amavis [CVE-2024-28054](https://gitlab.com/amavis/amavis/-/work_items/112) (two `boundary` parameters); "Composition Kills" (USENIX Security 2020, several From); [Inbox Invasion](https://citation.thinkst.com/talk/96163) (Black Hat Asia 2025: evasions across detectors and clients) | first counts, a problem, no step near crypto (section 3) |
+| Boundary ambiguity | Inbox Invasion; contradictory or prefixed boundaries | exact delimiter rule; prefixes a problem (section 3) |
+| Line-end ambiguity | SMTP smuggling (Postfix, Sendmail, Exim, 2023: bare LF) | one rule for line ends; CRLF canonical form for signatures (sections 3, 5) |
+| Transfer-encoding edge cases | Inbox Invasion; the IETF MIME ambiguity draft | fixed decoder rules; encodings on multiparts ignored (section 3) |
+| Charset tricks | UTF-7 and ISO-2022 escapes hiding text from filters | WHATWG labels only; no UTF-7 (section 3) |
+| Quadratic work, recursion, ReDoS | postal-mime (quadratic encoded-word join; nested multipart); Nodemailer's address parser (backtracking, recursion); Go `net/mail` and `mime/multipart` (quadratic concatenation, part counts); Perl Email-MIME | scanners without backtracking, iterative walks, one budget per call (section 4) |
+| Filename spoofing and traversal | the U+202E trick; Thunderbird (a malformed filename attached a directory listing to a forward) | the filename rules (section 4) |
+| Content-type confusion, attachments as documents | Roundcube [CVE-2024-42008](https://www.sonarsource.com/blog/government-emails-at-risk-critical-cross-site-scripting-vulnerability-in-roundcube-webmail/) (an attachment served with a dangerous type), CVE-2024-37383 (SVG, exploited); Thunderbird (a message declared as PDF rendered as HTML); Zimbra CVE-2025-27915 (HTML in an ICS file, exploited) | inline images by magic number, never SVG; calendar text never HTML (sections 2, 3) |
+| `cid:` and Content-Location reaching across parts | [Re: What's Up Johnny?](https://arxiv.org/abs/1904.07550) (ACNS 2019: hidden content, replies as decryption oracles) | inline per body and per protection; no Content-Location (section 2) |
+| Signature spoofing by wrapping and display | [Johnny, You Are Fired](https://www.usenix.org/conference/usenixsecurity19/presentation/muller) (USENIX Security 2019: most OpenPGP and S/MIME clients); Thunderbird (signed text read as headers, [MFSA 2023-55](https://www.mozilla.org/security/advisories/mfsa2023-55/)) | labels per part, strict shape, `'all'` only for one root signature by the From; signed text never re-read as headers (sections 5, 7) |
+| EFAIL | [Poddebniak et al.](https://www.usenix.org/conference/usenixsecurity18/presentation/poddebniak) (USENIX Security 2018) | bodies never joined; root only; integrity required; no remote images in decrypted parts (sections 2, 5) |
+| Ciphertext replay, reply oracles | Re: What's Up Johnny?; an old ciphertext re-sent as a new message's root | protected headers as a set, From only when signed, replies quote only on `'matches'` (sections 6, 7) |
+| Unprotected headers trusted inside E2EE | [Delta Chat](https://eprint.iacr.org/2024/918.pdf) (USENIX Security 2024: a plaintext header removed a group member) | outer-only fields never protected (section 6) |
+| Vendor headers and external parts acted on | Thunderbird ([MFSA 2025-26](https://www.mozilla.org/security/advisories/mfsa2025-26): an external-attachment header fetched); `message/partial` reassembly to evade scanners | opaque types, vendor headers never acted on (section 3) |
+
+Memory-safety bugs in C parsers (mutt, PHP's mailparse) do not carry over to TypeScript and are left out.
 
 ## Decisions
 
@@ -366,10 +450,13 @@ encrypted-mail attacks), each mapped to this design; the result will be here.
 6. **Inline PGP only as the only body** for encryption; cleartext signatures only line-anchored, unquoted, with
    only `Hash:` headers, splitting the body.
 7. **Protected headers as a set, From only when signed.** No field is mixed from inner and outer.
-8. **Detection is structural.** Text that looks like armor in a quote, a forward or HTML is text.
+8. **Detection is structural, and strict near crypto.** Text that looks like armor in a quote, a forward or
+   HTML is text; anything ambiguous or repaired in or above a cryptographic structure means no step.
 9. **The steps are protocol-shaped, not PGP-shaped**, so S/MIME (`application/pkcs7-mime`,
    `multipart/signed; protocol="application/pkcs7-signature"`) can add step kinds without changing the
    message.
+10. **Decoding never creates structure.** Encoded words are decoded after tokenizing, controls are removed,
+    inline images stay with their body and its protection.
 
 ## Plan
 
@@ -411,4 +498,4 @@ What an app with its own MIME and PGP handling changes to move over:
 - **Signed but not encrypted, with protected headers**: a good signature's inner Subject wins (section 6).
   Is a differing outer Subject worth a problem of its own?
 - **`prefer`**: whether an app needs more than `'html' | 'text'`.
-- **Size**: whether 12 kB holds with UTF-7 and the address and date grammars.
+- **Size**: whether 12 kB holds with the address and date grammars.
